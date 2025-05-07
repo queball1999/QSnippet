@@ -1,0 +1,3 @@
+# QSnippet
+
+Snippet manager tool.
