@@ -1,0 +1,11 @@
+snippets:
+  -hi: Hello World
+  /addr: 123 Main St, Tucson, AZ
+  /ayee: ur mom
+  /running: This is a test to see if it works while the service is running.
+  /sig: 'Best regards,
+
+    Alyssa Pomerleau
+
+    '
+  /test: Testing

@@ -1,0 +1,72 @@
+program_name: QSnippet
+version: "0.0.0"
+log_level: DEBUG
+
+support_info:
+  email: support@quynnsoftware.com
+
+colors:
+  primary_background_active: "#FFFFFF"
+  primary_background_disabled: "#e1e1e1"
+  secondary_background_active: "#e1e1e1"
+  secondary_background_disabled: "#7f7f7f"
+  primary_accent_active: "#0a51cf"
+  primary_accent_pressed: "#4895f6"
+  primary_accent_disabled: "#cee9fe"
+  secondary_accent_active: "#5c5e70"
+  secondary_accent_pressed: "#abadba"
+  secondary_accent_disabled: "#e3e4e8"
+  tertiary_accent_active: "#0a8dcf"
+  tertiary_accent_pressed: "#48d4f6"
+  tertiary_accent_disabled: "#cefefd"
+  success_color: "#00cc6a"
+  fail_color: "#e81123"
+  overlay_color: "#2a4252"
+  dark_text_color_active: "#151a30"
+  dark_text_color_disabled: "#7580ae"
+  light_text_color_active: "#FFFFFF"
+  light_text_color_disabled: "#FFFFFF"
+
+images:
+  icon: "QSnippet_Icon_v1.png"
+
+fonts:
+  primary_font: "Inter"
+  secondary_font: "DM Sans"
+  sizes:
+    small: 14
+    medium: 18
+    large: 26
+    extra_large: 36
+    humongous: 64
+
+dimensions:
+  windows:
+    main:
+      width: 800
+      height: 600
+  buttons:
+    backspace:
+      width: 75
+      height: 50
+      radius: 8
+    mini_slim:
+      width: 165
+      height: 50
+      radius: 8
+    mini:
+      width: 200
+      height: 50
+      radius: 8
+    small:
+      width: 225
+      height: 75
+      radius: 8
+    medium:
+      width: 350
+      height: 125
+      radius: 8
+    large:
+      width: 450
+      height: 250
+      radius: 8
