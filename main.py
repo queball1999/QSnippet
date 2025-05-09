@@ -52,7 +52,6 @@ class main():
 
         # Load YAML settings
         self.cfg = FileUtils.read_yaml(self.config_file)
-        print(self.cfg)
 
         # Assign every top-level config key as an attribute on self
         # e.g. config['program_name'] → self.program_name

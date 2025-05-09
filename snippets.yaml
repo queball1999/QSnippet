@@ -1,5 +1,13 @@
 snippets:
 - enabled: true
+  folder: Test
+  label: Hi
   paste_style: Clipboard
-  snippet: '123 Main Street Springfield, IL 62704 '
-  trigger: /addr
+  snippet: Welcome to QSnippets...
+  trigger: /hi
+- enabled: true
+  folder: Another one
+  label: Hi 2
+  paste_style: Clipboard
+  snippet: Ayee
+  trigger: /2

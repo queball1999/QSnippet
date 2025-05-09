@@ -2,14 +2,14 @@ import os
 import sys
 import subprocess
 from PySide6.QtWidgets import (
-    QMessageBox, QSystemTrayIcon, QMenu
+    QMessageBox, QSystemTrayIcon, QMenu, QMainWindow
 )
 from PySide6.QtGui import QIcon, QAction
 
 from utils.file_utils import FileUtils
-from .widgets import ConfigEditor
+from .widgets import SnippetEditor
 
-class TrayApp:
+class TrayApp(QMainWindow):
     def __init__(self, parent):
         self.parent = parent
         self.cfg = parent.cfg
@@ -18,7 +18,7 @@ class TrayApp:
         self.config_file = paths['working_dir'] / "snippets.yaml"
 
         # Show editor at startup
-        self.editor = ConfigEditor(config_path=self.config_file, parent=self.parent)
+        self.editor = SnippetEditor(config_path=self.config_file, parent=self.parent)
         self.editor.show()
 
         # Path to the service script or executable

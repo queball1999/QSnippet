@@ -1,2 +1,2 @@
-from .config_editor import ConfigEditor
+from .snippet_editor import SnippetEditor
 from .QAnimatedSwitch import QAnimatedSwitch
