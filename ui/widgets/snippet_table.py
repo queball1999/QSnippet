@@ -1,5 +1,3 @@
-import yaml
-from pathlib import Path
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 from PySide6.QtCore import Qt, Signal
 

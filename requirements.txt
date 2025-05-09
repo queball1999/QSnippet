@@ -1,4 +1,6 @@
 pyyaml
+PySide6
+pyperclip
 pynput
 watchdog
 pyinstaller
