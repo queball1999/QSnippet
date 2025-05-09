@@ -1,11 +1,5 @@
 snippets:
-  -hi: Hello World
-  /addr: 123 Main St, Tucson, AZ
-  /ayee: ur mom
-  /running: This is a test to see if it works while the service is running.
-  /sig: 'Best regards,
-
-    Alyssa Pomerleau
-
-    '
-  /test: Testing
+- enabled: true
+  paste_style: Clipboard
+  snippet: '123 Main Street Springfield, IL 62704 '
+  trigger: /addr

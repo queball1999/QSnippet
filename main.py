@@ -10,6 +10,7 @@ class main():
         # Main Program Execution
         self.create_global_variables()
         self.load_config()
+        self.ensure_snippets_file_exists()
         self.scale_ui_cfg()
         self.start_program()
 
@@ -31,6 +32,16 @@ class main():
         self.snippets_file = self.working_dir / "snippets.yaml"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         print(self.program_icon)
+
+    def ensure_snippets_file_exists(self):
+        """
+        Ensure that the main config file exists, otherwise write defaults.
+        """
+        if not self.snippets_file.exists():
+            default = {
+                'snippets': {"/hi": "Welcome to QSnippets..."}
+            }
+            FileUtils.write_yaml(path=self.snippets_file, data=default)
 
     def load_config(self):
         """ This function loads a yaml config file and flattens its entries into attributes. """
