@@ -1,78 +1,193 @@
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
-from PySide6.QtCore import Qt, Signal
 
-class SnippetTable(QTreeWidget):
-    # Emits the selected entry dict, or None if nothing selected or folder
-    entrySelected = Signal(object)
+import sys
+from PySide6.QtWidgets import (
+    QTreeView, QMenu, QApplication, QAbstractItemView
+)
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction
+from PySide6.QtCore import (
+    Qt, Signal, QModelIndex, QSortFilterProxyModel
+)
+
+class SnippetTable(QTreeView):
+    # Signals for context‐menu actions
+    addFolder         = Signal(QStandardItem)  # parent folder or None
+    addSnippet        = Signal(QStandardItem)  # parent folder
+    addSubFolder      = Signal(QStandardItem)  # parent folder
+    editSnippet       = Signal(dict)           # entry data
+    renameFolder      = Signal(QStandardItem)  # folder item
+    renameSnippet     = Signal(dict)           # entry data
+    deleteFolder      = Signal(QStandardItem)  # folder item
+    deleteSnippet     = Signal(dict)           # entry data
+    entrySelected     = Signal(dict)           # when a snippet is clicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setHeaderLabels(['Label', 'Trigger', 'Enabled', 'Paste Style'])
-        self.current_item = None
-        self.itemSelectionChanged.connect(self._on_selection_changed)
+
+        # Base model
+        self.model = QStandardItemModel()
+        self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style'])
+
+        # Proxy for sorting/filtering
+        self.proxy = QSortFilterProxyModel(self)
+        self.proxy.setSourceModel(self.model)
+        self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.setModel(self.proxy)
+
+        # Ensure we select rows
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+
+        # Drag & drop sorting
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+
+        # Header sorting
+        self.setSortingEnabled(True)
+
+        # Track current selection
+        #self.clicked.connect(self._on_click)
+        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
+        # Remove empty folders automatically
+        self.model.rowsRemoved.connect(self._on_rows_removed)
 
     def load_entries(self, entries):
         """
-        Populate the tree with a list of snippet entries.
-        Each entry is a dict with keys: folder, label, trigger, snippet, enabled, paste_style
+        entries: list of dicts with keys
+          folder, label, trigger, snippet, enabled (bool), paste_style
         """
-        self.clear()
-        self.folder_items = {}
+        self.model.clear()
+        self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style'])
+        self.folders = {}  # folder_name -> QStandardItem
+
         for entry in entries:
-            folder = entry.get('folder', 'Default')
-            if folder not in self.folder_items:
-                parent = QTreeWidgetItem(self, [folder])
-                parent.setFirstColumnSpanned(True)
-                parent.setData(0, Qt.UserRole, None)
-                self.addTopLevelItem(parent)
-                self.folder_items[folder] = parent
-            parent = self.folder_items[folder]
-            item = QTreeWidgetItem(parent, [
-                entry.get('label', ''),
-                entry.get('trigger', ''),
-                'On' if entry.get('enabled', False) else 'Off',
-                entry.get('paste_style', '')
-            ])
-            item.setData(0, Qt.UserRole, entry)
-            parent.addChild(item)
+            folder = entry.get('folder','Default')
+            
+            if folder not in self.folders:
+                folder_item = QStandardItem(folder)
+                # mark it as a folder
+                folder_item.setData(None, Qt.UserRole)
+
+                # Just one call to appendRow, supplying one item per column:
+                self.model.appendRow([
+                    folder_item,
+                    QStandardItem(),  # just placeholders in the other columns
+                    QStandardItem(),
+                    QStandardItem()
+                ])
+                self.folders[folder] = folder_item
+
+            parent = self.folders[folder]
+
+            # Create child snippet row
+            label_item = QStandardItem(entry.get('label',''))
+            trigger_item = QStandardItem(entry.get('trigger',''))
+            enabled_item = QStandardItem('On' if entry.get('enabled',False) else 'Off')
+            style_item = QStandardItem(entry.get('paste_style',''))
+
+            # Store full entry dict on first column
+            label_item.setData(entry, Qt.UserRole)
+            parent.appendRow([label_item, trigger_item, enabled_item, style_item])
+
         self.expandAll()
 
-    def _on_selection_changed(self):
-        items = self.selectedItems()
-        if not items:
-            self.entrySelected.emit(None)
-            return
-        item = items[0]
-        entry = item.data(0, Qt.UserRole)
-        if isinstance(entry, dict):
-            self.current_item = item
-            self.entrySelected.emit(entry)
+    def _on_click(self, proxy_idx):
+        src_idx = self.proxy.mapToSource(proxy_idx)
+        item = self.model.itemFromIndex(src_idx)
+        data = item.data(Qt.UserRole)
+        print(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
+        if isinstance(data, dict):
+            self.entrySelected.emit(data)
         else:
             self.entrySelected.emit(None)
 
+    def _on_selection_changed(self, selected, deselected):
+        # grab the first index in the new selection
+        indexes = selected.indexes()
+        if not indexes:
+            self.entrySelected.emit(None)
+            return
+
+        # any column will do, we just need row/parent
+        proxy_idx = indexes[0]
+        self._on_click(proxy_idx)
+
+    def contextMenuEvent(self, event):
+        proxy_idx = self.indexAt(event.pos())
+        menu = QMenu(self)
+
+        if not proxy_idx.isValid():
+            # whitespace
+            menu.addAction('Add Folder',    lambda: self.addFolder.emit(None))
+            menu.addAction('Add Snippet',   lambda: self.addSnippet.emit(None))
+
+        else:
+            src_idx = self.proxy.mapToSource(proxy_idx)
+            item = self.model.itemFromIndex(src_idx)
+            data = item.data(Qt.UserRole)
+
+            if data is None:
+                # folder row
+                menu.addAction('Add Item',       lambda: self.addSnippet.emit(item))
+                menu.addAction('Add Sub-Folder', lambda: self.addSubFolder.emit(item))
+                menu.addSeparator()
+                menu.addAction('Rename Folder',  lambda: self.renameFolder.emit(item))
+                menu.addAction('Delete Folder',  lambda: self.deleteFolder.emit(item))
+            else:
+                # snippet row
+                menu.addAction('Edit Item',      lambda: self.editSnippet.emit(data))
+                menu.addAction('Rename Item',    lambda: self.renameSnippet.emit(data))
+                menu.addAction('Delete Item',    lambda: self.deleteSnippet.emit(data))
+
+        menu.exec(event.globalPos())
+
     def clear_selection(self):
         self.clearSelection()
-        self.current_item = None
         self.entrySelected.emit(None)
 
     def select_entry(self, entry):
-        # Find item matching entry['trigger'] and select it
+        """Find and select the row matching entry['trigger']."""
         def recurse(parent):
-            for i in range(parent.childCount()):
-                child = parent.child(i)
-                data = child.data(0, Qt.UserRole)
-                if isinstance(data, dict) and data.get('trigger') == entry.get('trigger'):
-                    self.setCurrentItem(child)
+            for row in range(parent.rowCount()):
+                label_item = parent.child(row,0)
+                data = label_item.data(Qt.UserRole)
+                if isinstance(data, dict) and data.get('trigger')==entry.get('trigger'):
+                    idx = label_item.index()
+                    self.setCurrentIndex(self.proxy.mapFromSource(idx))
                     return True
-                if recurse(child):
+                if recurse(label_item):
                     return True
             return False
-        for idx in range(self.topLevelItemCount()):
-            top = self.topLevelItem(idx)
-            if recurse(top):
-                break
+
+        # search top‐level folders
+        for i in range(self.model.rowCount()):
+            folder = self.model.item(i,0)
+            if recurse(folder):
+                return
 
     def current_entry(self):
-        if self.current_item:
-            return self.current_item.data(0, Qt.UserRole)
-        return None
+        idx = self.currentIndex()
+        if not idx.isValid():
+            return None
+        src_idx = self.proxy.mapToSource(idx)
+        item = self.model.itemFromIndex(src_idx)
+        data = item.data(Qt.UserRole)
+        return data if isinstance(data, dict) else None
+
+    def _on_rows_removed(self, parent_idx: QModelIndex, start: int, end: int):
+        """
+        If a folder loses all its children, delete the folder automatically.
+        parent_idx is in model coordinates.
+        """
+        if not parent_idx.isValid():
+            return
+        parent = self.model.itemFromIndex(parent_idx)
+        if parent and parent.rowCount()==0:
+            # remove the folder
+            self.model.removeRow(parent.row())
+
+    def update_stylesheet(self):
+        """ This function handles updating the stylesheet. """
+        #self.setStyleSheet(f""" """)

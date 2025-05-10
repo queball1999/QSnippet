@@ -3,7 +3,7 @@ import os
 from PySide6.QtWidgets import QApplication, QMessageBox
 # Load custom modules
 from utils.file_utils import FileUtils
-from ui import TrayApp
+from ui import QSnippet
 
 class main():
     def __init__(self):
@@ -24,9 +24,11 @@ class main():
         self.screen_height = self.screen_geometry.height()
         self.REFERENCE_WIDTH = 1920
         self.REFERENCE_HEIGHT = 1080
+
         # Define Directories
         self.working_dir = FileUtils.get_default_paths()["working_dir"]
         self.images_path = os.path.join(self.working_dir, "images")
+
         # Define Files
         self.config_file = self.working_dir / "config.yaml"
         self.snippets_file = self.working_dir / "snippets.yaml"
@@ -39,7 +41,12 @@ class main():
         """
         if not self.snippets_file.exists():
             default = {
-                'snippets': {"/hi": "Welcome to QSnippets..."}
+                'snippets': {"enabled": True,
+                             "folder": None,
+                             "label": "Welcome",
+                             "paste_style": "Clipboard",
+                             "snippet": "Welcome to QSnippets",
+                             "trigger": "/welcome"}
             }
             FileUtils.write_yaml(path=self.snippets_file, data=default)
 
@@ -126,7 +133,7 @@ class main():
 
     def start_program(self):
         """ Create and show the main window/tray"""
-        tray = TrayApp(parent=self)
+        tray = QSnippet(parent=self)
         tray.run()
 
 if __name__ == '__main__':
@@ -137,6 +144,6 @@ if __name__ == '__main__':
     except Exception as e:
         QMessageBox.critical(None, "Fatal Error", str(e))
         sys.exit(1)"""
-
+    
     ex = main()
     sys.exit(ex.app.exec())

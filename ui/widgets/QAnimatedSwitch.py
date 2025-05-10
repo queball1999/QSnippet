@@ -12,6 +12,7 @@ class QAnimatedSwitch(QWidget):
                  off_text: str = '', 
                  checked_color: str = '#9C0000',
                  background_color: str = '',
+                 text_position: str = 'right',
                  parent=None) -> QWidget:
         super().__init__(parent)
         self.objectName = objectName
@@ -19,12 +20,12 @@ class QAnimatedSwitch(QWidget):
         self.off_text = off_text
         self.checked_color = checked_color
         self.background_color = background_color
+        self.text_position = text_position.lower()
         self.toggled = False
         self.disabled = False
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
         self.widgets()
-
 
     def widgets(self) -> None:
         layout = QGridLayout(self)
@@ -44,24 +45,61 @@ class QAnimatedSwitch(QWidget):
 
         layout.addWidget(self.label, 0, 1, 1, 1, Qt.AlignLeft)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._build_widgets()
 
         if self.background_color:
             self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
+
+    def _build_widgets(self):
+        if self.layout():
+            QWidget().setLayout(self.layout())
+
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(4)
+
+        self.toggle_button = AnimatedToggle(checked_color=self.checked_color)
+        self.toggle_button.setFixedSize(QSize(50, 35))
+        self.toggle_button.stateChanged.connect(self._on_toggled)
+
+        self.label = QLabel(self.off_text)
+        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.label.mousePressEvent = self.handle_mouse_press
+
+        pos = self.text_position
+        if pos == 'left':
+            layout.addWidget(self.label,         0, 0, Qt.AlignVCenter)
+            layout.addWidget(self.toggle_button, 0, 1, Qt.AlignVCenter | Qt.AlignLeft)
+        elif pos == 'right':
+            layout.addWidget(self.toggle_button, 0, 0, Qt.AlignVCenter)
+            layout.addWidget(self.label,         0, 1, Qt.AlignVCenter| Qt.AlignLeft)
+        elif pos == 'top':
+            layout.addWidget(self.label,         0, 0, 1, 2, Qt.AlignHCenter)
+            layout.addWidget(self.toggle_button, 1, 0, 1, 2, Qt.AlignHCenter)
+        elif pos == 'bottom':
+            layout.addWidget(self.toggle_button, 0, 0, 1, 2, Qt.AlignHCenter)
+            layout.addWidget(self.label,         1, 0, 1, 2, Qt.AlignHCenter)
+        else:
+            layout.addWidget(self.toggle_button, 0, 0, Qt.AlignVCenter)
+            layout.addWidget(self.label,         0, 1, Qt.AlignVCenter)
+
+        self.setLayout(layout)
 
     def handle_mouse_press(self, 
                            event: QMouseEvent) -> None:
         self.toggle(True)
 
-
     def toggle(self, 
                state: bool = True) -> None:
         if state:
             self.toggle_button.toggle()
-            
 
+    def setChecked(self, state: bool) -> None:
+        if state != self.isChecked():
+            self.toggle_button.toggle()
+            
     def isChecked(self) -> None:
         return self.toggled
-
 
     def enable(self, 
                activate: bool) -> None:
@@ -70,10 +108,8 @@ class QAnimatedSwitch(QWidget):
         else:
             self.disabled = True
 
-
     def isEnabled(self):
         return not self.disabled
-
 
     def disable(self, 
                 activate: bool) -> None:
@@ -82,23 +118,16 @@ class QAnimatedSwitch(QWidget):
         else:
             self.disabled = False
 
-
     def isDisabled(self) -> None:
         return self.disabled
 
-
     def hide(self):
-        print('hide toggle, inside widget')
         self.setVisible(False)
-
     def show(self):
-        print('show toggle, inside widget')
         self.setVisible(True)
-
 
     def setWidth(self, width: int = 60):
         self.toggle_button.setWidth(width)
-
 
     def _on_toggled(self, 
                     checked: bool) -> None:
@@ -106,7 +135,6 @@ class QAnimatedSwitch(QWidget):
         self.label.setText(self.on_text if checked else self.off_text)
         self.stateChanged.emit(checked)
        
-
     def setCheckedColor(self) -> None:
         pass
 

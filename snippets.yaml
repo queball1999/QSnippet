@@ -6,7 +6,7 @@ snippets:
   snippet: Welcome to QSnippets...
   trigger: /hi
 - enabled: true
-  folder: Another one
+  folder: Ayee
   label: Hi 2
   paste_style: Clipboard
   snippet: Ayee

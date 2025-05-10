@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QTextEdit, QComboBox, QCheckBox,
+    QWidget, QLabel, QLineEdit, QTextEdit, QComboBox,
     QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox
 )
 from PySide6.QtCore import Signal
-
+from .QAnimatedSwitch import QAnimatedSwitch
 
 class SnippetForm(QWidget):
     # Signals to notify parent
@@ -19,19 +19,18 @@ class SnippetForm(QWidget):
     def initUI(self):
         layout = QVBoxLayout(self)
 
-        self.msg_label = QLabel(
-            'Uh oh, nothing selected. Create a new snippet or select one from the list.'
-        )
-        self.msg_label.setWordWrap(True)
-        layout.addWidget(self.msg_label)
-
         # Form fields
         self.folder_input = QLineEdit()
         self.label_input = QLineEdit()
         self.trigger_input = QLineEdit()
         self.snippet_input = QTextEdit()
-        self.enabled_switch = QCheckBox('Enabled')
+        #self.enabled_switch = QCheckBox('Enabled')
         self.style_combo = QComboBox()
+        self.enabled_switch = QAnimatedSwitch(objectName="enabled_switch",
+                                           on_text="Disable",
+                                           off_text="Enable",
+                                           text_position="left",
+                                           parent=self)
         self.style_combo.addItems(['Keystroke', 'Clipboard'])
 
         # Add labeled widgets
@@ -63,11 +62,7 @@ class SnippetForm(QWidget):
         self.save_btn.clicked.connect(self.saveClicked)
         self.delete_btn.clicked.connect(self.deleteClicked)
 
-    def display_message(self, text: str):
-        self.msg_label.setText(text)
-
     def clear_form(self):
-        self.msg_label.clear()
         self.folder_input.clear()
         self.label_input.clear()
         self.trigger_input.clear()
@@ -80,7 +75,6 @@ class SnippetForm(QWidget):
         Populate form fields from snippet entry dict
         {folder, label, trigger, snippet, enabled, paste_style}
         """
-        self.msg_label.clear()
         self.folder_input.setText(entry.get('folder', ''))
         self.label_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
@@ -114,3 +108,7 @@ class SnippetForm(QWidget):
             QMessageBox.warning(self, 'Error', 'Trigger and snippet are required')
             return False
         return True
+    
+    def update_stylesheet(self):
+        """ This function handles updating the stylesheet. """
+        #self.setStyleSheet(f""" """)
