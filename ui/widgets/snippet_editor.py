@@ -2,7 +2,7 @@ import yaml
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QWidget, QSplitter, QStackedWidget, QVBoxLayout
+    QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox
 )
 from PySide6.QtGui     import QIcon
 from PySide6.QtCore    import Qt
@@ -37,6 +37,7 @@ class SnippetEditor(QWidget):
         self.form.newClicked.connect(self.show_new_form)
         self.form.saveClicked.connect(self.on_save)
         self.form.deleteClicked.connect(self.on_delete)
+        self.form.cancelPressed.connect(self.show_home_widget)
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self.home_widget)
@@ -64,7 +65,11 @@ class SnippetEditor(QWidget):
             self.stack.setCurrentWidget(self.form)
             self.form.load_entry(entry)
         else:
-            self.stack.setCurrentWidget(self.home_widget)        
+            self.stack.setCurrentWidget(self.home_widget)    
+
+    def show_home_widget(self):
+        # Should deselect any selected items in tree view
+        self.stack.setCurrentWidget(self.home_widget)
 
     def show_new_form(self):
         # Clear the table selection and form inputs, then swap in form
@@ -73,26 +78,31 @@ class SnippetEditor(QWidget):
         self.stack.setCurrentWidget(self.form)
 
     def on_save(self):
-        if not self.form.validate():
-            return
-        entry = self.form.get_entry()
-        data = yaml.safe_load(self.config_path.read_text()) or {}
-        snippets = data.get('snippets', [])
+        try:
+            if not self.form.validate():
+                return
+            entry = self.form.get_entry()
+            data = yaml.safe_load(self.config_path.read_text()) or {}
+            snippets = data.get('snippets', [])
 
-        # replace or append
-        for i, e in enumerate(snippets):
-            if e.get('trigger') == entry['trigger']:
-                snippets[i] = entry
-                break
-        else:
-            snippets.append(entry)
+            # replace or append
+            for i, e in enumerate(snippets):
+                if e.get('trigger') == entry['trigger']:
+                    snippets[i] = entry
+                    break
+            else:
+                snippets.append(entry)
 
-        data['snippets'] = snippets
-        self.config_path.write_text(yaml.safe_dump(data), encoding='utf-8')
+            data['snippets'] = snippets
+            self.config_path.write_text(yaml.safe_dump(data), encoding='utf-8')
 
-        # refresh table and re-select
-        self.load_config()
-        self.table.select_entry(entry)
+            # refresh table and re-select
+            self.load_config()
+            self.table.select_entry(entry)
+            QMessageBox.information(None, 'Snippet Saved', 'Snippet Saved Successfully!')
+        except:
+            # Need to log this section for this error to make sense
+            QMessageBox.information(None, 'Save Failed', 'Snippet Save Failed. See log for details.')
 
     def on_delete(self):
         entry = self.table.current_entry()

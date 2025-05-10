@@ -6,7 +6,7 @@ class TrayMenu(QMenu):
     start_signal = Signal()     # Signal to start the service
     stop_signal = Signal()      # Signal to stop the service
     edit_signal = Signal()      # Signal to bring up UI
-    quit_signal = Signal()      # Signal to quit app
+    exit_signal = Signal()      # Signal to exit app
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,9 +32,9 @@ class TrayMenu(QMenu):
 
         self.addSeparator() # Add seperator
 
-        self.quit_action = self.addAction("Quit")
-        self.quit_action.setData("Quit")
-        self.quit_action.triggered.connect(self.quit_signal.emit)
+        self.exit_action = self.addAction("Exit")
+        self.exit_action.setData("Exit")
+        self.exit_action.triggered.connect(self.exit_signal.emit)
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """

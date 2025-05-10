@@ -8,6 +8,6 @@ snippets:
 - enabled: true
   folder: Ayee
   label: Hi 2
-  paste_style: Clipboard
-  snippet: Ayee
+  paste_style: Keystroke
+  snippet: Ayee, this is a longer test
   trigger: /2

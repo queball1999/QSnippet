@@ -11,6 +11,7 @@ class SnippetForm(QWidget):
     saveClicked = Signal()
     deleteClicked = Signal()
     entryChanged = Signal(dict)
+    cancelPressed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,15 +53,18 @@ class SnippetForm(QWidget):
         self.new_btn = QPushButton('New')
         self.save_btn = QPushButton('Save')
         self.delete_btn = QPushButton('Delete')
+        self.cancel_btn = QPushButton('Cancel')
         btn_layout.addWidget(self.new_btn)
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.delete_btn)
+        btn_layout.addWidget(self.cancel_btn)
         layout.addLayout(btn_layout)
 
         # Connect signals
-        self.new_btn.clicked.connect(self.newClicked)
-        self.save_btn.clicked.connect(self.saveClicked)
-        self.delete_btn.clicked.connect(self.deleteClicked)
+        self.new_btn.pressed.connect(self.newClicked)
+        self.save_btn.pressed.connect(self.saveClicked)
+        self.delete_btn.pressed.connect(self.deleteClicked)
+        self.cancel_btn.pressed.connect(self.cancelPressed.emit)
 
     def clear_form(self):
         self.folder_input.clear()
