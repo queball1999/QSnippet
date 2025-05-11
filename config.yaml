@@ -55,12 +55,12 @@ dimensions:
       height: 50
       radius: 8
     mini:
-      width: 200
-      height: 50
+      width: 150
+      height: 35
       radius: 8
     small:
       width: 225
-      height: 75
+      height: 65
       radius: 8
     medium:
       width: 350

@@ -8,8 +8,16 @@ snippets:
 - enabled: true
   folder: Ayee
   label: Hi 2
-  paste_style: Keystroke
-  snippet: Ayee, this is a longer test
+  paste_style: Clipboard
+  snippet: 'Ayee, this is a longer test of QSnippet.
+
+
+    I wonder if the formating and everything will be the same in every paste???
+
+
+    - Quynn :)
+
+    '
   trigger: /2
 - enabled: true
   folder: Ayee
@@ -17,3 +25,21 @@ snippets:
   paste_style: Clipboard
   snippet: Hello
   trigger: /test
+- enabled: true
+  folder: Ayee
+  label: M365 Admin
+  paste_style: Clipboard
+  snippet: https://admin.microsoft.com
+  trigger: /3
+- enabled: true
+  folder: Ayee
+  label: Energy
+  paste_style: Clipboard
+  snippet: '@energytransportlogistics.com'
+  trigger: /energy
+- enabled: true
+  folder: Test
+  label: Hi
+  paste_style: Clipboard
+  snippet: Welcome to QSnippets...
+  trigger: /welcome

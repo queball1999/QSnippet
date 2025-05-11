@@ -18,7 +18,10 @@ class SnippetExpander():
         self.idle_clear_secs = 10
         self.buffer = ""
         self.last_key_time = time.time()
-        self.max_trigger_len = max((len(k) for k in self.config.snippets), default=0)
+        
+        # This sets the max trigger length. Also determines how long buffer is.
+        # Using 255 for 1 byte
+        self.max_trigger_len = 255
 
         self.listener = keyboard.Listener(on_press=self._on_key_press)
         self.controller = keyboard.Controller()
@@ -29,37 +32,45 @@ class SnippetExpander():
         try:
             char = key.char
         except AttributeError:
+            logger.debug("Could not determine key. Clearing buffer!")
             self.buffer = ""
             return
 
         if char in ["", " ", "\n", None]: # Clear buffer and skip characters
+            logger.debug("Null character or space detected. Clearing buffer!")
             self.buffer = ""
             return
         
-        now = time.time()
+        # Commenting out 05.11.25
+        """now = time.time()
         if now - self.last_key_time > self.idle_clear_secs:  # If we’ve been idle too long, clear buffer
             logging.debug("Idle timeout, clearing buffer.")
             self.buffer = ""
+        
 
         self.last_key_time = now
-        
+        """
+
+        # Shifting buffer to keep within max length
         self.buffer += char
         if len(self.buffer) > self.max_trigger_len:
             self.buffer = self.buffer[-self.max_trigger_len:]
 
+        # Check for snippet
         for snippet in self.config.snippets:
             trigger = snippet["trigger"]
             enabled = snippet["enabled"]
 
             if not enabled:
                 break
-
+                  
             if self.buffer.endswith(trigger):
                 logging.info(f"Trigger detected: {trigger}")
                 snippet_text = snippet["snippet"]
                 style = snippet.get("paste_style", "Keystroke")
                 self._expand(trigger, snippet_text, style)
                 self.buffer = ""
+                logger.debug("Trigger detected. Clearing buffer!")
                 break
         return
 

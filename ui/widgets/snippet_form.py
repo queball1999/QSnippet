@@ -13,8 +13,10 @@ class SnippetForm(QWidget):
     entryChanged = Signal(dict)
     cancelPressed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, main, parent=None):
         super().__init__(parent)
+        self.main = main
+        self.parent = parent
         self.initUI()
 
     def initUI(self):

@@ -138,6 +138,7 @@ class main():
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)    # Initialize QApplication
+    # Commented out for testing. Need to restore.
     """try:
         ex = main()
         sys.exit(ex.app.exec())

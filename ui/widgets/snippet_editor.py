@@ -43,10 +43,10 @@ class SnippetEditor(QWidget):
         self.splitter.addWidget(self.table)
 
         # Right: stack of home + form
-        self.home_widget = HomeWidget()
+        self.home_widget = HomeWidget(main=self.main, parent=self)
         self.home_widget.new_snippet.connect(self.show_new_form)
 
-        self.form = SnippetForm()
+        self.form = SnippetForm(main=self.main, parent=self)
         self.form.newClicked.connect(self.show_new_form)
         self.form.saveClicked.connect(self.on_save)
         self.form.deleteClicked.connect(self.on_delete)
@@ -220,3 +220,7 @@ class SnippetEditor(QWidget):
             if sn['trigger'] != entry['trigger']
         ]
         self._save_snippets()
+
+    def update_stylesheet(self):
+        """ This function handles updating the stylesheet. """
+        #self.setStyleSheet(f""" """)
