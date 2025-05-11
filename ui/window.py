@@ -51,7 +51,7 @@ class QSnippet(QMainWindow):
         layout = QHBoxLayout(container)
 
         # Show editor at startup
-        self.editor = SnippetEditor(config_path=self.config_file, parent=self.parent)
+        self.editor = SnippetEditor(config_path=self.config_file, main=self.parent, parent=self)
         
         layout.addWidget(self.editor)
         container.setLayout(layout)

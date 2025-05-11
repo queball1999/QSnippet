@@ -1,27 +1,30 @@
 
 import sys
 from PySide6.QtWidgets import (
-    QTreeView, QMenu, QApplication, QAbstractItemView
+    QTreeView, QMenu, QAbstractItemView
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QMouseEvent
 from PySide6.QtCore import (
-    Qt, Signal, QModelIndex, QSortFilterProxyModel
+    Qt, Signal, QModelIndex, QSortFilterProxyModel, QItemSelectionModel
 )
 
 class SnippetTable(QTreeView):
     # Signals for context‐menu actions
-    addFolder         = Signal(QStandardItem)  # parent folder or None
-    addSnippet        = Signal(QStandardItem)  # parent folder
-    addSubFolder      = Signal(QStandardItem)  # parent folder
-    editSnippet       = Signal(dict)           # entry data
-    renameFolder      = Signal(QStandardItem)  # folder item
-    renameSnippet     = Signal(dict)           # entry data
-    deleteFolder      = Signal(QStandardItem)  # folder item
-    deleteSnippet     = Signal(dict)           # entry data
-    entrySelected     = Signal(dict)           # when a snippet is clicked
+    addFolder = Signal(QStandardItem)  # parent folder or None
+    addSnippet = Signal(QStandardItem)  # parent folder
+    addSubFolder = Signal(QStandardItem)  # parent folder
+    editSnippet = Signal(dict)           # entry data
+    renameFolder = Signal(QStandardItem)  # folder item
+    renameSnippet = Signal(dict)           # entry data
+    deleteFolder = Signal(QStandardItem)  # folder item
+    deleteSnippet = Signal(dict)           # entry data
+    entrySelected = Signal(dict)           # when a snippet is clicked
+    refreshSignal = Signal()    # trigger refresh
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
+        self._entries = []
 
         # Base model
         self.model = QStandardItemModel()
@@ -58,6 +61,7 @@ class SnippetTable(QTreeView):
         entries: list of dicts with keys
           folder, label, trigger, snippet, enabled (bool), paste_style
         """
+        self.entries = entries
         self.model.clear()
         self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style'])
         self.folders = {}  # folder_name -> QStandardItem
@@ -93,6 +97,14 @@ class SnippetTable(QTreeView):
 
         self.expandAll()
 
+    def refresh(self):
+        if self.entries:
+            self.parent.load_config()
+
+    def reload(self, entries):
+        """Reload the table with a fresh snippet list"""
+        self.load_entries(entries)
+
     def _on_click(self, proxy_idx):
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
@@ -120,8 +132,9 @@ class SnippetTable(QTreeView):
 
         if not proxy_idx.isValid():
             # whitespace
-            menu.addAction('Add Folder',    lambda: self.addFolder.emit(None))
-            menu.addAction('Add Snippet',   lambda: self.addSnippet.emit(None))
+            menu.addAction('Add Folder', lambda: self.addFolder.emit(None))
+            menu.addAction('Add Snippet', lambda: self.addSnippet.emit(None))
+            menu.addAction('Refresh', self.refreshSignal.emit)
 
         else:
             src_idx = self.proxy.mapToSource(proxy_idx)
@@ -130,16 +143,16 @@ class SnippetTable(QTreeView):
 
             if data is None:
                 # folder row
-                menu.addAction('Add Item',       lambda: self.addSnippet.emit(item))
+                menu.addAction('Add Item', lambda: self.addSnippet.emit(item))
                 menu.addAction('Add Sub-Folder', lambda: self.addSubFolder.emit(item))
                 menu.addSeparator()
-                menu.addAction('Rename Folder',  lambda: self.renameFolder.emit(item))
-                menu.addAction('Delete Folder',  lambda: self.deleteFolder.emit(item))
+                menu.addAction('Rename Folder', lambda: self.renameFolder.emit(item))
+                menu.addAction('Delete Folder', lambda: self.deleteFolder.emit(item))
             else:
                 # snippet row
-                menu.addAction('Edit Item',      lambda: self.editSnippet.emit(data))
-                menu.addAction('Rename Item',    lambda: self.renameSnippet.emit(data))
-                menu.addAction('Delete Item',    lambda: self.deleteSnippet.emit(data))
+                menu.addAction('Edit Item', lambda: self.editSnippet.emit(data))
+                menu.addAction('Rename Item', lambda: self.renameSnippet.emit(data))
+                menu.addAction('Delete Item', lambda: self.deleteSnippet.emit(data))
 
         menu.exec(event.globalPos())
 
@@ -187,6 +200,28 @@ class SnippetTable(QTreeView):
         if parent and parent.rowCount()==0:
             # remove the folder
             self.model.removeRow(parent.row())
+
+    def selectionCommand(self, index, event=None):
+        """
+        Only allow selection on *left* mouse presses.
+        Ignore right-clicks so they can open the context menu
+        without triggering entrySelected.
+        """
+        # If it’s a mouse press and it’s the right button, do nothing
+        if isinstance(event, QMouseEvent) and event.button() == Qt.RightButton:
+            idx = self.indexAt(event.pos())
+            if idx.isValid():
+                sel = self.selectionModel()
+                # block selection signals so entrySelected won't fire
+                was_blocked = sel.blockSignals(True)
+                # setCurrentIndex just to paint the row as “current”
+                self.setCurrentIndex(idx)
+                # restore signal delivery
+                sel.blockSignals(was_blocked)
+            return QItemSelectionModel.NoUpdate
+
+        # Otherwise fall back to the default behavior
+        return super().selectionCommand(index, event)
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """

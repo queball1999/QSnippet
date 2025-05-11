@@ -1,8 +1,11 @@
 import logging
 import platform
 import pyperclip
+import time
 from pynput import keyboard
 from .config_utils import ConfigLoader
+
+logger = logging.getLogger(__name__)
 
 class SnippetExpander():
     """
@@ -12,22 +15,33 @@ class SnippetExpander():
         self.config = config_loader
         self.parent = parent
 
-        self.buffer = ''
+        self.idle_clear_secs = 10
+        self.buffer = ""
+        self.last_key_time = time.time()
         self.max_trigger_len = max((len(k) for k in self.config.snippets), default=0)
+
         self.listener = keyboard.Listener(on_press=self._on_key_press)
         self.controller = keyboard.Controller()
         # detect which modifier to use for paste
-        self._paste_mod = keyboard.Key.cmd if platform.system() == 'Darwin' else keyboard.Key.ctrl
+        self._paste_mod = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
 
     def _on_key_press(self, key):
         try:
             char = key.char
         except AttributeError:
-            self.buffer = ''
+            self.buffer = ""
             return
 
-        if not char:
+        if char in ["", " ", "\n", None]: # Clear buffer and skip characters
+            self.buffer = ""
             return
+        
+        now = time.time()
+        if now - self.last_key_time > self.idle_clear_secs:  # If we’ve been idle too long, clear buffer
+            logging.debug("Idle timeout, clearing buffer.")
+            self.buffer = ""
+
+        self.last_key_time = now
         
         self.buffer += char
         if len(self.buffer) > self.max_trigger_len:
@@ -42,22 +56,22 @@ class SnippetExpander():
 
             if self.buffer.endswith(trigger):
                 logging.info(f"Trigger detected: {trigger}")
-                snippet_text = snippet['snippet']
-                style = snippet.get('paste_style', 'Keystroke')
+                snippet_text = snippet["snippet"]
+                style = snippet.get("paste_style", "Keystroke")
                 self._expand(trigger, snippet_text, style)
-                self.buffer = ''
+                self.buffer = ""
                 break
         return
 
     def _expand_clipboard(self, snippet):
         pyperclip.copy(snippet)
         with self.controller.pressed(self._paste_mod):
-            self.controller.press('v')
-            self.controller.release('v')
+            self.controller.press("v")
+            self.controller.release("v")
 
     def _expand_keystrokes(self, snippet):
         for ch in snippet:
-            if ch == '\n':
+            if ch == "\n":
                 self.controller.press(keyboard.Key.enter)
                 self.controller.release(keyboard.Key.enter)
             else:
@@ -71,7 +85,7 @@ class SnippetExpander():
             self.controller.release(keyboard.Key.backspace)
 
         # Expand accordingly
-        if paste_style == 'Clipboard':
+        if paste_style == "Clipboard":
             self._expand_clipboard(snippet)
         else:
             self._expand_keystrokes(snippet)

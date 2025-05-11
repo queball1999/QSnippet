@@ -11,3 +11,9 @@ snippets:
   paste_style: Keystroke
   snippet: Ayee, this is a longer test
   trigger: /2
+- enabled: true
+  folder: Ayee
+  label: Test
+  paste_style: Clipboard
+  snippet: Hello
+  trigger: /test
