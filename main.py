@@ -1,11 +1,15 @@
 import sys
 import os
+import logging
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont
 # Load custom modules
 from utils.file_utils import FileUtils
+from utils.config_utils import ConfigLoader
 from ui import QSnippet
+
+logger = logging.getLogger(__name__)
 
 class main():
     def __init__(self):
@@ -60,7 +64,10 @@ class main():
             sys.exit(1)
 
         # Load YAML settings
-        self.cfg = FileUtils.read_yaml(self.config_file)
+        #self.cfg = FileUtils.read_yaml(self.config_file)
+        self.loader = ConfigLoader(self.config_file, parent=self)
+        self.loader.configChanged.connect(self._on_config_updated)
+        self.cfg = self.loader.config
 
         # Assign every top-level config key as an attribute on self
         # e.g. config['program_name'] → self.program_name
@@ -76,6 +83,13 @@ class main():
                 for subkey, subval in subdict.items():
                     attr_name = f"{section}_{subkey}"
                     setattr(self, attr_name, subval)
+
+    def _on_config_updated(self, config):
+        """ When config update is detected, refresh config variable and UI elements. """
+        logger.info("Config reloaded.")
+        if config:
+            self.cfg = config
+        # Should also fire off UI refresh, etc to ensure the UI matches the config
 
     def scale_ui_cfg(self):
         """ 

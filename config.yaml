@@ -29,6 +29,7 @@ colors:
 
 images:
   icon: "QSnippet_Icon_v1.png"
+  test: "test.png"
 
 fonts:
   primary_font: "Inter"

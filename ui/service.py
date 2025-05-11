@@ -1,13 +1,11 @@
 import logging
 import time
 from threading import Thread, Event
-
-from utils.config_utils import ConfigLoader
+from utils.config_utils import SnippetsLoader
 from utils.keyboard_utils import SnippetExpander
 from utils.file_utils import FileUtils
 
-
-class SnippetService:
+class SnippetService():
     """Background service that loads snippets and listens for triggers."""
 
     def __init__(self, config_path: str):
@@ -25,12 +23,16 @@ class SnippetService:
         logging.info(f"Initializing SnippetService with config: {config_path}")
 
         # Core components
-        self.loader   = ConfigLoader(config_path)
+        self.loader   = SnippetsLoader(config_path, parent=self)
+        self.loader.snippetsChanged.connect(self._on_snippets_updated)
         self.expander = SnippetExpander(config_loader=self.loader, parent=self)
 
         # Thread control
         self._thread   = None
         self._stop_evt = Event()
+
+    def _on_snippets_updated(self, new_snippets: list):
+        logging.info("Snippet definitions reloaded.")
 
     def _run_loop(self):
         """Monitor thread: sleep until stop requested, then clean up."""

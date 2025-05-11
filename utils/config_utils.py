@@ -1,48 +1,85 @@
 import os
 import yaml
 import logging
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from PySide6.QtCore import QObject, QFileSystemWatcher, Signal
 
-class ConfigLoader:
+logger = logging.getLogger(__name__)
+
+class ConfigLoader(QObject):
     """
-    Loads and watches the YAML config file for snippet definitions.
+    Loads and watches the YAML application config file.
+    Emits `configChanged` when the top-level settings change.
     """
-    def __init__(self, config_path: str):
-        self.config_path = config_path
-        self.snippets = {}
+    configChanged = Signal(dict)
+
+    def __init__(self, config_path: str, parent=None):
+        super().__init__()
+        self.config_path = os.path.abspath(config_path)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.addPath(self.config_path)
+        self._watcher.fileChanged.connect(self._on_file_changed)
+
+        # initial load
+        self.config = {}
         self._load_config()
-        self._start_watcher()
 
     def _load_config(self):
-        """Load snippets from YAML file."""
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-            self.snippets = data.get('snippets', {}) or {}
-            logging.info(f"Loaded {len(self.snippets)} snippets.")
+                data = yaml.safe_load(f) or {}
+            self.config = data
+            logger.info(f"Loaded config: {self.config_path}")
+            self.configChanged.emit(self.config)
         except Exception as e:
-            logging.error(f"Failed to load config: {e}")
+            logger.error(f"Failed to load config {self.config_path}: {e}")
 
-    def _start_watcher(self):
-        """Watch the config file for changes."""
-        class Handler(FileSystemEventHandler):
-            def __init__(self, outer):
-                self.outer = outer
-
-            def on_modified(self, event):
-                if os.path.abspath(event.src_path) == os.path.abspath(self.outer.config_path):
-                    logging.info("Config file changed. Reloading...")
-                    self.outer._load_config()
-
-        self._observer = Observer()
-        directory = os.path.dirname(os.path.abspath(self.config_path)) or '.'
-        event_handler = Handler(self)
-        self._observer.schedule(event_handler, directory, recursive=False)
-        self._observer.daemon = True
-        self._observer.start()
+    def _on_file_changed(self, path):
+        # QFileSystemWatcher may emit twice, so re-add path if needed
+        if not self._watcher.files():
+            self._watcher.addPath(self.config_path)
+        logger.info(f"Config file changed on disk: {path}")
+        self._load_config()
 
     def stop(self):
-        """Stop the file watcher."""
-        self._observer.stop()
-        self._observer.join()
+        """Stop watching the config file."""
+        self._watcher.removePath(self.config_path)
+
+
+class SnippetsLoader(QObject):
+    """
+    Loads and watches the YAML snippets file.
+    Emits `snippetsChanged` when the snippet definitions update.
+    """
+    snippetsChanged = Signal(list)
+
+    def __init__(self, snippets_path: str, parent=None):
+        super().__init__()
+        self.snippets_path = os.path.abspath(snippets_path)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.addPath(self.snippets_path)
+        self._watcher.fileChanged.connect(self._on_file_changed)
+
+        # initial load
+        self.snippets = []
+        self._load_snippets()
+
+    def _load_snippets(self):
+        try:
+            with open(self.snippets_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            self.snippets = data.get('snippets', [])
+            logger.info(f"Loaded {len(self.snippets)} snippets from {self.snippets_path}")
+            self.snippetsChanged.emit(self.snippets)
+        except Exception as e:
+            logger.error(f"Failed to load snippets {self.snippets_path}: {e}")
+
+    def _on_file_changed(self, path):
+        # re-add path if watcher lost it
+        if not self._watcher.files():
+            self._watcher.addPath(self.snippets_path)
+        logger.info(f"Snippets file changed on disk: {path}")
+        self._load_snippets()
+
+    def stop(self):
+        """Stop watching the snippets file."""
+        self._watcher.removePath(self.snippets_path)

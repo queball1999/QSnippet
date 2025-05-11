@@ -21,22 +21,10 @@ snippets:
   trigger: /2
 - enabled: true
   folder: Ayee
-  label: Test
-  paste_style: Clipboard
-  snippet: Hello
-  trigger: /test
-- enabled: true
-  folder: Ayee
   label: M365 Admin
   paste_style: Clipboard
   snippet: https://admin.microsoft.com
   trigger: /3
-- enabled: true
-  folder: Ayee
-  label: Energy
-  paste_style: Clipboard
-  snippet: '@energytransportlogistics.com'
-  trigger: /energy
 - enabled: true
   folder: Test
   label: Hi
