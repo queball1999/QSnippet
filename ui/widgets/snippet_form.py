@@ -69,6 +69,7 @@ class SnippetForm(QWidget):
         self.cancel_btn.pressed.connect(self.cancelPressed.emit)
 
     def clear_form(self):
+        """ Clear all entries in the form. """
         self.folder_input.clear()
         self.label_input.clear()
         self.trigger_input.clear()
@@ -109,6 +110,10 @@ class SnippetForm(QWidget):
 
     def validate(self) -> bool:
         """Ensure required fields are populated"""
+        # Items to Validate:
+        #   - Max Trigger Length of 255
+        #   - Trigger must have no spaces or newlines.
+        #   - 
         entry = self.get_entry()
         if not entry['trigger'] or not entry['snippet']:
             QMessageBox.warning(self, 'Error', 'Trigger and snippet are required')

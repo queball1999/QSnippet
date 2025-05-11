@@ -2,8 +2,6 @@ import logging
 import time
 from threading import Thread, Event
 
-from PySide6.QtWidgets import QApplication, QMessageBox
-
 from utils.config_utils import ConfigLoader
 from utils.keyboard_utils import SnippetExpander
 from utils.file_utils import FileUtils

@@ -43,3 +43,15 @@ snippets:
   paste_style: Clipboard
   snippet: Welcome to QSnippets...
   trigger: /welcome
+- enabled: true
+  folder: Ayee
+  label: M365 Admin
+  paste_style: Clipboard
+  snippet: https://admin.microsoft.com
+  trigger: /msadmin
+- enabled: true
+  folder: Ayee
+  label: Energy
+  paste_style: Clipboard
+  snippet: '@energytransportlogistics.com'
+  trigger: '@energy'

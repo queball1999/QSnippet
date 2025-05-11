@@ -26,7 +26,7 @@ class SnippetEditor(QWidget):
         self.splitter = QSplitter(Qt.Horizontal, self)
 
         # Left: snippet table
-        self.table = SnippetTable()
+        self.table = SnippetTable(main=self.main, parent=self)
         self.table.entrySelected.connect(self.on_entry_selected)
         self.table.refreshSignal.connect(self.load_config)
         # folder signals
@@ -140,7 +140,6 @@ class SnippetEditor(QWidget):
         self.stack.setCurrentIndex(0)
 
     # ----- Context Menu Actions -----
-
     def on_add_folder(self, parent_item):
         name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
         if not ok or not name.strip():

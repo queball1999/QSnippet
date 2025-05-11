@@ -21,10 +21,13 @@ class SnippetTable(QTreeView):
     entrySelected = Signal(dict)           # when a snippet is clicked
     refreshSignal = Signal()    # trigger refresh
 
-    def __init__(self, parent=None):
+    def __init__(self, main, parent=None):
         super().__init__(parent)
+        self.main = main
         self.parent = parent
         self._entries = []
+        # Set Font Size
+        self.setFont(self.main.small_font_size)
 
         # Base model
         self.model = QStandardItemModel()
@@ -98,6 +101,7 @@ class SnippetTable(QTreeView):
         self.expandAll()
 
     def refresh(self):
+        """ Reload the table data. """
         if self.entries:
             self.parent.load_config()
 
@@ -134,6 +138,10 @@ class SnippetTable(QTreeView):
             # whitespace
             menu.addAction('Add Folder', lambda: self.addFolder.emit(None))
             menu.addAction('Add Snippet', lambda: self.addSnippet.emit(None))
+            menu.addSeparator()
+            menu.addAction('Expand All', None)
+            menu.addAction('Collapse All', None)
+            menu.addSeparator()
             menu.addAction('Refresh', self.refreshSignal.emit)
 
         else:
@@ -201,13 +209,13 @@ class SnippetTable(QTreeView):
             # remove the folder
             self.model.removeRow(parent.row())
 
-    def selectionCommand(self, index, event=None):
+    #def selectionCommand(self, index, event=None):
         """
         Only allow selection on *left* mouse presses.
         Ignore right-clicks so they can open the context menu
         without triggering entrySelected.
         """
-        # If it’s a mouse press and it’s the right button, do nothing
+        """# If it’s a mouse press and it’s the right button, do nothing
         if isinstance(event, QMouseEvent) and event.button() == Qt.RightButton:
             idx = self.indexAt(event.pos())
             if idx.isValid():
@@ -221,7 +229,7 @@ class SnippetTable(QTreeView):
             return QItemSelectionModel.NoUpdate
 
         # Otherwise fall back to the default behavior
-        return super().selectionCommand(index, event)
+        return super().selectionCommand(index, event)"""
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """

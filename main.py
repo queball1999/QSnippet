@@ -1,6 +1,8 @@
 import sys
 import os
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QFont
 # Load custom modules
 from utils.file_utils import FileUtils
 from ui import QSnippet
@@ -80,9 +82,29 @@ class main():
         Reassigns the size attributes with scaled versions. 
         Needs more work but this will do for now 05/07/25
         """
+        # Scale Accordingly
         self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
         self.dimensions_buttons = self.scale_dict_sizes(size_dict=self.dimensions_buttons, screen_geometry=self.screen_geometry)
         self.dimensions_windows = self.scale_dict_sizes(size_dict=self.dimensions_windows, screen_geometry=self.screen_geometry)
+        
+        # Buttons
+        self.mini_button_size = QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
+        self.small_button_size = QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
+        self.medium_button_size = QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
+        self.large_button_size = QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
+        
+        # Font Sizes
+        self.small_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
+        self.small_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["small"], QFont.Bold)
+        self.medium_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
+        self.medium_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], QFont.Bold)
+        self.large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
+        self.large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["large"], QFont.Bold)
+        self.extra_large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
+        self.extra_large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], QFont.Bold)
+        self.humongous_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
+        self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
+    
 
     def scale_width(self, original_width, screen_geometry):
         """Scale a width value from the 1920 reference to the current screen."""
