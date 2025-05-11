@@ -82,6 +82,9 @@ class QSnippet(QMainWindow):
         self.tray.setContextMenu(menu)
         self.tray.show()
 
+    def run(self):
+        sys.exit(self.app.exec())
+
     def start_service(self):
         self.snippet_service.start()
         # should log this
@@ -109,6 +112,3 @@ class QSnippet(QMainWindow):
         # Override close to hide instead of exiting app
         event.ignore()
         self.hide()
-
-    def run(self):
-        sys.exit(self.app.exec())

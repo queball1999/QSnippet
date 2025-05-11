@@ -1,3 +1,0 @@
-- open UI at boot
-- start at boot
-- theme

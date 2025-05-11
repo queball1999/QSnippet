@@ -4,7 +4,7 @@ snippets:
   label: Hi
   paste_style: Clipboard
   snippet: Welcome to QSnippets...
-  trigger: /hi
+  trigger: /welcome
 - enabled: true
   folder: Ayee
   label: Hi 2
@@ -19,18 +19,6 @@ snippets:
 
     '
   trigger: /2
-- enabled: true
-  folder: Ayee
-  label: M365 Admin
-  paste_style: Clipboard
-  snippet: https://admin.microsoft.com
-  trigger: /3
-- enabled: true
-  folder: Test
-  label: Hi
-  paste_style: Clipboard
-  snippet: Welcome to QSnippets...
-  trigger: /welcome
 - enabled: true
   folder: Ayee
   label: M365 Admin

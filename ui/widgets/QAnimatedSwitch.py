@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QCheckBox, QWidget, QGridLayout, QLabel, QSizePolicy
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QIcon, QPaintEvent, QPainter, QMouseEvent
+from PySide6.QtGui import QPainter, QPen, QFont, QBrush, QColor, QIcon, QPaintEvent, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QSize, QPoint, Slot, Property, QPointF, QRectF, QEasingCurve, QSequentialAnimationGroup, QPropertyAnimation, Signal
 
 ### Toggle and AnimatedToggle are part of qtWidgets, provided by Martin Fitzpatrick
@@ -13,6 +13,7 @@ class QAnimatedSwitch(QWidget):
                  checked_color: str = '#9C0000',
                  background_color: str = '',
                  text_position: str = 'right',
+                 text_font: QFont = QFont,
                  parent=None) -> QWidget:
         super().__init__(parent)
         self.objectName = objectName
@@ -21,6 +22,7 @@ class QAnimatedSwitch(QWidget):
         self.checked_color = checked_color
         self.background_color = background_color
         self.text_position = text_position.lower()
+        self.text_font = text_font
         self.toggled = False
         self.disabled = False
         self.setFocusPolicy(Qt.NoFocus)
@@ -39,6 +41,8 @@ class QAnimatedSwitch(QWidget):
         layout.addWidget(self.toggle_button, 0, 0, 1, 1, Qt.AlignLeft)
 
         self.label = QLabel(text=self.off_text)
+        if self.text_font:
+            self.label.setFont(self.text_font)
         self.label.setFocusPolicy(Qt.NoFocus)
         self.label.mousePressEvent = self.handle_mouse_press
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -63,6 +67,8 @@ class QAnimatedSwitch(QWidget):
         self.toggle_button.stateChanged.connect(self._on_toggled)
 
         self.label = QLabel(self.off_text)
+        if self.text_font:
+            self.label.setFont(self.text_font)
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.label.mousePressEvent = self.handle_mouse_press
 

@@ -39,7 +39,6 @@ class main():
         self.config_file = self.working_dir / "config.yaml"
         self.snippets_file = self.working_dir / "snippets.yaml"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
-        print(self.program_icon)
 
     def ensure_snippets_file_exists(self):
         """
@@ -64,31 +63,43 @@ class main():
             sys.exit(1)
 
         # Load YAML settings
-        #self.cfg = FileUtils.read_yaml(self.config_file)
         self.loader = ConfigLoader(self.config_file, parent=self)
         self.loader.configChanged.connect(self._on_config_updated)
         self.cfg = self.loader.config
+        self.flatten_cfg()
 
-        # Assign every top-level config key as an attribute on self
-        # e.g. config['program_name'] → self.program_name
-        for key, val in self.cfg.items():
-            setattr(self, key, val)
+    def flatten_cfg(self):
+        """ Flatten configuration dict and assign to attributes. """
+        try:
+            # Assign every top-level config key as an attribute on self
+            # e.g. config['program_name'] → self.program_name
+            for key, val in self.cfg.items():
+                setattr(self, key, val)
 
-        # For each nested dict (like colors, images, sizing), flatten its entries
-        # by prefixing with the section name:
-        # e.g. config['images']['icon'] → self.images_icon
-        #      config['colors']['primary_accent_active'] → self.colors_primary_accent_active`
-        for section, subdict in self.cfg.items():
-            if isinstance(subdict, dict):
-                for subkey, subval in subdict.items():
-                    attr_name = f"{section}_{subkey}"
-                    setattr(self, attr_name, subval)
+            # For each nested dict (like colors, images, sizing), flatten its entries
+            # by prefixing with the section name:
+            # e.g. config['images']['icon'] → self.images_icon
+            #      config['colors']['primary_accent_active'] → self.colors_primary_accent_active`
+            for section, subdict in self.cfg.items():
+                if isinstance(subdict, dict):
+                    for subkey, subval in subdict.items():
+                        attr_name = f"{section}_{subkey}"
+                        setattr(self, attr_name, subval)
+
+            return True
+        except:
+            logger.error("Failed to flatten config")
+            return False
 
     def _on_config_updated(self, config):
         """ When config update is detected, refresh config variable and UI elements. """
         logger.info("Config reloaded.")
         if config:
             self.cfg = config
+            self.flatten_cfg()  # Flatten config again to refresh attributes.
+            self.scale_ui_cfg() # Refresh UI config and scale
+            self.qsnippet.editor.updateUI()    # Trigger UI update
+            self.app.processEvents()
         # Should also fire off UI refresh, etc to ensure the UI matches the config
 
     def scale_ui_cfg(self):
@@ -96,6 +107,7 @@ class main():
         Reassigns the size attributes with scaled versions. 
         Needs more work but this will do for now 05/07/25
         """
+        print("Scaling UI elements")
         # Scale Accordingly
         self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
         self.dimensions_buttons = self.scale_dict_sizes(size_dict=self.dimensions_buttons, screen_geometry=self.screen_geometry)
@@ -118,7 +130,8 @@ class main():
         self.extra_large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], QFont.Bold)
         self.humongous_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
         self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
-    
+
+        print(self.fonts)
 
     def scale_width(self, original_width, screen_geometry):
         """Scale a width value from the 1920 reference to the current screen."""
@@ -169,8 +182,8 @@ class main():
 
     def start_program(self):
         """ Create and show the main window/tray"""
-        tray = QSnippet(parent=self)
-        tray.run()
+        self.qsnippet = QSnippet(parent=self)
+        self.qsnippet.run()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)    # Initialize QApplication

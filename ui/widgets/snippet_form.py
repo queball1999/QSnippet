@@ -24,29 +24,47 @@ class SnippetForm(QWidget):
 
         # Form fields
         self.folder_input = QLineEdit()
+        self.folder_input.setFont(self.main.small_font_size)
+
         self.label_input = QLineEdit()
+        self.label_input.setFont(self.main.small_font_size)
+
         self.trigger_input = QLineEdit()
+        self.trigger_input.setFont(self.main.small_font_size)
+
         self.snippet_input = QTextEdit()
-        #self.enabled_switch = QCheckBox('Enabled')
+        self.snippet_input.setFont(self.main.small_font_size)
+
         self.style_combo = QComboBox()
-        self.enabled_switch = QAnimatedSwitch(objectName="enabled_switch",
-                                           on_text="Disable",
-                                           off_text="Enable",
-                                           text_position="left",
-                                           parent=self)
+        self.style_combo.setFont(self.main.small_font_size)
         self.style_combo.addItems(['Keystroke', 'Clipboard'])
+
+        # Enabled Switch Row
+        self.switch_row = QHBoxLayout()
+        self.enabled_switch = QAnimatedSwitch(objectName="enabled_switch",
+                                           on_text="Enabled",
+                                           off_text="Disabled",
+                                           text_position="right",
+                                           text_font=self.main.medium_font_size,
+                                           parent=self)
+        self.spacer = QLabel()
+        
+        self.switch_row.addWidget(self.enabled_switch)
+        self.switch_row.addWidget(self.spacer)
+        
 
         # Add labeled widgets
         for widget, title in [
+            (self.enabled_switch, None),
             (self.folder_input, 'Folder:'),
             (self.label_input, 'Label:'),
             (self.trigger_input, 'Trigger:'),
             (self.snippet_input, 'Snippet:'),
-            (self.enabled_switch, None),
             (self.style_combo, 'Paste Style:')
         ]:
             if title:
                 lbl = QLabel(title)
+                lbl.setFont(self.main.medium_font_size)
                 layout.addWidget(lbl)
             layout.addWidget(widget)
 

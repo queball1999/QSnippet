@@ -220,6 +220,12 @@ class SnippetEditor(QWidget):
         ]
         self._save_snippets()
 
+    def updateUI(self):
+        """Fucntion to call when you need toupdate the UI. """
+        self.home_widget.updateUI()
+        self.update()
+        self.main.app.processEvents()
+
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)

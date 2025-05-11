@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont
 
 class HomeWidget(QWidget):
     new_snippet = Signal()
+    updated = Signal()
 
     def __init__(self, main, parent=None):
         super().__init__(parent)
@@ -14,12 +15,13 @@ class HomeWidget(QWidget):
 
     def initUI(self):
         self.main_layout = QVBoxLayout()
-        self.main_layout.setSpacing(25)
+        self.main_layout.setSpacing(15)
         self.main_layout.setContentsMargins(25, 25, 25, 25)
         # Make sure to add spacing
 
         self.welcome_label = QLabel("Welcome to QSnippets")
         self.welcome_label.setFont(self.main.large_font_size)
+        print(f"Large Font Size: {self.main.large_font_size}")
         # Make sure to remember the font 
 
         self.second_label = QLabel("Give your snippets a try below. Type /welcome now to see one in action.")
@@ -53,6 +55,17 @@ class HomeWidget(QWidget):
 
         self.setLayout(self.main_layout)
 
+    def updateUI(self):
+        self.welcome_label.setFont(self.main.large_font_size)
+        self.second_label.setFont(self.main.small_font_size)
+        self.third_label.setFont(self.main.small_font_size)
+        self.create_label.setFont(self.main.small_font_size)
+        self.create_button.setFont(self.main.small_font_size)
+
+        self.layout().invalidate()
+        self.update()
+
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)
+        self.update()

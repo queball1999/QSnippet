@@ -35,11 +35,11 @@ fonts:
   primary_font: "Inter"
   secondary_font: "DM Sans"
   sizes:
-    small: 14
-    medium: 18
-    large: 26
-    extra_large: 36
-    humongous: 64
+    small: 12
+    medium: 16
+    large: 30
+    extra_large: 24
+    humongous: 32
 
 dimensions:
   windows:
