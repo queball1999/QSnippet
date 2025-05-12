@@ -37,3 +37,9 @@ snippets:
   paste_style: Clipboard
   snippet: '@guglielmolaw.com'
   trigger: '@gug'
+- enabled: true
+  folder: Default
+  label: ''
+  paste_style: Clipboard
+  snippet: s
+  trigger: /ss

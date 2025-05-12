@@ -15,6 +15,7 @@ class QAnimatedSwitch(QWidget):
                  text_position: str = 'right',
                  text_font: QFont = QFont("Arial", 10),
                  toggle_size: QSize = QSize(50, 35),
+                 start_state: str = "off",
                  parent=None) -> QWidget:
         super().__init__(parent)
         self.objectName = objectName
@@ -25,38 +26,24 @@ class QAnimatedSwitch(QWidget):
         self.text_position = text_position.lower()
         self.text_font = text_font
         self.toggle_size = toggle_size
+        self.start_state = (start_state.lower() == "on")    # store as bool
+
         self.toggled = False
         self.disabled = False
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
-        self.widgets()
-
-    def widgets(self) -> None:
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        self.toggle_button = AnimatedToggle(checked_color=self.checked_color)
-        self.toggle_button.setFocusPolicy(Qt.NoFocus)
-        self.toggle_button.setFixedSize(self.toggle_size)
-        self.toggle_button.stateChanged.connect(self._on_toggled)
-        layout.addWidget(self.toggle_button, 0, 0, 1, 1, Qt.AlignLeft)
-
-        self.label = QLabel(text=self.off_text)
-        if self.text_font:
-            self.label.setFont(self.text_font)
-        self.label.setFocusPolicy(Qt.NoFocus)
-        self.label.mousePressEvent = self.handle_mouse_press
-        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        layout.addWidget(self.label, 0, 1, 1, 1, Qt.AlignLeft)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._build_widgets()
+        self.initUI()
+        
+        if self.start_state:
+            self.toggle_button.blockSignals(True)
+            self.toggle_button.setChecked(True)
+            self.toggled = self.start_state
+            self.label.setText(self.on_text if self.start_state else self.off_text)
+            self.toggle_button.blockSignals(False)
+            self.toggle_button.stateChanged.connect(self._on_toggled)
 
-        if self.background_color:
-            self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
-
-    def _build_widgets(self):
+    def initUI(self) -> None:
         if self.layout():
             QWidget().setLayout(self.layout())
 
@@ -65,7 +52,7 @@ class QAnimatedSwitch(QWidget):
         layout.setSpacing(4)
 
         self.toggle_button = AnimatedToggle(checked_color=self.checked_color)
-        self.toggle_button.setFixedSize(QSize(50, 35))
+        self.toggle_button.setFixedSize(self.toggle_size)
         self.toggle_button.stateChanged.connect(self._on_toggled)
 
         self.label = QLabel(self.off_text)
@@ -92,6 +79,8 @@ class QAnimatedSwitch(QWidget):
             layout.addWidget(self.label,         0, 1, Qt.AlignVCenter)
 
         self.setLayout(layout)
+        if self.background_color:
+            self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
 
     def handle_mouse_press(self, 
                            event: QMouseEvent) -> None:
@@ -160,7 +149,7 @@ class QAnimatedSwitch(QWidget):
             self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
 
         # Need to be able to update checked color
-        
+
         self.layout().invalidate()
         self.update()
 

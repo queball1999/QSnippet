@@ -36,16 +36,16 @@ fonts:
   secondary_font: "DM Sans"
   sizes:
     small: 12
-    medium: 16
-    large: 18
-    extra_large: 30
+    medium: 14
+    large: 20
+    extra_large: 26
     humongous: 32
 
 dimensions:
   windows:
     main:
       width: 1200
-      height: 800
+      height: 850
   buttons:
     mini_slim:
       width: 75

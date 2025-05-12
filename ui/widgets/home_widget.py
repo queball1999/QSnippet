@@ -16,7 +16,7 @@ class HomeWidget(QWidget):
     def initUI(self):
         self.main_layout = QVBoxLayout()
         self.main_layout.setSpacing(15)
-        self.main_layout.setContentsMargins(25, 25, 25, 25)
+        self.main_layout.setContentsMargins(15, 0, 0, 0)
 
         self.welcome_label = QLabel("Welcome to QSnippets")
         self.welcome_label.setFont(self.main.extra_large_font_size)
