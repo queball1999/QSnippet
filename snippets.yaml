@@ -6,7 +6,7 @@ snippets:
   snippet: Welcome to QSnippets...
   trigger: /welcome
 - enabled: true
-  folder: Ayee
+  folder: Test
   label: Hi 2
   paste_style: Clipboard
   snippet: 'Ayee, this is a longer test of QSnippet.
@@ -20,14 +20,20 @@ snippets:
     '
   trigger: /2
 - enabled: true
-  folder: Ayee
+  folder: Work
   label: M365 Admin
   paste_style: Clipboard
   snippet: https://admin.microsoft.com
   trigger: /msadmin
 - enabled: true
-  folder: Ayee
+  folder: Work
   label: Energy
   paste_style: Clipboard
   snippet: '@energytransportlogistics.com'
   trigger: '@energy'
+- enabled: true
+  folder: Work
+  label: Gug
+  paste_style: Clipboard
+  snippet: '@guglielmolaw.com'
+  trigger: '@gug'

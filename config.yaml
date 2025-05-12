@@ -37,8 +37,8 @@ fonts:
   sizes:
     small: 12
     medium: 16
-    large: 30
-    extra_large: 24
+    large: 18
+    extra_large: 28
     humongous: 32
 
 dimensions:

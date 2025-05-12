@@ -20,8 +20,8 @@ class HomeWidget(QWidget):
         # Make sure to add spacing
 
         self.welcome_label = QLabel("Welcome to QSnippets")
-        self.welcome_label.setFont(self.main.large_font_size)
-        print(f"Large Font Size: {self.main.large_font_size}")
+        self.welcome_label.setFont(self.main.extra_large_font_size)
+        print(f"Extra Large Font Size: {self.main.extra_large_font_size}")
         # Make sure to remember the font 
 
         self.second_label = QLabel("Give your snippets a try below. Type /welcome now to see one in action.")
@@ -56,7 +56,8 @@ class HomeWidget(QWidget):
         self.setLayout(self.main_layout)
 
     def updateUI(self):
-        self.welcome_label.setFont(self.main.large_font_size)
+        print(f"Extra Large Font Size: {self.main.extra_large_font_size}")
+        self.welcome_label.setFont(self.main.extra_large_font_size)
         self.second_label.setFont(self.main.small_font_size)
         self.third_label.setFont(self.main.small_font_size)
         self.create_label.setFont(self.main.small_font_size)

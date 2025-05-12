@@ -80,6 +80,7 @@ class QSnippet(QMainWindow):
         menu.exit_signal.connect(self.exit)
 
         self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self.show)
         self.tray.show()
 
     def run(self):
