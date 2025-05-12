@@ -17,12 +17,9 @@ class HomeWidget(QWidget):
         self.main_layout = QVBoxLayout()
         self.main_layout.setSpacing(15)
         self.main_layout.setContentsMargins(25, 25, 25, 25)
-        # Make sure to add spacing
 
         self.welcome_label = QLabel("Welcome to QSnippets")
         self.welcome_label.setFont(self.main.extra_large_font_size)
-        print(f"Extra Large Font Size: {self.main.extra_large_font_size}")
-        # Make sure to remember the font 
 
         self.second_label = QLabel("Give your snippets a try below. Type /welcome now to see one in action.")
         self.second_label.setFont(self.main.small_font_size)
@@ -41,7 +38,7 @@ class HomeWidget(QWidget):
 
         self.create_button = QPushButton("New Snippet")
         self.create_button.setFont(self.main.small_font_size)
-        self.create_button.setFixedSize(self.main.mini_button_size)
+        self.create_button.setFixedSize(self.main.small_button_size)
         self.create_button.pressed.connect(self.new_snippet.emit)
 
         self.create_row.addWidget(self.create_label)
@@ -55,13 +52,18 @@ class HomeWidget(QWidget):
 
         self.setLayout(self.main_layout)
 
-    def updateUI(self):
-        print(f"Extra Large Font Size: {self.main.extra_large_font_size}")
+    def applyStyles(self):
+        # Font Sizing
         self.welcome_label.setFont(self.main.extra_large_font_size)
         self.second_label.setFont(self.main.small_font_size)
         self.third_label.setFont(self.main.small_font_size)
         self.create_label.setFont(self.main.small_font_size)
+
         self.create_button.setFont(self.main.small_font_size)
+        # Button Sizing
+        self.create_button.setFixedSize(self.main.small_button_size)
+        # StyleSheet
+        self.update_stylesheet()
 
         self.layout().invalidate()
         self.update()
@@ -69,4 +71,3 @@ class HomeWidget(QWidget):
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)
-        self.update()

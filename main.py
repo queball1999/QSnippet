@@ -62,7 +62,7 @@ class main():
             QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
             sys.exit(1)
 
-        # Load YAML settings
+        # Setup Config file watcher
         self.loader = ConfigLoader(self.config_file, parent=self)
         self.loader.configChanged.connect(self._on_config_updated)
         self.cfg = self.loader.config
@@ -98,7 +98,7 @@ class main():
             self.cfg = config
             self.flatten_cfg()  # Flatten config again to refresh attributes.
             self.scale_ui_cfg() # Refresh UI config and scale
-            self.qsnippet.editor.updateUI()    # Trigger UI update
+            self.qsnippet.editor.applyStyles()    # Trigger UI update
             self.app.processEvents()
         # Should also fire off UI refresh, etc to ensure the UI matches the config
 
@@ -107,7 +107,6 @@ class main():
         Reassigns the size attributes with scaled versions. 
         Needs more work but this will do for now 05/07/25
         """
-        print("Scaling UI elements")
         # Scale Accordingly
         self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
         self.dimensions_buttons = self.scale_dict_sizes(size_dict=self.dimensions_buttons, screen_geometry=self.screen_geometry)
@@ -131,6 +130,8 @@ class main():
         self.humongous_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
         self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
 
+        # Widget Sizes
+        self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])
         print(self.fonts)
 
     def scale_width(self, original_width, screen_geometry):

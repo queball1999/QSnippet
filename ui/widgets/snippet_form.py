@@ -46,6 +46,7 @@ class SnippetForm(QWidget):
                                            off_text="Disabled",
                                            text_position="right",
                                            text_font=self.main.medium_font_size,
+                                           toggle_size=self.main.small_toggle_size,
                                            parent=self)
         self.spacer = QLabel()
         
@@ -71,9 +72,21 @@ class SnippetForm(QWidget):
         # Buttons
         btn_layout = QHBoxLayout()
         self.new_btn = QPushButton('New')
+        self.new_btn.setFont(self.main.small_font_size)
+        self.new_btn.setFixedSize(self.main.small_button_size)
+
         self.save_btn = QPushButton('Save')
+        self.save_btn.setFont(self.main.small_font_size)
+        self.save_btn.setFixedSize(self.main.small_button_size)
+
         self.delete_btn = QPushButton('Delete')
-        self.cancel_btn = QPushButton('Cancel')
+        self.delete_btn.setFont(self.main.small_font_size)
+        self.delete_btn.setFixedSize(self.main.small_button_size)
+
+        self.cancel_btn = QPushButton('Cancel') # Maybe rename home?
+        self.cancel_btn.setFont(self.main.small_font_size)
+        self.cancel_btn.setFixedSize(self.main.small_button_size)
+
         btn_layout.addWidget(self.new_btn)
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.delete_btn)
@@ -137,6 +150,36 @@ class SnippetForm(QWidget):
             QMessageBox.warning(self, 'Error', 'Trigger and snippet are required')
             return False
         return True
+    
+    def applyStyles(self):
+        # Font Sizing
+        self.folder_input.setFont(self.main.small_font_size)
+        self.label_input.setFont(self.main.small_font_size)
+        self.trigger_input.setFont(self.main.small_font_size)
+        self.snippet_input.setFont(self.main.small_font_size)
+        self.style_combo.setFont(self.main.small_font_size)
+        
+        self.new_btn.setFont(self.main.small_font_size)
+        self.save_btn.setFont(self.main.small_font_size)
+        self.delete_btn.setFont(self.main.small_font_size)
+        self.cancel_btn.setFont(self.main.small_font_size)
+
+        # Button Sizing
+        self.new_btn.setFixedSize(self.main.small_button_size)
+        self.save_btn.setFixedSize(self.main.small_button_size)
+        self.delete_btn.setFixedSize(self.main.small_button_size)
+        self.cancel_btn.setFixedSize(self.main.small_button_size)
+
+        # Widget Styling
+        self.enabled_switch.text_font = self.main.medium_font_size
+        self.enabled_switch.toggle_size = self.main.small_toggle_size
+        self.enabled_switch.applyStyles()
+
+        # StyleSheet
+        self.update_stylesheet()
+
+        self.layout().invalidate()
+        self.update()
     
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """

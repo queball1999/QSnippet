@@ -38,7 +38,7 @@ fonts:
     small: 12
     medium: 16
     large: 18
-    extra_large: 28
+    extra_large: 30
     humongous: 32
 
 dimensions:
@@ -47,27 +47,28 @@ dimensions:
       width: 1200
       height: 800
   buttons:
-    backspace:
-      width: 75
-      height: 50
-      radius: 8
     mini_slim:
-      width: 165
-      height: 50
-      radius: 8
+      width: 75
+      height: 25
+      radius: 4
     mini:
-      width: 150
-      height: 35
+      width: 100
+      height: 25
       radius: 8
     small:
-      width: 225
-      height: 65
+      width: 125
+      height: 35
       radius: 8
     medium:
-      width: 350
-      height: 125
+      width: 200
+      height: 45
       radius: 8
     large:
-      width: 450
-      height: 250
+      width: 250
+      height: 65
       radius: 8
+  toggles:
+    small:
+      width: 60
+      height: 45
+      radius: 10

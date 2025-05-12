@@ -79,7 +79,7 @@ class SnippetEditor(QWidget):
         self.parent.statusBar().showMessage(old_text)
 
     def on_entry_selected(self, entry):
-        print(f"Entry: {entry}")
+        #print(f"Entry: {entry}")
         if entry:
             self.form.clear_form()
             self.stack.setCurrentWidget(self.form)
@@ -220,9 +220,10 @@ class SnippetEditor(QWidget):
         ]
         self._save_snippets()
 
-    def updateUI(self):
+    def applyStyles(self):
         """Fucntion to call when you need toupdate the UI. """
-        self.home_widget.updateUI()
+        self.home_widget.applyStyles()
+        self.form.applyStyles()
         self.update()
         self.main.app.processEvents()
 

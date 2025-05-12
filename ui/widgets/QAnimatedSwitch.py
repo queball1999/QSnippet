@@ -13,7 +13,8 @@ class QAnimatedSwitch(QWidget):
                  checked_color: str = '#9C0000',
                  background_color: str = '',
                  text_position: str = 'right',
-                 text_font: QFont = QFont,
+                 text_font: QFont = QFont("Arial", 10),
+                 toggle_size: QSize = QSize(50, 35),
                  parent=None) -> QWidget:
         super().__init__(parent)
         self.objectName = objectName
@@ -23,6 +24,7 @@ class QAnimatedSwitch(QWidget):
         self.background_color = background_color
         self.text_position = text_position.lower()
         self.text_font = text_font
+        self.toggle_size = toggle_size
         self.toggled = False
         self.disabled = False
         self.setFocusPolicy(Qt.NoFocus)
@@ -36,7 +38,7 @@ class QAnimatedSwitch(QWidget):
         
         self.toggle_button = AnimatedToggle(checked_color=self.checked_color)
         self.toggle_button.setFocusPolicy(Qt.NoFocus)
-        self.toggle_button.setFixedSize(QSize(50, 35))
+        self.toggle_button.setFixedSize(self.toggle_size)
         self.toggle_button.stateChanged.connect(self._on_toggled)
         layout.addWidget(self.toggle_button, 0, 0, 1, 1, Qt.AlignLeft)
 
@@ -100,6 +102,12 @@ class QAnimatedSwitch(QWidget):
         if state:
             self.toggle_button.toggle()
 
+    def _on_toggled(self, 
+                    checked: bool) -> None:
+        self.toggled = not self.toggled
+        self.label.setText(self.on_text if checked else self.off_text)
+        self.stateChanged.emit(checked)
+
     def setChecked(self, state: bool) -> None:
         if state != self.isChecked():
             self.toggle_button.toggle()
@@ -129,20 +137,33 @@ class QAnimatedSwitch(QWidget):
 
     def hide(self):
         self.setVisible(False)
+
     def show(self):
         self.setVisible(True)
 
     def setWidth(self, width: int = 60):
         self.toggle_button.setWidth(width)
-
-    def _on_toggled(self, 
-                    checked: bool) -> None:
-        self.toggled = not self.toggled
-        self.label.setText(self.on_text if checked else self.off_text)
-        self.stateChanged.emit(checked)
        
     def setCheckedColor(self) -> None:
+        #FIXME: Needs work
         pass
+
+    def applyStyles(self):
+        """ Function to redraw and apply new styles """
+        if self.toggle_size:
+            self.toggle_button.setFixedSize(self.toggle_size)
+
+        if self.text_font:
+            self.label.setFont(self.text_font)
+
+        if self.background_color:
+            self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
+
+        # Need to be able to update checked color
+        
+        self.layout().invalidate()
+        self.update()
+
 
 
 ### Toggle and Animated Toggle are part of qtWidgets, provided by Martin Fitzpatrick
