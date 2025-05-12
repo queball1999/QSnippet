@@ -23,13 +23,13 @@ class SnippetForm(QWidget):
         layout = QVBoxLayout(self)
 
         # Form fields
-        self.folder_input = QLineEdit()
+        self.folder_input = QLineEdit(clearButtonEnabled=True)
         self.folder_input.setFont(self.main.small_font_size)
 
-        self.label_input = QLineEdit()
+        self.label_input = QLineEdit(clearButtonEnabled=True)
         self.label_input.setFont(self.main.small_font_size)
 
-        self.trigger_input = QLineEdit()
+        self.trigger_input = QLineEdit(clearButtonEnabled=True)
         self.trigger_input.setFont(self.main.small_font_size)
 
         self.snippet_input = QTextEdit()
@@ -144,7 +144,7 @@ class SnippetForm(QWidget):
         # Items to Validate:
         #   - Max Trigger Length of 255
         #   - Trigger must have no spaces or newlines.
-        #   - 
+        #   - Trigger must have special character as first char.
         entry = self.get_entry()
         if not entry['trigger'] or not entry['snippet']:
             QMessageBox.warning(self, 'Error', 'Trigger and snippet are required')
