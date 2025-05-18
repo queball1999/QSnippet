@@ -25,6 +25,7 @@ class SnippetForm(QWidget):
 
         self.define_text()
         self.initUI()
+        self.applyStyles()
 
     def define_text(self):
         self.instructions_text = """Fill out the form below to add a new snippet or modify an existing one. 
@@ -80,66 +81,52 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # Form fields
         self.new_label = QLabel("Name")
         self.new_label.setToolTip("Name or description of your snippet.")
-        self.new_label.setFont(self.main.small_font_size)
 
         self.new_input = QLineEdit(text="New Snippet", clearButtonEnabled=True)
-        self.new_input.setFont(self.main.small_font_size)
         self.new_input.setPlaceholderText("New Snippet")
         self.new_input.setToolTip("Name or description of your snippet.")
 
         self.trigger_label = QLabel("Trigger")
         self.trigger_label.setToolTip(self.trigger_tooltip)
-        self.trigger_label.setFont(self.main.small_font_size)
 
         self.trigger_input = QLineEdit(clearButtonEnabled=True)
-        self.trigger_input.setFont(self.main.small_font_size)
         self.trigger_input.setToolTip(self.trigger_tooltip)
         self.trigger_input.setPlaceholderText("/do")
 
         self.folder_label = QLabel("Folder")
-        self.folder_label.setFont(self.main.small_font_size)
         self.folder_label.setToolTip("Folder which your snippet is organized in.")
 
         self.folder_input = QLineEdit(text="Default", clearButtonEnabled=True)
-        self.folder_input.setFont(self.main.small_font_size)
         self.folder_input.setToolTip("Folder which your snippet is organized in.")
         self.folder_input.setPlaceholderText("Default")
 
         self.style_label = QLabel("Paste Style")
-        self.style_label.setFont(self.main.small_font_size)
         self.style_label.setToolTip(self.paste_style_tooltip)
 
         self.style_combo = QComboBox()
-        self.style_combo.setFont(self.main.small_font_size)
         self.style_combo.addItems(['Clipboard', 'Keystroke'])
         self.style_combo.setToolTip(self.paste_style_tooltip)
 
         # Snippet Input
-        self.snippet_label = QLabel("Snippet:")
+        self.snippet_label = QLabel("Snippet")
         self.snippet_label.setToolTip(self.snippet_tooltip)
-        self.snippet_label.setFont(self.main.small_font_size)
 
         self.snippet_input = QTextEdit()
-        self.snippet_input.setFont(self.main.small_font_size)
         self.snippet_input.setToolTip(self.snippet_tooltip)
         self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut...")
 
         # Buttons
         btn_layout = QHBoxLayout()
         self.new_btn = QPushButton('New')
-        self.new_btn.setFont(self.main.small_font_size)
         self.new_btn.setFixedSize(self.main.small_button_size)
 
         self.save_btn = QPushButton('Save')
-        self.save_btn.setFont(self.main.small_font_size)
         self.save_btn.setFixedSize(self.main.small_button_size)
 
         self.delete_btn = QPushButton('Delete')
-        self.delete_btn.setFont(self.main.small_font_size)
         self.delete_btn.setFixedSize(self.main.small_button_size)
 
         self.cancel_btn = QPushButton('Cancel') # Maybe rename home?
-        self.cancel_btn.setFont(self.main.small_font_size)
         self.cancel_btn.setFixedSize(self.main.small_button_size)
 
         btn_layout.addWidget(self.new_btn)
@@ -231,13 +218,16 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # Font Sizing
         self.form_title.setFont(self.main.large_font_size)
         self.instructions.setFont(self.main.small_font_size)
+        self.folder_label.setFont(self.main.small_font_size)
         self.folder_input.setFont(self.main.small_font_size)
+        self.new_label.setFont(self.main.small_font_size)
         self.new_input.setFont(self.main.small_font_size)
+        self.trigger_label.setFont(self.main.small_font_size)
         self.trigger_input.setFont(self.main.small_font_size)
+        self.snippet_label.setFont(self.main.small_font_size)
         self.snippet_input.setFont(self.main.small_font_size)
+        self.style_label.setFont(self.main.small_font_size)
         self.style_combo.setFont(self.main.small_font_size)
-
-        # FIXME: We don'd save the labels, but we need to so we can update.
         
         self.new_btn.setFont(self.main.small_font_size)
         self.save_btn.setFont(self.main.small_font_size)
@@ -263,22 +253,10 @@ Snippets come in handy for text you enter often or for standard messages you sen
     
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
-        #self.setStyleSheet(f""" """)
-
-class FieldRow(QFrame):
-    def __init__(self, title: str, widget: QWidget, font=None, tooltip=None, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.NoFrame)
-        row = QVBoxLayout(self)
-        row.setContentsMargins(0,0,0,0)
-        row.setSpacing(8)
-
-        lbl = QLabel(title + ":")
-        if font:
-            lbl.setFont(font)
-        row.addWidget(lbl, 0, Qt.AlignVCenter)
-
-        widget.setToolTip(tooltip or "")
-        row.addWidget(widget, 1)     # stretch so the widget expands
-
-        self.setLayout(row)
+        self.setStyleSheet(f"""
+            QLineEdit, QComboBox {{
+                padding: 5px;
+            }}
+            QPushButton {{
+                padding: 5px
+            }}""")

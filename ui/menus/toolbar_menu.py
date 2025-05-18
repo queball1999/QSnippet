@@ -20,21 +20,21 @@ class ToolbarMenu(QToolBar):
         # --- New Snippet ---
         new_icon = QIcon.fromTheme("document-new")  # or your own .png
         new_action = QAction(new_icon, "New Snippet", self)
-        new_action.setToolTip("New Snippet (ctrl+n)")
+        new_action.setToolTip("New Snippet (Ctrl+N)")
         new_action.triggered.connect(self.editor.show_new_form)
         self.addAction(new_action)
 
         # --- Save Snippet ---
         save_icon = QIcon.fromTheme("document-save")
         save_action = QAction(save_icon, "Save Snippet", self)
-        save_action.setToolTip("Save Snippet (ctrl+s)")
+        save_action.setToolTip("Save Snippet (Ctrl+S)")
         save_action.triggered.connect(self.editor.on_save)
         self.addAction(save_action)
 
         # --- Delete Snippet ---
         del_icon = QIcon.fromTheme("edit-delete")
         delete_action = QAction(del_icon, "Delete Snippet", self)
-        delete_action.setToolTip("Delete Snippet (del)")
+        delete_action.setToolTip("Delete Snippet (Del)")
         delete_action.triggered.connect(self.editor.on_delete)
         self.addAction(delete_action)
 

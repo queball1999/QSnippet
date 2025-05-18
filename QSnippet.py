@@ -18,7 +18,9 @@ class main():
         self.load_config()
         self.ensure_snippets_file_exists()
         self.scale_ui_cfg()
+        self.fix_image_paths()
         self.start_program()
+        
 
     def create_global_variables(self):
         # Global Configuration Variables
@@ -39,6 +41,7 @@ class main():
         self.config_file = self.working_dir / "config.yaml"
         self.snippets_file = self.working_dir / "snippets.yaml"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
+        
 
     def ensure_snippets_file_exists(self):
         """
@@ -133,6 +136,15 @@ class main():
         # Widget Sizes
         self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])
         print(self.fonts)
+        
+
+    def fix_image_paths(self):
+        """ This loops through images and appends the right path. """
+        print(self.images["icon_16"])
+        for image in self.images:
+            old_val = self.images[image]
+            self.images[image] = os.path.join(self.images_path, old_val)
+        print(self.images["icon_16"])
 
     def scale_width(self, original_width, screen_geometry):
         """Scale a width value from the 1920 reference to the current screen."""

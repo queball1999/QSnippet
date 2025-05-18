@@ -28,8 +28,11 @@ colors:
   light_text_color_disabled: "#FFFFFF"
 
 images:
-  icon: "QSnippet_Icon_v1.png"
-  test: "test.png"
+  icon_256: "QSnippet_256x256.png"
+  icon_128: "QSnippet_128x128.png"
+  icon_64: "QSnippet_64x64.png"
+  icon_32: "QSnippet_32x32.png"
+  icon_16: "QSnippet_16x16.png"
 
 fonts:
   primary_font: "Inter"
@@ -45,7 +48,7 @@ dimensions:
   windows:
     main:
       width: 1200
-      height: 850
+      height: 800
   buttons:
     mini_slim:
       width: 75

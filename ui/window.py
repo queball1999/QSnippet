@@ -20,7 +20,7 @@ class QSnippet(QMainWindow):
         self.app = parent.app
 
         self.setWindowTitle(self.parent.program_name)
-        self.setWindowIcon(QIcon(self.parent.program_icon))
+        self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
         paths = FileUtils.get_default_paths()
         self.config_file = paths['working_dir'] / "snippets.yaml"
@@ -69,7 +69,7 @@ class QSnippet(QMainWindow):
 
     def init_tray_menu(self):
         # install the system tray icon
-        icon = QIcon(self.parent.program_icon)
+        icon = QIcon(self.parent.images["icon_16"])
         self.tray = QSystemTrayIcon(icon, self.app)
         self.tray.setToolTip('QSnippet')
 
