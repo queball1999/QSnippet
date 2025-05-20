@@ -28,17 +28,21 @@ colors:
   light_text_color_disabled: "#FFFFFF"
 
 images:
-  icon: "QSnippet_Icon_v1.png"
+  icon_256: "QSnippet_256x256.png"
+  icon_128: "QSnippet_128x128.png"
+  icon_64: "QSnippet_64x64.png"
+  icon_32: "QSnippet_32x32.png"
+  icon_16: "QSnippet_16x16.png"
 
 fonts:
   primary_font: "Inter"
   secondary_font: "DM Sans"
   sizes:
-    small: 14
-    medium: 18
-    large: 26
-    extra_large: 36
-    humongous: 64
+    small: 12
+    medium: 14
+    large: 20
+    extra_large: 26
+    humongous: 32
 
 dimensions:
   windows:
@@ -46,27 +50,28 @@ dimensions:
       width: 1200
       height: 800
   buttons:
-    backspace:
-      width: 75
-      height: 50
-      radius: 8
     mini_slim:
-      width: 165
-      height: 50
-      radius: 8
+      width: 75
+      height: 25
+      radius: 4
     mini:
-      width: 150
-      height: 35
+      width: 100
+      height: 25
       radius: 8
     small:
-      width: 225
-      height: 65
+      width: 125
+      height: 35
       radius: 8
     medium:
-      width: 350
-      height: 125
+      width: 200
+      height: 45
       radius: 8
     large:
-      width: 450
-      height: 250
+      width: 250
+      height: 65
       radius: 8
+  toggles:
+    small:
+      width: 60
+      height: 45
+      radius: 10

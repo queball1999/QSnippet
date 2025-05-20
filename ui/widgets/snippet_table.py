@@ -113,7 +113,7 @@ class SnippetTable(QTreeView):
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)
-        print(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
+        #print(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
         if isinstance(data, dict):
             self.entrySelected.emit(data)
         else:
@@ -230,6 +230,20 @@ class SnippetTable(QTreeView):
 
         # Otherwise fall back to the default behavior
         return super().selectionCommand(index, event)"""
+
+    def applyStyles(self):
+        # Font Sizing
+        self.setFont(self.main.small_font_size)
+
+        # Button Sizing
+
+        # Widget Styling
+
+        # StyleSheet
+        self.update_stylesheet()
+
+        self.layout().invalidate()
+        self.update()
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """

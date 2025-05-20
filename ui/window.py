@@ -19,8 +19,8 @@ class QSnippet(QMainWindow):
         self.cfg = parent.cfg
         self.app = parent.app
 
-        self.setWindowTitle('QSnippet')
-        self.setWindowIcon(QIcon(self.parent.program_icon))
+        self.setWindowTitle(self.parent.program_name)
+        self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
         paths = FileUtils.get_default_paths()
         self.config_file = paths['working_dir'] / "snippets.yaml"
@@ -69,7 +69,7 @@ class QSnippet(QMainWindow):
 
     def init_tray_menu(self):
         # install the system tray icon
-        icon = QIcon(self.parent.program_icon)
+        icon = QIcon(self.parent.images["icon_16"])
         self.tray = QSystemTrayIcon(icon, self.app)
         self.tray.setToolTip('QSnippet')
 
@@ -80,7 +80,13 @@ class QSnippet(QMainWindow):
         menu.exit_signal.connect(self.exit)
 
         self.tray.setContextMenu(menu)
+        # Added to allow left clicks but interferes with right-clicks
+        # FIXME: Need to troubleshoot
+        #self.tray.activated.connect(self.show) 
         self.tray.show()
+
+    def run(self):
+        sys.exit(self.app.exec())
 
     def start_service(self):
         self.snippet_service.start()
@@ -109,6 +115,3 @@ class QSnippet(QMainWindow):
         # Override close to hide instead of exiting app
         event.ignore()
         self.hide()
-
-    def run(self):
-        sys.exit(self.app.exec())
