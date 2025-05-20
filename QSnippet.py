@@ -134,17 +134,13 @@ class main():
         self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
 
         # Widget Sizes
-        self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])
-        print(self.fonts)
-        
+        self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
 
     def fix_image_paths(self):
         """ This loops through images and appends the right path. """
-        print(self.images["icon_16"])
         for image in self.images:
             old_val = self.images[image]
             self.images[image] = os.path.join(self.images_path, old_val)
-        print(self.images["icon_16"])
 
     def scale_width(self, original_width, screen_geometry):
         """Scale a width value from the 1920 reference to the current screen."""

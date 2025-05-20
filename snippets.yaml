@@ -1,25 +1,5 @@
 snippets:
 - enabled: true
-  folder: Test
-  label: Hi
-  paste_style: Clipboard
-  snippet: Welcome to QSnippets...
-  trigger: /welcome
-- enabled: true
-  folder: Test
-  label: Hi 2
-  paste_style: Clipboard
-  snippet: 'Ayee, this is a longer test of QSnippet.
-
-
-    I wonder if the formating and everything will be the same in every paste???
-
-
-    - Quynn :)
-
-    '
-  trigger: /2
-- enabled: true
   folder: Work
   label: M365 Admin
   paste_style: Clipboard
@@ -38,8 +18,20 @@ snippets:
   snippet: '@guglielmolaw.com'
   trigger: '@gug'
 - enabled: true
-  folder: Default
-  label: ''
+  folder: Work
+  label: Start Ticket
   paste_style: Clipboard
-  snippet: s
-  trigger: /ss
+  snippet: I am looking into this now. I will follow up shortly.
+  trigger: /start
+- enabled: true
+  folder: Work
+  label: Questions
+  paste_style: Clipboard
+  snippet: Please let me know if you have any questions or concerns.
+  trigger: /questions
+- enabled: true
+  folder: Work
+  label: Issues
+  paste_style: Clipboard
+  snippet: Please let me know if there are any issues.
+  trigger: /issues

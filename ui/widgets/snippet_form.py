@@ -79,14 +79,14 @@ Snippets come in handy for text you enter often or for standard messages you sen
                                            parent=self)
 
         # Form fields
-        self.new_label = QLabel("Name")
+        self.new_label = QLabel("Name<span style='color:red'>*</span>")
         self.new_label.setToolTip("Name or description of your snippet.")
 
         self.new_input = QLineEdit(text="New Snippet", clearButtonEnabled=True)
         self.new_input.setPlaceholderText("New Snippet")
         self.new_input.setToolTip("Name or description of your snippet.")
 
-        self.trigger_label = QLabel("Trigger")
+        self.trigger_label = QLabel("Trigger<span style='color:red'>*</span>")
         self.trigger_label.setToolTip(self.trigger_tooltip)
 
         self.trigger_input = QLineEdit(clearButtonEnabled=True)
@@ -108,7 +108,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.style_combo.setToolTip(self.paste_style_tooltip)
 
         # Snippet Input
-        self.snippet_label = QLabel("Snippet")
+        self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
         self.snippet_label.setToolTip(self.snippet_tooltip)
 
         self.snippet_input = QTextEdit()
@@ -143,7 +143,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # Add Widgets to Grid
         layout.addWidget(self.form_title, 0, 0, 1, 2, Qt.AlignLeft)
         layout.addWidget(self.instructions, 1, 0, 1, 2, Qt.AlignLeft)
-        layout.addWidget(self.enabled_switch, 2, 0, 1, 2, Qt.AlignLeft)
+        layout.addWidget(self.enabled_switch, 2, 0, 1, 1, Qt.AlignLeft)
         layout.addWidget(self.new_label, 3, 0, 1, 1, Qt.AlignLeft)
         layout.addWidget(self.new_input, 4, 0, 1, 1)
         layout.addWidget(self.trigger_label, 3, 1, 1, 1, Qt.AlignLeft)

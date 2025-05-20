@@ -33,19 +33,22 @@ class HomeWidget(QWidget):
         self.third_label.setToolTip("A snippet is a brief or extended block of text that appears when you type a shortcut.\nSnippets come in handy for text you enter often or for standard messages you send regularly.")
         self.third_label.setWordWrap(True)
         
+        self.create_row = QHBoxLayout()
         self.create_label = QLabel("Go ahead and create a new snippet now")
+
         self.create_button = QPushButton("New Snippet")
         self.create_button.setFixedSize(self.main.small_button_size)
         self.create_button.pressed.connect(self.new_snippet.emit)
 
-        
+        self.create_row.addWidget(self.create_label)
+        self.create_row.addWidget(self.create_button, alignment=Qt.AlignLeft)
+
         self.main_layout.addWidget(self.welcome_label, 0, 0, 1, 1, Qt.AlignLeft)
         self.main_layout.addWidget(self.second_label, 1, 0, 1, 1, Qt.AlignLeft)
-        self.main_layout.addWidget(self.program_logo, 0, 1, 1, 1, Qt.AlignCenter)
+        self.main_layout.addWidget(self.program_logo, 0, 1, 2, 1, Qt.AlignCenter)
         self.main_layout.addWidget(self.test_entry, 2, 0, 1, 2)
-        self.main_layout.addWidget(self.third_label, 3, 0, 1, 2, Qt.AlignLeft)
-        self.main_layout.addWidget(self.create_label, 4, 0, 1, 1)
-        self.main_layout.addWidget(self.create_button, 4, 1, 1, 1)
+        self.main_layout.addWidget(self.third_label, 3, 0, 1, 2)
+        self.main_layout.addLayout(self.create_row, 4, 0, 1, 1)
 
         self.setLayout(self.main_layout)
 
