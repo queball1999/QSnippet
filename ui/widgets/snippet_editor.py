@@ -4,8 +4,8 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog
 )
-from PySide6.QtGui     import QIcon, QStandardItem
-from PySide6.QtCore    import Qt
+from PySide6.QtGui import QIcon, QStandardItem
+from PySide6.QtCore import Qt
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm

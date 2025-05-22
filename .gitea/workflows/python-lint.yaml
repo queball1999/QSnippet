@@ -1,0 +1,33 @@
+name: Python Lint
+
+on:
+  schedule:
+    - cron: '0 22 * * *'  # Runs at 10 PM everyday
+  push:
+    branches: [ main, dev, staging ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint Python Code (flake8)
+        run: |
+          flake8 . --exit-zero --format=default | tee flake8-report.txt
+
+      - name: Upload Flake8 Lint Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake8-report
+          path: flake8-report.txt
