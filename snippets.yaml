@@ -35,3 +35,56 @@ snippets:
   paste_style: Clipboard
   snippet: Please let me know if there are any issues.
   trigger: /issues
+- enabled: true
+  folder: SQL
+  label: SQL Query
+  paste_style: Clipboard
+  snippet: 'SELECT * FROM '
+  trigger: '*select'
+- enabled: true
+  folder: Work
+  label: Good Day
+  paste_style: Clipboard
+  snippet: Have a great rest of your day!
+  trigger: /day
+- enabled: true
+  folder: Work
+  label: Reach me at ...
+  paste_style: Clipboard
+  snippet: Feel free to reach me at (520) 222-8345.
+  trigger: /reachme
+- enabled: true
+  folder: Work
+  label: DarkWeb No Need to Notify
+  paste_style: Clipboard
+  snippet: '>> all public info
+
+    >> no need to notify'
+  trigger: /public
+- enabled: true
+  folder: Work
+  label: DarkWeb Notify
+  paste_style: Clipboard
+  snippet: '>> Notifying client
+
+    >> Resolving out'
+  trigger: /notify
+- enabled: true
+  folder: Work
+  label: Dark Web Template
+  paste_style: Clipboard
+  snippet: "Robert,\n\nWe have found a set of your login credentials for sale on the\
+    \ \"dark web\", a place where hackers trade information. \n\nThis means that your\
+    \ email or computer login may be compromised, and we need you to change your email\
+    \ & computer password as soon as possible. \n\nPlease keep your email password\
+    \ (and all company systems passwords) unique to only the business. IE, don't use\
+    \ your personal passwords on company computers. We highly recommend that you don't\
+    \ reuse passwords across multiple sites for your personal accounts as well, as\
+    \ it is a very poor strategy and can lead to your bank/credit cards becoming compromised.\
+    \ \n\nPlease let us know if you need help changing your passwords! If you have\
+    \ any questions about this information, don't hesitate to contact us by submitting\
+    \ a ticket to support@geeks2you.com.\n\n==================================\n\n\
+    To provide some clarity on what was leaked so you can focus on the correct accounts,\
+    \ it looks like the  following is what was found: ...\n\nPlease update any accounts\
+    \ using this password."
+  trigger: /darkweb
