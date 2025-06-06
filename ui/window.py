@@ -56,7 +56,8 @@ class QSnippet(QMainWindow):
         layout.addWidget(self.editor)
         container.setLayout(layout)
         self.setCentralWidget(container)
-        self.show()
+        if self.parent.general_show_ui_at_start:
+            self.show()
 
     def init_menubar(self):
         self.menubar = MenuBar(self)

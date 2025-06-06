@@ -4,3 +4,4 @@ pyperclip
 pynput
 watchdog
 pyinstaller
+pywin32

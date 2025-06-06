@@ -44,6 +44,45 @@ class ConfigLoader(QObject):
         """Stop watching the config file."""
         self._watcher.removePath(self.config_path)
 
+class SettingsLoader(QObject):
+    """
+    Loads and watches the YAML application settings file.
+    Emits `settingsChanged` when the top-level settings change.
+    """
+    settingsChanged = Signal(dict)
+
+    def __init__(self, settings_path: str, parent=None):
+        super().__init__()
+        self.settings_path = os.path.abspath(settings_path)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.addPath(self.settings_path)
+        self._watcher.fileChanged.connect(self._on_file_changed)
+
+        # initial load
+        self.settings = {}
+        self._load_settings()
+
+    def _load_settings(self):
+        try:
+            with open(self.settings_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f) or {}
+            self.settings = data
+            logger.info(f"Loaded Settings: {self.settings_path}")
+            self.settingsChanged.emit(self.settings)
+        except Exception as e:
+            logger.error(f"Failed to load Settings {self.settings_path}: {e}")
+
+    def _on_file_changed(self, path):
+        # QFileSystemWatcher may emit twice, so re-add path if needed
+        if not self._watcher.files():
+            self._watcher.addPath(self.settings_path)
+        logger.info(f"Settings file changed on disk: {path}")
+        self._load_settings()
+
+    def stop(self):
+        """Stop watching the settings file."""
+        self._watcher.removePath(self.settings_path)
+
 
 class SnippetsLoader(QObject):
     """

@@ -1,0 +1,3 @@
+general:
+  start_at_boot: true
+  show_ui_at_start: false

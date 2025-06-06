@@ -73,7 +73,7 @@ snippets:
   folder: Work
   label: Dark Web Template
   paste_style: Clipboard
-  snippet: "Robert,\n\nWe have found a set of your login credentials for sale on the\
+  snippet: "[NAME],\n\nWe have found a set of your login credentials for sale on the\
     \ \"dark web\", a place where hackers trade information. \n\nThis means that your\
     \ email or computer login may be compromised, and we need you to change your email\
     \ & computer password as soon as possible. \n\nPlease keep your email password\

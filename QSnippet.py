@@ -6,7 +6,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont
 # Load custom modules
 from utils.file_utils import FileUtils
-from utils.config_utils import ConfigLoader
+from utils.config_utils import ConfigLoader, SettingsLoader
+from utils import RegUtils
 from ui import QSnippet
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ class main():
         # Main Program Execution
         self.create_global_variables()
         self.load_config()
+        self.load_settings()
         self.ensure_snippets_file_exists()
         self.scale_ui_cfg()
         self.fix_image_paths()
@@ -38,7 +40,9 @@ class main():
         self.images_path = os.path.join(self.working_dir, "images")
 
         # Define Files
+        self.app_exe = self.working_dir / "QSnippet.exe"
         self.config_file = self.working_dir / "config.yaml"
+        self.settings_file = self.working_dir / "settings.yaml"
         self.snippets_file = self.working_dir / "snippets.yaml"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         
@@ -58,6 +62,29 @@ class main():
             }
             FileUtils.write_yaml(path=self.snippets_file, data=default)
 
+    def flatten_yaml(self, items: dict) -> bool:
+        """ Flatten yaml to dict and assign to attributes. """
+        try:
+            # Assign every top-level config key as an attribute on self
+            # e.g. config['program_name'] → self.program_name
+            for key, val in items.items():
+                setattr(self, key, val)
+
+            # For each nested dict (like colors, images, sizing), flatten its entries
+            # by prefixing with the section name:
+            # e.g. config['images']['icon'] → self.images_icon
+            #      config['colors']['primary_accent_active'] → self.colors_primary_accent_active`
+            for section, subdict in items.items():
+                if isinstance(subdict, dict):
+                    for subkey, subval in subdict.items():
+                        attr_name = f"{section}_{subkey}"
+                        setattr(self, attr_name, subval)
+
+            return True
+        except:
+            logger.error("Failed to flatten config")
+            return False
+        
     def load_config(self):
         """ This function loads a yaml config file and flattens its entries into attributes. """
         # Check for config
@@ -69,41 +96,47 @@ class main():
         self.loader = ConfigLoader(self.config_file, parent=self)
         self.loader.configChanged.connect(self._on_config_updated)
         self.cfg = self.loader.config
-        self.flatten_cfg()
-
-    def flatten_cfg(self):
-        """ Flatten configuration dict and assign to attributes. """
-        try:
-            # Assign every top-level config key as an attribute on self
-            # e.g. config['program_name'] → self.program_name
-            for key, val in self.cfg.items():
-                setattr(self, key, val)
-
-            # For each nested dict (like colors, images, sizing), flatten its entries
-            # by prefixing with the section name:
-            # e.g. config['images']['icon'] → self.images_icon
-            #      config['colors']['primary_accent_active'] → self.colors_primary_accent_active`
-            for section, subdict in self.cfg.items():
-                if isinstance(subdict, dict):
-                    for subkey, subval in subdict.items():
-                        attr_name = f"{section}_{subkey}"
-                        setattr(self, attr_name, subval)
-
-            return True
-        except:
-            logger.error("Failed to flatten config")
-            return False
+        self.flatten_yaml(items=self.cfg)
 
     def _on_config_updated(self, config):
         """ When config update is detected, refresh config variable and UI elements. """
         logger.info("Config reloaded.")
         if config:
             self.cfg = config
-            self.flatten_cfg()  # Flatten config again to refresh attributes.
-            self.scale_ui_cfg() # Refresh UI config and scale
+            self.flatten_yaml()  # Flatten config again to refresh attributes.
+            self.scale_ui_cfg(items=self.cfg) # Refresh UI config and scale
             self.qsnippet.editor.applyStyles()    # Trigger UI update
             self.app.processEvents()
         # Should also fire off UI refresh, etc to ensure the UI matches the config
+
+    def load_settings(self):
+        """ This function loads a yaml settings file and flattens its entries into attributes. """
+        # Check for config
+        if not self.settings_file.exists():
+            QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
+            sys.exit(1)
+
+        # Setup Config file watcher
+        self.loader = SettingsLoader(self.settings_file, parent=self)
+        self.loader.settingsChanged.connect(self._on_settings_updated)
+        self.settings = self.loader.settings
+        self.flatten_yaml(items=self.settings)
+        self.handle_start_up_reg()
+
+    def _on_settings_updated(self, config):
+        """ When config update is detected, refresh config variable and UI elements. """
+        logger.info("Settings reloaded.")
+        if config:
+            self.settings = config
+            self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
+            self.handle_start_up_reg()
+
+    def handle_start_up_reg(self):
+        """ Based on settings, set the correct registry key for startup """
+        if self.general_start_at_boot:
+            RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
+        else:
+            RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):
         """ 
