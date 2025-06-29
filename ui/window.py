@@ -34,6 +34,7 @@ class QSnippet(QMainWindow):
         self._status_timer.start(5000)
 
         self.snippet_service = SnippetService(self.config_file)
+        # Need to call refresh here
 
         self.initUI()
         self.init_menubar()
@@ -47,6 +48,7 @@ class QSnippet(QMainWindow):
 
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.config_file, main=self.parent, parent=self)
+        self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
         
         layout.addWidget(self.editor)
         container.setLayout(layout)
@@ -68,6 +70,7 @@ class QSnippet(QMainWindow):
         icon = QIcon(self.parent.images["icon_16"])
         self.tray = QSystemTrayIcon(icon, self.app)
         self.tray.setToolTip('QSnippet')
+        # Allow left clicks of tray icon to show UI
         self.tray.activated.connect(self.on_tray_icon_activated)
 
         menu = TrayMenu()
@@ -77,9 +80,6 @@ class QSnippet(QMainWindow):
         menu.exit_signal.connect(self.exit)
 
         self.tray.setContextMenu(menu)
-        # Added to allow left clicks but interferes with right-clicks
-        # FIXME: Need to troubleshoot
-        #self.tray.activated.connect(self.show) 
         self.tray.show()
 
     def run(self):

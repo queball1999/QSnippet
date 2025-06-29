@@ -21,6 +21,13 @@ class SnippetExpander():
         self.max_trigger_len = 255
         self.trigger_flag = False   # Used to track if we are within a snippet trigger sequence
 
+        self.build_trigger_map()
+
+        self.listener = keyboard.Listener(on_press=self._on_key_press)
+        self.controller = keyboard.Controller()
+        self._paste_mod = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
+
+    def build_trigger_map(self):
         # Build an enabled trigger→snippet map for quick lookup
         self.trigger_map = {
             s["trigger"]: s
@@ -35,9 +42,11 @@ class SnippetExpander():
         self.trigger_regex = re.compile(pattern)
         logger.debug(self.trigger_regex)
 
-        self.listener = keyboard.Listener(on_press=self._on_key_press)
-        self.controller = keyboard.Controller()
-        self._paste_mod = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
+    def refresh_snippets(self):
+        print("refresh snippets")
+        self.snippets = self.snippets_db.get_all_snippets()
+        self.build_trigger_map()
+        logging.info("SnippetExpander reloaded snippets from DB.")
 
     def retrieve_trigger_chars(self, snippets):
         """

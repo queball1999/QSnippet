@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QLabel, QHBoxLayout, QComboBox
 )
 from PySide6.QtGui import QIcon, QStandardItem
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
@@ -14,6 +14,8 @@ from .home_widget   import HomeWidget
 
 
 class SnippetEditor(QWidget):
+    trigger_reload = Signal()
+
     def __init__(self, config_path, main, parent=None):
         super().__init__()
         self.config_path = Path(config_path)
@@ -165,6 +167,7 @@ class SnippetEditor(QWidget):
             self.load_config()
             self.table.select_entry(entry)
             self.show_new_form()
+            self.trigger_reload.emit()  # Flag
             QMessageBox.information(None, 'Snippet Saved', 'Snippet Saved Successfully!')
         except Exception as e:
             QMessageBox.information(None, 'Save Failed', f'Snippet Save Failed: {e}')

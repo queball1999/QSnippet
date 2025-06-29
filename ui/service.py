@@ -35,6 +35,11 @@ class SnippetService():
         self._thread   = None
         self._stop_evt = Event()
 
+    def refresh(self):
+        """Force a reload of snippets from the database."""
+        print('reload!')
+        self.expander.refresh_snippets()
+
     def _on_snippets_updated(self, new_snippets: list):
         logging.info("Snippet definitions reloaded.")
 
