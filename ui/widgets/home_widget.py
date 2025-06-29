@@ -29,7 +29,7 @@ class HomeWidget(QWidget):
 
         self.test_entry = QTextEdit()
 
-        self.third_label = QLabel("Your shortcuts insert snippets and will work anywhere on your computer. Whether you're typing in Word, Notepad or Chrome, we've got you covered.")
+        self.third_label = QLabel("Your triggers insert snippets where you are typing and work with any app on your computer. Whether you're typing in Word, Notepad or Chrome, we've got you covered.")
         self.third_label.setToolTip("A snippet is a brief or extended block of text that appears when you type a shortcut.\nSnippets come in handy for text you enter often or for standard messages you send regularly.")
         self.third_label.setWordWrap(True)
         

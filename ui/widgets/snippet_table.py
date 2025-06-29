@@ -113,7 +113,7 @@ class SnippetTable(QTreeView):
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)
-        #print(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
+        # print(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
         if isinstance(data, dict):
             self.entrySelected.emit(data)
         else:

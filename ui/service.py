@@ -1,9 +1,10 @@
 import logging
 import time
 from threading import Thread, Event
-from utils.config_utils import SnippetsLoader
+# from utils.config_utils import SnippetsLoader
 from utils.keyboard_utils import SnippetExpander
 from utils.file_utils import FileUtils
+from utils.snippet_db import SnippetDB
 
 class SnippetService():
     """Background service that loads snippets and listens for triggers."""
@@ -11,7 +12,7 @@ class SnippetService():
     def __init__(self, config_path: str):
         # Set up logging
         paths = FileUtils.get_default_paths()
-        log_file = paths['log_dir'] / 'qsnippet_service.log'
+        log_file = paths['log_dir'] / 'QSnippet_service.log'
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s %(levelname)s: %(message)s',
@@ -23,9 +24,12 @@ class SnippetService():
         logging.info(f"Initializing SnippetService with config: {config_path}")
 
         # Core components
-        self.loader   = SnippetsLoader(config_path, parent=self)
-        self.loader.snippetsChanged.connect(self._on_snippets_updated)
-        self.expander = SnippetExpander(config_loader=self.loader, parent=self)
+        # Replacing with SnippetDB on 06/28/25
+        """ self.loader   = SnippetsLoader(config_path, parent=self)
+        self.loader.snippetsChanged.connect(self._on_snippets_updated) """
+
+        self.snippet_db = SnippetDB(config_path)
+        self.expander = SnippetExpander(snippets_db=self.snippet_db, parent=self)
 
         # Thread control
         self._thread   = None
@@ -42,7 +46,7 @@ class SnippetService():
 
         logging.info("SnippetService monitor shutting down…")
         self.expander.stop()
-        self.loader.stop()
+        # self.loader.stop()
 
     def start(self):
         """Start the expander (once) and launch the monitor thread."""

@@ -19,9 +19,9 @@ snippets:
   trigger: '@gug'
 - enabled: true
   folder: Work
-  label: Start Ticket
+  label: Ticket Start
   paste_style: Clipboard
-  snippet: I am looking into this now. I will follow up shortly.
+  snippet: I will be reaching out to follow up shortly.
   trigger: /start
 - enabled: true
   folder: Work
@@ -88,3 +88,37 @@ snippets:
     \ it looks like the  following is what was found: ...\n\nPlease update any accounts\
     \ using this password."
   trigger: /darkweb
+- enabled: true
+  folder: Work
+  label: Update Processed
+  paste_style: Clipboard
+  snippet: I have successfully processed this update. Please let me know if there
+    are any issues.
+  trigger: /update
+- enabled: true
+  folder: Work
+  label: Assist
+  paste_style: Clipboard
+  snippet: '[Name],
+
+
+    I will be reaching out to assist.'
+  trigger: /assist
+- enabled: true
+  folder: Work
+  label: Take control
+  paste_style: Clipboard
+  snippet: I am going to take control, please allow me a moment.
+  trigger: /control
+- enabled: true
+  folder: Work
+  label: Researching
+  paste_style: Clipboard
+  snippet: I am looking into this now. I will be reaching out to follow up shortly.
+  trigger: /research
+- enabled: true
+  folder: test
+  label: Barcode test
+  paste_style: Keystroke
+  snippet: https://safewatercalifornia.com/my-account/?user_id=3506https://safewatercalifornia.com/my-account/?user_id=3506
+  trigger: /b

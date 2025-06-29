@@ -93,13 +93,14 @@ class QAnimatedSwitch(QWidget):
 
     def _on_toggled(self, 
                     checked: bool) -> None:
-        self.toggled = not self.toggled
+        self.toggled = checked
         self.label.setText(self.on_text if checked else self.off_text)
         self.stateChanged.emit(checked)
 
     def setChecked(self, state: bool) -> None:
         if state != self.isChecked():
             self.toggle_button.toggle()
+            self.toggled = state
             
     def isChecked(self) -> None:
         return self.toggled

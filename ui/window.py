@@ -1,8 +1,6 @@
-import os
 import sys
-import subprocess
 from PySide6.QtWidgets import (
-    QMessageBox, QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget
+    QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import QTimer
@@ -23,12 +21,9 @@ class QSnippet(QMainWindow):
         self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
         paths = FileUtils.get_default_paths()
-        self.config_file = paths['working_dir'] / "snippets.yaml"
-
-        # Path to the service script or executable
-        # Will need to swap out with actial service eventually
-        #self.service_cmd = ['python', os.path.join(os.getcwd(), 'service.py'), '--config', str(self.config_file)]
-        self.process = None
+        # Replacing with SnippetDB on 06/28/25
+        # self.config_file = paths['working_dir'] / "snippets.yaml"
+        self.config_file = paths['working_dir'] / "snippets.db"
 
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
@@ -73,6 +68,7 @@ class QSnippet(QMainWindow):
         icon = QIcon(self.parent.images["icon_16"])
         self.tray = QSystemTrayIcon(icon, self.app)
         self.tray.setToolTip('QSnippet')
+        self.tray.activated.connect(self.on_tray_icon_activated)
 
         menu = TrayMenu()
         menu.start_signal.connect(self.start_service)
@@ -106,6 +102,16 @@ class QSnippet(QMainWindow):
             self.statusBar().showMessage(f"Service status: Stopped")
         else:
             self.statusBar().showMessage(f"Service status: Running")
+
+    def on_tray_icon_activated(self, event):
+        """ Handle left-click event and show UI """
+        if event == QSystemTrayIcon.Trigger:
+            # Left click
+            if not self.isVisible():
+                self.show()
+            else:
+                self.raise_()  # bring to front
+                self.activateWindow()
 
     def exit(self):
         self.stop_service()

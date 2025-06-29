@@ -1,5 +1,6 @@
 import winreg
 
+
 class RegUtils():
     def add_to_run_key(app_exe_path: str, entry_name: str = "QSnippet"):
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"

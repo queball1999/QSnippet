@@ -5,12 +5,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont
 # Load custom modules
-from utils.file_utils import FileUtils
-from utils.config_utils import ConfigLoader, SettingsLoader
-from utils import RegUtils
+from utils import *
 from ui import QSnippet
 
 logger = logging.getLogger(__name__)
+
+
+# To Add: "Press return after inserting snippet" toggle
 
 class main():
     def __init__(self):
@@ -18,11 +19,11 @@ class main():
         self.create_global_variables()
         self.load_config()
         self.load_settings()
+        self.init_logger()
         self.ensure_snippets_file_exists()
         self.scale_ui_cfg()
         self.fix_image_paths()
         self.start_program()
-        
 
     def create_global_variables(self):
         # Global Configuration Variables
@@ -37,6 +38,8 @@ class main():
 
         # Define Directories
         self.working_dir = FileUtils.get_default_paths()["working_dir"]
+        self.default_os_paths = self.get_default_paths()
+        self.logs_dir = self.default_os_paths["log_dir"]
         self.images_path = os.path.join(self.working_dir, "images")
 
         # Define Files
@@ -44,8 +47,59 @@ class main():
         self.config_file = self.working_dir / "config.yaml"
         self.settings_file = self.working_dir / "settings.yaml"
         self.snippets_file = self.working_dir / "snippets.yaml"
+        self.snippet_db_file = self.working_dir / "snippets.db"
+        self.snippet_db = SnippetDB(self.snippet_db_file)
+        # Comment out to run migration
+        self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
+
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
+        self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
+
+    def migrate_yaml_to_sqlite(self, yaml_path, db: SnippetDB):
+        import yaml
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        for entry in data.get("snippets", []):
+            entry["tags"] = ""
+            entry["return_press"] = False
+            db.insert_snippet(entry)
         
+    def get_default_paths(self):
+        """ Retrieve and return the default directories based on OS """
+        try:
+            system = platform.system()
+            user_home = Path.home()
+
+            # Generate Default Directories Based on OS
+            if system == "Windows": # Windows
+                documents = Path(os.path.join(os.environ["USERPROFILE"], "Documents", "QSnippet"))
+                log_dir = Path(os.getenv("ProgramData", "C:/ProgramData")) / "QSnippet" / "logs"
+            elif system == "Darwin":    # MacOS
+                documents = user_home / "Documents" / "QSnippet"
+                log_dir = user_home / "Library" / "Logs" / "QSnippet"
+            else:  # Linux and others
+                documents = user_home / "Documents" / "QSnippet"
+                log_dir = Path("/var/log/QSnippet")
+
+            return {
+                "ads_dir": documents / "ads",   # not used; 04/06/25
+                "export_dir": documents / "exports",
+                "recordings_dir": documents / "recordings", # not used; 04/06/25
+                "log_dir": log_dir
+            }
+        except Exception as e:
+            logging.critical("Could not retrieve OS specific directories!")
+            raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
+    
+    def init_logger(self):
+        """ Initialize the logger class """
+        try:
+            print("Setting up Logger")
+            self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
+            logging.info("Logger initialized!")
+        except Exception as e:
+            #logging.critical("Could not initialize logger class!")
+            raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
 
     def ensure_snippets_file_exists(self):
         """
