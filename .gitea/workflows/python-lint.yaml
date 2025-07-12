@@ -1,8 +1,6 @@
 name: Python Lint
 
 on:
-  schedule:
-    - cron: '0 22 * * *'  # Runs at 10 PM everyday
   push:
     branches: [ main, dev, staging ]
 
@@ -31,3 +29,4 @@ jobs:
         with:
           name: flake8-report
           path: flake8-report.txt
+          

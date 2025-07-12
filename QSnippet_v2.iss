@@ -18,12 +18,13 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName=%localappdata%/QSnippet\{#MyAppName}
+DefaultDirName={autopf}\{#MyAppName}
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 LicenseFile=P:\Coding\Gitea Repos\QSnippet\LICENSE
 ; Remove the following line to run in administrative install mode (install for all users.)
-PrivilegesRequired=lowest
+; PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=P:\Coding\Gitea Repos\QSnippet\output
 OutputBaseFilename=QSnippet
 SetupIconFile=P:\Coding\Gitea Repos\QSnippet\images\QSnippet.ico
@@ -39,12 +40,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "P:\Coding\Gitea Repos\QSnippet\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\images\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "P:\Coding\Gitea Repos\QSnippet\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "P:\Coding\Gitea Repos\QSnippet\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "P:\Coding\Gitea Repos\QSnippet\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\config.yaml"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\settings.yaml"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\snippets.yaml"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

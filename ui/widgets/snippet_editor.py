@@ -32,7 +32,7 @@ class SnippetEditor(QWidget):
 
         # Search bar and filters
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search by label, trigger, content, or tags...")
+        self.search_bar.setPlaceholderText("Search all the things...")
         self.search_bar.textChanged.connect(self.run_search)
 
         self.filter_dropdown = QComboBox()

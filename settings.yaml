@@ -1,3 +1,5 @@
 general:
   start_at_boot: false
   show_ui_at_start: false
+appearance:
+  theme: dark

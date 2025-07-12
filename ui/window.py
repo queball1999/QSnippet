@@ -6,6 +6,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtCore import QTimer
 
 from utils.file_utils import FileUtils
+from utils.reg_utils import RegUtils
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
@@ -23,7 +24,7 @@ class QSnippet(QMainWindow):
         paths = FileUtils.get_default_paths()
         # Replacing with SnippetDB on 06/28/25
         # self.config_file = paths['working_dir'] / "snippets.yaml"
-        self.config_file = paths['working_dir'] / "snippets.db"
+        self.config_file = paths['documents'] / "snippets.db"
 
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
@@ -73,11 +74,12 @@ class QSnippet(QMainWindow):
         # Allow left clicks of tray icon to show UI
         self.tray.activated.connect(self.on_tray_icon_activated)
 
-        menu = TrayMenu()
+        menu = TrayMenu(main=self.parent)
         menu.start_signal.connect(self.start_service)
         menu.stop_signal.connect(self.stop_service)
         menu.edit_signal.connect(self.show)
         menu.exit_signal.connect(self.exit)
+        menu.startup_signal.connect(self.handle_startup_signal)
 
         self.tray.setContextMenu(menu)
         self.tray.show()
@@ -102,6 +104,21 @@ class QSnippet(QMainWindow):
             self.statusBar().showMessage(f"Service status: Stopped")
         else:
             self.statusBar().showMessage(f"Service status: Running")
+
+    def handle_startup_signal(self, enabled: bool):
+        if enabled:
+            RegUtils.add_to_run_key(app_exe_path=self.parent.app_exe, entry_name="QSnippet")
+        else:
+            RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+        # Update YAML settings
+        self.parent.skip_reg = False    # Force a skip so we only load reg key once
+        self.parent.settings["general"]["start_at_boot"] = enabled
+        FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
+        QTimer.singleShot(1000, self.unset_skip_reg)
+
+    def unset_skip_reg(self):
+        self.parent.skip_reg = False
 
     def on_tray_icon_activated(self, event):
         """ Handle left-click event and show UI """

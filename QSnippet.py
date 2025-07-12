@@ -11,8 +11,6 @@ from ui import QSnippet
 logger = logging.getLogger(__name__)
 
 
-# To Add: "Press return after inserting snippet" toggle
-
 class main():
     def __init__(self):
         # Main Program Execution
@@ -20,7 +18,7 @@ class main():
         self.load_config()
         self.load_settings()
         self.init_logger()
-        self.ensure_snippets_file_exists()
+        # self.ensure_snippets_file_exists()
         self.scale_ui_cfg()
         self.fix_image_paths()
         self.start_program()
@@ -35,22 +33,38 @@ class main():
         self.screen_height = self.screen_geometry.height()
         self.REFERENCE_WIDTH = 1920
         self.REFERENCE_HEIGHT = 1080
+        # Flag to skip loading reg key
+        self.skip_reg = False
 
         # Define Directories
         self.working_dir = FileUtils.get_default_paths()["working_dir"]
         self.default_os_paths = self.get_default_paths()
+
         self.logs_dir = self.default_os_paths["log_dir"]
+        self.documents_dir = self.default_os_paths["documents"]
         self.images_path = os.path.join(self.working_dir, "images")
+        # Ensure directories exist
+        self.ensure_directories_exist([
+            self.logs_dir,
+            self.documents_dir,
+            self.images_path
+        ])
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.config_file = self.working_dir / "config.yaml"
-        self.settings_file = self.working_dir / "settings.yaml"
+        self.config_file = self.documents_dir / "config.yaml"
+        self.settings_file = self.documents_dir / "settings.yaml"   # updated to documents dir 062825
         self.snippets_file = self.working_dir / "snippets.yaml"
-        self.snippet_db_file = self.working_dir / "snippets.db"
+        self.snippet_db_file = self.documents_dir / "snippets.db"     # updated to documents dir 062825
+        # Ensure files exist
+        self.ensure_files_exist([
+            {"file": self.config_file, "function": FileUtils.create_config_file(self.config_file)},
+            {"file": self.settings_file, "function": FileUtils.create_settings_file(self.settings_file)},
+            {"file": self.snippet_db_file, "function": FileUtils.create_snippets_db_file(self.snippet_db_file)}
+        ])
         self.snippet_db = SnippetDB(self.snippet_db_file)
         # Comment out to run migration
-        self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
+        # self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
 
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
@@ -82,6 +96,7 @@ class main():
                 log_dir = Path("/var/log/QSnippet")
 
             return {
+                "documents": documents,
                 "ads_dir": documents / "ads",   # not used; 04/06/25
                 "export_dir": documents / "exports",
                 "recordings_dir": documents / "recordings", # not used; 04/06/25
@@ -90,6 +105,41 @@ class main():
         except Exception as e:
             logging.critical("Could not retrieve OS specific directories!")
             raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
+        
+    def ensure_directories_exist(self, directories: list = []):
+        """
+        Ensures that all directories in the given list exist.
+        If a directory does not exist, it is created.
+
+        :param directories: List of directory paths to check/create
+        """
+        for directory in directories:
+            try:
+                os.makedirs(directory, exist_ok=True)
+            except Exception as e:
+                logging.critical(f"Failed to make directory {directory}! Error: {e}")
+                raise ValueError("Failed to make directory {directory}! "
+                                 f"Please contact application vendor. Error: {e}")
+            
+    def ensure_files_exist(self, files: list = []):
+        """
+        Ensures all specified files exist. If a file is missing,
+        its corresponding creation function is called.
+        
+        :param files: List of dicts like { "file": Path, "function": callable }
+        """
+        for entry in files:
+            path = entry.get("file")
+            create_fn = entry.get("function")
+
+            if not path.exists():
+                logger.warning(f"Missing file: {path}. Creating default...")
+                try:
+                    create_fn(path)
+                    logger.info(f"Created default file: {path}")
+                except Exception as e:
+                    logger.critical(f"Failed to create {path}: {e}")
+                    raise ValueError(f"Failed to create required file: {path}\n\n{e}")
     
     def init_logger(self):
         """ Initialize the logger class """
@@ -187,9 +237,11 @@ class main():
 
     def handle_start_up_reg(self):
         """ Based on settings, set the correct registry key for startup """
-        if self.general_start_at_boot:
+        if self.skip_reg:
+            return
+        elif not RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"] == True:
             RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        else:
+        elif RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"] == False:
             RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):

@@ -52,8 +52,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.return_tooltip = """After inserting your snippet, do you need to press return or enter?"""
 
         self.paste_style_tooltip = """QSnippet supports 2 ways to paste your snippet: 
-    • Clipboard – copies the text to your system clipboard and pastes it in one go.
-    • Keystroke – simulates typing each character (useful in apps or fields that block direct clipboard pastes)."""
+    • Paste From Clipboard – copies the text to your system clipboard and pastes it in one go.
+    • Simulate Typing – simulates typing each character (useful in apps or fields that block direct clipboard pastes)."""
 
     def initUI(self):
         # Main Layout
@@ -74,16 +74,16 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.enabled_switch = QAnimatedSwitch(objectName="enabled_switch",
                                            on_text="Enabled",
                                            off_text="Disabled",
-                                           text_position="right",
+                                           text_position="left",
                                            text_font=self.main.medium_font_size,
                                            toggle_size=self.main.small_toggle_size,
                                            start_state=start_state,
                                            parent=self)
         
         self.return_switch = QAnimatedSwitch(objectName="return_switch",
-                                           on_text="Press Enter after snippet",
-                                           off_text="Press Enter after snippet",
-                                           text_position="right",
+                                           on_text="Press Enter After Snippet",
+                                           off_text="Press Enter After Snippet",
+                                           text_position="left",
                                            text_font=self.main.small_font_size,
                                            toggle_size=self.main.small_toggle_size,
                                            start_state="off",
@@ -93,7 +93,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.style_switch = QAnimatedSwitch(objectName="style_switch",
                                            on_text="Paste From Clipboard",
                                            off_text="Simulate Typing",
-                                           text_position="right",
+                                           text_position="left",
                                            text_font=self.main.small_font_size,
                                            toggle_size=self.main.small_toggle_size,
                                            start_state="on",

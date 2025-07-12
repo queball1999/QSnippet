@@ -7,15 +7,18 @@ class TrayMenu(QMenu):
     stop_signal = Signal()      # Signal to stop the service
     edit_signal = Signal()      # Signal to bring up UI
     exit_signal = Signal()      # Signal to exit app
+    startup_signal = Signal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, main=None, parent=None):
         super().__init__(parent)
+        self.main = main
+        self.parent = parent
         # Colors
         # Font Sizes
         self.add_actions()
 
     def add_actions(self):
-        self.start_action = self.addAction("Start Service") #Define QIcon to set icon
+        """ self.start_action = self.addAction("Start Service") #Define QIcon to set icon
         self.start_action.setData("Start Service")
         # Remember to set font
         self.start_action.triggered.connect(self.start_signal.emit)
@@ -23,6 +26,14 @@ class TrayMenu(QMenu):
         self.stop_action = self.addAction("Stop Service")
         self.stop_action.setData("Stop Service")
         self.stop_action.triggered.connect(self.stop_signal.emit)
+        """
+
+        # Launch at Startup (Checkbox style)
+        self.launch_action = self.addAction("Launch at startup")
+        self.launch_action.setData("Launch at startup")
+        self.launch_action.setCheckable(True)  # Enable checkbox behavior
+        self.launch_action.setChecked(True)  # Set initial state
+        self.launch_action.toggled.connect(lambda checked: self.startup_signal.emit(checked))
 
         self.addSeparator() # Add seperator
 

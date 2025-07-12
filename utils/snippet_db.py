@@ -1,13 +1,17 @@
 # snippet_db.py
 import sqlite3
 import yaml
+import logging
 from pathlib import Path
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 class SnippetDB:
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        logging.info(f"SQLite Path: {db_path}")
         self.conn = sqlite3.connect(self.db_path)
         self._create_table()
 
