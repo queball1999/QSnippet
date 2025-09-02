@@ -67,6 +67,7 @@ class main():
             {"file": self.settings_file, "function": FileUtils.create_settings_file(self.settings_file)},
             {"file": self.snippet_db_file, "function": FileUtils.create_snippets_db_file(self.snippet_db_file)}
         ])
+        
         self.snippet_db = SnippetDB(self.snippet_db_file)
 
         # Uncomment to run migration

@@ -21,7 +21,7 @@ class HomeWidget(QWidget):
 
         # Welcome Hearer w/ Logo
         self.welcome_label = QLabel("Welcome to QSnippets")
-        self.second_label = QLabel("Give your snippets a try below. Type /welcome now to see one in action.")
+        self.second_label = QLabel("Give your snippets a try below. It looks like you may want to create one to test here!")
         
         self.pixmap = QPixmap(self.main.images["icon_64"])
         self.program_logo = QLabel()
@@ -75,7 +75,19 @@ class HomeWidget(QWidget):
                 padding: 5px
             }}""")
         
+    def set_random_snippet(self):
+        snippet = self.main.snippet_db.get_random_snippet()
+        if not snippet:
+            self.second_label.setText("Give your snippets a try below. It looks like you may want to create one to test here!")
+            return
+        
+        # Show trigger and snippet content
+        msg = (
+            f"Give your snippets a try below. Type <code>{snippet['trigger']}</code> now to see one in action."
+               )
+        self.second_label.setText(msg)
+
     def showEvent(self, event):
         super().showEvent(event)
-        # force focus when the form is shown
-        self.test_entry.setFocus(Qt.TabFocusReason)
+        self.set_random_snippet()   # Set random snippet on each load
+        self.test_entry.setFocus(Qt.TabFocusReason) # Force focus when the form is shown

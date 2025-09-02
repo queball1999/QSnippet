@@ -24,10 +24,6 @@ class SnippetService():
         logging.info(f"Initializing SnippetService with config: {config_path}")
 
         # Core components
-        # Replacing with SnippetDB on 06/28/25
-        """ self.loader   = SnippetsLoader(config_path, parent=self)
-        self.loader.snippetsChanged.connect(self._on_snippets_updated) """
-
         self.snippet_db = SnippetDB(config_path)
         self.expander = SnippetExpander(snippets_db=self.snippet_db, parent=self)
 

@@ -21,11 +21,6 @@ class QSnippet(QMainWindow):
         self.setWindowTitle(self.parent.program_name)
         self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
-        paths = FileUtils.get_default_paths()
-        # Replacing with SnippetDB on 06/28/25
-        # self.config_file = paths['working_dir'] / "snippets.yaml"
-        self.config_file = paths['documents'] / "snippets.db"
-
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
         self.resize(width, height)
@@ -34,7 +29,7 @@ class QSnippet(QMainWindow):
         self._status_timer.timeout.connect(self.check_service_status)
         self._status_timer.start(5000)
 
-        self.snippet_service = SnippetService(self.config_file)
+        self.snippet_service = SnippetService(self.parent.snippet_db_file)
 
         self.initUI()
         self.init_menubar()
@@ -47,7 +42,7 @@ class QSnippet(QMainWindow):
         layout = QHBoxLayout(container)
 
         # Show editor at startup
-        self.editor = SnippetEditor(config_path=self.config_file, main=self.parent, parent=self)
+        self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)
         self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
         
         layout.addWidget(self.editor)

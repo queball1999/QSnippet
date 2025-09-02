@@ -2,6 +2,7 @@
 import sqlite3
 import yaml
 import logging
+import random
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -73,6 +74,20 @@ class SnippetDB:
             columns = [col[0] for col in cur.description]
             return dict(zip(columns, row))
         return {}
+    
+    def get_random_snippet(self) -> Dict[str, Any]:
+        """Return a random enabled snippet, or empty dict if none exist."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM snippets WHERE enabled = 1")
+        rows = cur.fetchall()
+        if not rows:
+            return {}
+        columns = [col[0] for col in cur.description]
+        row = random.choice(rows)
+        item = dict(zip(columns, row))
+        item["enabled"] = bool(item["enabled"])
+        item["return_press"] = bool(item["return_press"])
+        return item
     
     def rename_folder(self, old_folder: str, new_folder: str):
         with self.conn:
