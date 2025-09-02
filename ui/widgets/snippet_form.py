@@ -1,8 +1,8 @@
 import logging
 import re
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QLineEdit, QTextEdit, QComboBox, QFrame, QGridLayout,
-    QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QSizePolicy
+    QWidget, QLabel, QLineEdit, QTextEdit, QGridLayout,
+    QPushButton, QHBoxLayout
 )
 from PySide6.QtCore import Signal, Qt
 from .QAnimatedSwitch import QAnimatedSwitch
@@ -256,16 +256,19 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # FIXME: Needs additional logic here
         entry = self.get_entry()
         if not entry['trigger']:
-            QMessageBox.warning(self, 'Error', 'Trigger is required!')
+            self.message_box.warning("Trigger is required!", title="Error")
             return False
         elif not entry['snippet']:
-            QMessageBox.warning(self, 'Error', 'Snippet is required!')
+            self.message_box.warning("Snippet is required!", title="Error")
             return False
         elif not entry['label']:
-            QMessageBox.warning(self, 'Error', 'Label is required!')
+            self.message_box.warning("Label is required!", title="Error")
             return False
         elif not re.match(self.special_chars_regex, entry['trigger']):
-            QMessageBox.warning(self, 'Error', f"Your trigger did not meet the requirements.\n\n{self.trigger_requirements}")
+            self.message_box.warning(
+                f"Your trigger did not meet the requirements.\n\n{self.trigger_requirements}",
+                title="Error"
+            )
             return False
         return True
     
@@ -325,3 +328,9 @@ Snippets come in handy for text you enter often or for standard messages you sen
             QPushButton {{
                 padding: 5px
             }}""")
+        
+    def showEvent(self, event):
+        super().showEvent(event)
+        # force focus when the form is shown
+        self.new_input.setFocus(Qt.TabFocusReason)
+

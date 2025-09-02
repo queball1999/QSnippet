@@ -54,12 +54,15 @@ class FileUtils:
             user_home = Path.home()
 
             if system == "Windows":
+                app_data = Path(os.path.join(os.environ["LOCALAPPDATA"], "QSnippet"))
                 documents = Path(os.path.join(os.environ["USERPROFILE"], "Documents", "QSnippet"))
                 log_dir = Path(os.getenv("ProgramData", "C:/ProgramData")) / "QSnippet" / "logs"
             elif system == "Darwin":
+                app_data = user_home / "Library" / "Application Support" / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
                 log_dir = user_home / "Library" / "Logs" / "QSnippet"
             else:
+                app_data = Path(os.getenv("XDG_DATA_HOME", user_home / ".local" / "share")) / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
                 log_dir = Path("/var/log/QSnippet")
 
@@ -71,6 +74,7 @@ class FileUtils:
             cwd = Path.cwd()
 
             return {
+                "app_data": app_data,
                 "documents": documents,
                 "log_dir": log_dir,
                 "working_dir": cwd

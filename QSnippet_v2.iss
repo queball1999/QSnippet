@@ -26,7 +26,7 @@ LicenseFile=P:\Coding\Gitea Repos\QSnippet\LICENSE
 ; PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=P:\Coding\Gitea Repos\QSnippet\output
-OutputBaseFilename=QSnippet
+OutputBaseFilename=QSnippet-{#MyAppVersion}
 SetupIconFile=P:\Coding\Gitea Repos\QSnippet\images\QSnippet.ico
 Compression=lzma
 SolidCompression=yes
@@ -76,8 +76,8 @@ procedure DeinitializeUninstall();
 begin
   if RemoveData then
   begin
-    // Documents folder
-    DelTree(ExpandConstant('{userdocs}\QSnippet'), True, True, True);
+    // App Data folder
+    DelTree(ExpandConstant('{localappdata}\QSnippet'), True, True, True);
 
     // ProgramData logs
     DelTree(ExpandConstant('{commonappdata}\QSnippet'), True, True, True);

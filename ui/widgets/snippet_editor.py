@@ -3,9 +3,9 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
-    QLineEdit, QLabel, QHBoxLayout, QComboBox
+    QLineEdit, QHBoxLayout, QComboBox
 )
-from PySide6.QtGui import QIcon, QStandardItem
+from PySide6.QtGui import QStandardItem
 from PySide6.QtCore import Qt, Signal
 
 from .snippet_table import SnippetTable
@@ -112,7 +112,6 @@ class SnippetEditor(QWidget):
         self.parent.statusBar().showMessage(old_text)
 
     def on_entry_selected(self, entry):
-        #print(f"Entry: {entry}")
         if entry:
             self.form.clear_form()
             self.stack.setCurrentWidget(self.form)
@@ -130,33 +129,6 @@ class SnippetEditor(QWidget):
         self.form.clear_form()
         self.stack.setCurrentWidget(self.form)
 
-    def on_save_old(self):
-        try:
-            if not self.form.validate():
-                return
-            entry = self.form.get_entry()
-            data = yaml.safe_load(self.config_path.read_text()) or {}
-            snippets = data.get('snippets', [])
-
-            # replace or append
-            for i, e in enumerate(snippets):
-                if e.get('trigger') == entry['trigger']:
-                    snippets[i] = entry
-                    break
-            else:
-                snippets.append(entry)
-
-            data['snippets'] = snippets
-            self.config_path.write_text(yaml.safe_dump(data), encoding='utf-8')
-
-            # refresh table and re-select
-            self.load_config()
-            self.table.select_entry(entry)
-            QMessageBox.information(None, 'Snippet Saved', 'Snippet Saved Successfully!')
-        except:
-            # Need to log this section for this error to make sense
-            QMessageBox.information(None, 'Save Failed', 'Snippet Save Failed. See log for details.')
-
     def on_save(self):
         try:
             if not self.form.validate():
@@ -168,24 +140,9 @@ class SnippetEditor(QWidget):
             self.table.select_entry(entry)
             self.show_new_form()
             self.trigger_reload.emit()  # Flag
-            QMessageBox.information(None, 'Snippet Saved', 'Snippet Saved Successfully!')
+            self.main.message_box.info('Snippet Saved Successfully!', title='Snippet Saved')
         except Exception as e:
-            QMessageBox.information(None, 'Save Failed', f'Snippet Save Failed: {e}')
-
-    def on_delete_old(self):
-        entry = self.table.current_entry()
-        if not entry:
-            return
-        data = yaml.safe_load(self.config_path.read_text()) or {}
-        data['snippets'] = [
-            e for e in data.get('snippets', [])
-            if e.get('trigger') != entry['trigger']
-        ]
-        self.config_path.write_text(yaml.safe_dump(data), encoding='utf-8')
-
-        self.load_config()
-        # go back to home screen after delete
-        self.stack.setCurrentIndex(0)
+            self.main.message_box.info(f'Snippet Save Failed: {e}', title='Save Failed')
 
     def on_delete(self):
         entry = self.table.current_entry()
@@ -212,19 +169,6 @@ class SnippetEditor(QWidget):
         full = f"{parent_name}/{name.strip()}"
         self.show_new_form()
         self.form.folder_input.setText(full)
-
-    def on_rename_folder_old(self, folder_item):
-        old = folder_item.text()
-        new, ok = QInputDialog.getText(self, 'Rename Folder',
-                                       f'New name for "{old}":', text=old)
-        if not ok or not new.strip() or new.strip() == old:
-            return
-        for sn in self.snippets:
-            if sn.get('folder') == old:
-                sn['folder'] = new.strip()
-        self._save_snippets()
-        QMessageBox.information(self, 'Folder Renamed',
-                                f'"{old}" → "{new.strip()}"')
         
     def on_rename_folder(self, folder_item):
         old = folder_item.text()
@@ -233,22 +177,7 @@ class SnippetEditor(QWidget):
             return
         self.main.snippet_db.rename_folder(old, new.strip())
         self.load_config()
-        QMessageBox.information(self, 'Folder Renamed', f'"{old}" → "{new.strip()}"')
-
-
-    def on_delete_folder_old(self, folder_item):
-        name = folder_item.text()
-        confirm = QMessageBox.question(
-            self, 'Delete Folder',
-            f'Delete folder "{name}" and all its snippets?'
-        )
-        if confirm != QMessageBox.Yes:
-            return
-        self.snippets = [
-            sn for sn in self.snippets
-            if sn.get('folder') != name
-        ]
-        self._save_snippets()
+        self.main.message_box.info(f'"{old}" → "{new.strip()}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item):
         self.show_new_form()
@@ -257,64 +186,46 @@ class SnippetEditor(QWidget):
 
     def on_delete_folder(self, folder_item):
         name = folder_item.text()
-        confirm = QMessageBox.question(
-            self, 'Delete Folder',
-            f'Delete folder "{name}" and all its snippets?'
+        confirm = self.main.message_box.question(
+            f'Delete folder "{name}" and all its snippets?',
+            title="Delete Folder",
+            buttons=QMessageBox.Yes | QMessageBox.No,
+            default_button=QMessageBox.No
         )
+
         if confirm != QMessageBox.Yes:
             return
+        
         self.main.snippet_db.delete_folder(name)
         self.load_config()
 
     def on_edit_snippet(self, entry):
         self.on_entry_selected(entry)
 
-    def on_rename_snippet_old(self, entry):
-        old_label = entry.get('label', '')
-        new_label, ok = QInputDialog.getText(
-            self, 'Rename Snippet', 'New label:', text=old_label
-        )
-        if not ok or not new_label.strip() or new_label == old_label:
-            return
-        for sn in self.snippets:
-            if sn['trigger'] == entry['trigger']:
-                sn['label'] = new_label.strip()
-                break
-        self._save_snippets()
-        QMessageBox.information(self, 'Snippet Renamed',
-                                f'"{old_label}" → "{new_label.strip()}"')
-
     def on_rename_snippet(self, entry):
         old_label = entry.get('label', '')
         new_label, ok = QInputDialog.getText(
             self, 'Rename Snippet', 'New label:', text=old_label
         )
+
         if not ok or not new_label.strip() or new_label == old_label:
             return
+        
         self.main.snippet_db.rename_snippet(entry['trigger'], new_label.strip())
         self.load_config()
-        QMessageBox.information(self, 'Snippet Renamed', f'"{old_label}" → "{new_label.strip()}"')
-
-    def on_delete_snippet_old(self, entry):
-        confirm = QMessageBox.question(
-            self, 'Delete Snippet',
-            f'Delete snippet "{entry.get("label","")}"?'
-        )
-        if confirm != QMessageBox.Yes:
-            return
-        self.snippets = [
-            sn for sn in self.snippets
-            if sn['trigger'] != entry['trigger']
-        ]
-        self._save_snippets()
+        self.main.message_box.info(f'"{old_label}" → "{new_label.strip()}"', title='Snippet Renamed')
     
     def on_delete_snippet(self, entry):
-        confirm = QMessageBox.question(
-            self, 'Delete Snippet',
-            f'Delete snippet "{entry.get("label","")}"?'
+        confirm = self.main.message_box.question(
+            f'Delete snippet "{entry.get("label","")}"?',
+            title="Delete Snippet",
+            buttons=QMessageBox.Yes | QMessageBox.No,
+            default_button=QMessageBox.No
         )
+
         if confirm != QMessageBox.Yes:
             return
+
         self.main.snippet_db.delete_snippet(entry['trigger'])
         self.load_config()
 

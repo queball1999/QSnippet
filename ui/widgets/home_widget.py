@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtWidgets import QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout, QGridLayout
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 
 class HomeWidget(QWidget):
     new_snippet = Signal()
@@ -74,3 +74,8 @@ class HomeWidget(QWidget):
             QPushButton {{
                 padding: 5px
             }}""")
+        
+    def showEvent(self, event):
+        super().showEvent(event)
+        # force focus when the form is shown
+        self.test_entry.setFocus(Qt.TabFocusReason)

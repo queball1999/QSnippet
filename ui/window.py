@@ -19,7 +19,6 @@ class QSnippet(QMainWindow):
         self.app = parent.app
 
         self.setWindowTitle(self.parent.program_name)
-        print(self.parent.images["icon_16"])
         self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
         paths = FileUtils.get_default_paths()
@@ -36,7 +35,6 @@ class QSnippet(QMainWindow):
         self._status_timer.start(5000)
 
         self.snippet_service = SnippetService(self.config_file)
-        # Need to call refresh here
 
         self.initUI()
         self.init_menubar()
@@ -90,7 +88,6 @@ class QSnippet(QMainWindow):
 
     def start_service(self):
         self.snippet_service.start()
-        # should log this
         if self.editor.isVisible():
             self.statusBar().showMessage(f"Service status: Running")
 
@@ -100,7 +97,6 @@ class QSnippet(QMainWindow):
             self.statusBar().showMessage(f"Service status: Stopped")
 
     def check_service_status(self):
-        #print('Checking Status')
         if not self.snippet_service._thread.is_alive():
             self.statusBar().showMessage(f"Service status: Stopped")
         else:

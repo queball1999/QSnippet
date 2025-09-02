@@ -209,28 +209,6 @@ class SnippetTable(QTreeView):
             # remove the folder
             self.model.removeRow(parent.row())
 
-    #def selectionCommand(self, index, event=None):
-        """
-        Only allow selection on *left* mouse presses.
-        Ignore right-clicks so they can open the context menu
-        without triggering entrySelected.
-        """
-        """# If it’s a mouse press and it’s the right button, do nothing
-        if isinstance(event, QMouseEvent) and event.button() == Qt.RightButton:
-            idx = self.indexAt(event.pos())
-            if idx.isValid():
-                sel = self.selectionModel()
-                # block selection signals so entrySelected won't fire
-                was_blocked = sel.blockSignals(True)
-                # setCurrentIndex just to paint the row as “current”
-                self.setCurrentIndex(idx)
-                # restore signal delivery
-                sel.blockSignals(was_blocked)
-            return QItemSelectionModel.NoUpdate
-
-        # Otherwise fall back to the default behavior
-        return super().selectionCommand(index, event)"""
-
     def applyStyles(self):
         # Font Sizing
         self.setFont(self.main.small_font_size)

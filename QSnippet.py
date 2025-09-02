@@ -8,6 +8,7 @@ from PySide6.QtGui import QFont, QIcon
 # Load custom modules
 from utils import *
 from ui import QSnippet
+from ui.widgets import AppMessageBox
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class main():
         self.load_settings()    # settings.yaml
         self.init_logger()
         self.fix_image_paths()
+        self.message_box = AppMessageBox(icon_path=self.images["icon_16"])
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
         self.start_program()
@@ -39,24 +41,26 @@ class main():
 
         # Define Directories
         self.working_dir = FileUtils.get_default_paths()["working_dir"]
-        self.default_os_paths = self.get_default_paths()
+        self.default_os_paths = FileUtils.get_default_paths()
 
         self.logs_dir = self.default_os_paths["log_dir"]
         self.documents_dir = self.default_os_paths["documents"]
+        self.app_data_dir = self.default_os_paths["app_data"]
         self.images_path = os.path.join(self.working_dir, "images")
         # Ensure directories exist
         self.ensure_directories_exist([
             self.logs_dir,
             self.documents_dir,
+            self.app_data_dir,
             self.images_path
         ])
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.config_file = self.documents_dir / "config.yaml"
-        self.settings_file = self.documents_dir / "settings.yaml"   # updated to documents dir 062825
-        self.snippets_file = self.working_dir / "snippets.yaml"
-        self.snippet_db_file = self.documents_dir / "snippets.db"     # updated to documents dir 062825
+        self.config_file = self.app_data_dir / "config.yaml"
+        self.settings_file = self.app_data_dir / "settings.yaml"
+        self.snippet_db_file = self.app_data_dir / "snippets.db"
+        
         # Ensure files exist
         self.ensure_files_exist([
             {"file": self.config_file, "function": FileUtils.create_config_file(self.config_file)},
@@ -64,7 +68,8 @@ class main():
             {"file": self.snippet_db_file, "function": FileUtils.create_snippets_db_file(self.snippet_db_file)}
         ])
         self.snippet_db = SnippetDB(self.snippet_db_file)
-        # Comment out to run migration
+
+        # Uncomment to run migration
         # self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
 
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
@@ -78,34 +83,6 @@ class main():
             entry["tags"] = ""
             entry["return_press"] = False
             db.insert_snippet(entry)
-        
-    def get_default_paths(self):
-        """ Retrieve and return the default directories based on OS """
-        try:
-            system = platform.system()
-            user_home = Path.home()
-
-            # Generate Default Directories Based on OS
-            if system == "Windows": # Windows
-                documents = Path(os.path.join(os.environ["USERPROFILE"], "Documents", "QSnippet"))
-                log_dir = Path(os.getenv("ProgramData", "C:/ProgramData")) / "QSnippet" / "logs"
-            elif system == "Darwin":    # MacOS
-                documents = user_home / "Documents" / "QSnippet"
-                log_dir = user_home / "Library" / "Logs" / "QSnippet"
-            else:  # Linux and others
-                documents = user_home / "Documents" / "QSnippet"
-                log_dir = Path("/var/log/QSnippet")
-
-            return {
-                "documents": documents,
-                "ads_dir": documents / "ads",   # not used; 04/06/25
-                "export_dir": documents / "exports",
-                "recordings_dir": documents / "recordings", # not used; 04/06/25
-                "log_dir": log_dir
-            }
-        except Exception as e:
-            logging.critical("Could not retrieve OS specific directories!")
-            raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
         
     def ensure_directories_exist(self, directories: list = []):
         """
@@ -308,7 +285,6 @@ class main():
         # scale fonts by the ratio of current screen height to reference height
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
 
-        # if you want integer point sizes, wrap with int(...)
         return {
             name: int(size * ratio)
             for name, size in font_dict.items()
@@ -324,12 +300,8 @@ class main():
                     pid = int(f.read().strip())
                 if psutil.pid_exists(pid):
                     # Already running
-                    msg = QMessageBox()
-                    msg.setIcon(QMessageBox.Critical)
-                    msg.setWindowIcon(QIcon(self.images["icon_16"]))
-                    msg.setWindowTitle("Already Running")
-                    msg.setText(f"Another instance of '{app_name}' is already running.")
-                    msg.exec()
+                    self.message_box.info(f"Another instance of '{app_name}' is already running.",
+                                          title="Already Running")
                     sys.exit(1)
             except Exception:
                 pass  # corrupt lock file, ignore
@@ -344,12 +316,14 @@ class main():
         self.qsnippet = QSnippet(parent=self)
         self.qsnippet.run()
 
+
 if __name__ == '__main__':
-    app = QApplication(sys.argv)    # Initialize QApplication
+    app = QApplication(sys.argv)
     try:
         ex = main()
         sys.exit(ex.app.exec())
     except Exception as e:
+        # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
         msg.setWindowIcon(QIcon("images/QSnippet_16x16.png")) # fallback location
