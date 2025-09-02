@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "QSnippet"
-#define MyAppVersion "0.0.0"
+#define MyAppVersion "0.0.1"
 #define MyAppPublisher "Quynn Bell"
 #define MyAppURL "https://quynnbell.com"
 #define MyAppExeName "QSnippet.exe"
@@ -52,3 +52,36 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
+[Code]
+var
+  RemoveData: Boolean;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True; // Continue uninstall
+
+  if MsgBox('Do you want to remove all user data and logs too? ' +
+    'Choose "Yes" to remove everything, or "No" to keep your data for reinstall.',
+    mbConfirmation, MB_YESNO) = IDYES then
+  begin
+    RemoveData := True;
+  end
+  else
+  begin
+    RemoveData := False;
+  end;
+end;
+
+procedure DeinitializeUninstall();
+begin
+  if RemoveData then
+  begin
+    // Documents folder
+    DelTree(ExpandConstant('{userdocs}\QSnippet'), True, True, True);
+
+    // ProgramData logs
+    DelTree(ExpandConstant('{commonappdata}\QSnippet'), True, True, True);
+  end;
+
+  // Program files folder will already be removed automatically
+end;

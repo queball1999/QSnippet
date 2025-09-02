@@ -1,10 +1,7 @@
 import sys
 import os
 import logging
-import psutil
-import win32gui
-import win32con
-import win32process
+import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont, QIcon
@@ -317,43 +314,30 @@ class main():
             for name, size in font_dict.items()
         }
 
-    def check_if_already_running(self, process_name: str):
-        """Check if another instance of the given process is already running."""
+    def check_if_already_running(self, app_name="QSnippet"):
+        lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
         current_pid = os.getpid()
-        target_name = process_name.lower().removesuffix(".exe")
 
-        # Setup dialog message box once
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon(self.images["icon_16"]))
-
-        for proc in psutil.process_iter(["pid", "name"]):
+        if os.path.exists(lock_file):
             try:
-                pid = proc.info["pid"]
-                name = proc.info["name"]
-
-                if pid == current_pid or not name:
-                    # Not found, continue to next loop
-                    continue
-
-                if name.lower().removesuffix(".exe") == target_name:
+                with open(lock_file, "r") as f:
+                    pid = int(f.read().strip())
+                if psutil.pid_exists(pid):
+                    # Already running
+                    msg = QMessageBox()
+                    msg.setIcon(QMessageBox.Critical)
+                    msg.setWindowIcon(QIcon(self.images["icon_16"]))
                     msg.setWindowTitle("Already Running")
-                    msg.setText(f"Another instance of '{process_name}' is already running.")
+                    msg.setText(f"Another instance of '{app_name}' is already running.")
                     msg.exec()
                     sys.exit(1)
-            except psutil.AccessDenied:
-                msg.setWindowTitle("Access Denied")
-                msg.setText(f"Access was denied. Please try running as administrator.")
-                msg.exec()
-                sys.exit(1)
-            except psutil.NoSuchProcess:
-                # No Process Found, start app as normal
-                del current_pid
-                del target_name
-                del msg
-                del pid
-                del name
-                continue
+            except Exception:
+                pass  # corrupt lock file, ignore
+
+        # Write our PID
+        with open(lock_file, "w") as f:
+            f.write(str(current_pid))
+        return False
 
     def start_program(self):
         """ Create and show the main window/tray"""
@@ -368,9 +352,8 @@ if __name__ == '__main__':
     except Exception as e:
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon(main.images["icon_16"]))
+        msg.setWindowIcon(QIcon("images/QSnippet_16x16.png")) # fallback location
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()
         sys.exit(1)
-        
