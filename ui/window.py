@@ -19,6 +19,7 @@ class QSnippet(QMainWindow):
         self.app = parent.app
 
         self.setWindowTitle(self.parent.program_name)
+        print(self.parent.images["icon_16"])
         self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
 
         paths = FileUtils.get_default_paths()

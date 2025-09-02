@@ -1,9 +1,13 @@
 import sys
 import os
 import logging
+import psutil
+import win32gui
+import win32con
+import win32process
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 # Load custom modules
 from utils import *
 from ui import QSnippet
@@ -15,12 +19,12 @@ class main():
     def __init__(self):
         # Main Program Execution
         self.create_global_variables()
-        self.load_config()
-        self.load_settings()
+        self.load_config()      # config.yaml
+        self.load_settings()    # settings.yaml
         self.init_logger()
-        # self.ensure_snippets_file_exists()
-        self.scale_ui_cfg()
         self.fix_image_paths()
+        self.check_if_already_running(self.program_name) # Check if application is already running
+        self.scale_ui_cfg()
         self.start_program()
 
     def create_global_variables(self):
@@ -150,21 +154,6 @@ class main():
         except Exception as e:
             #logging.critical("Could not initialize logger class!")
             raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
-
-    def ensure_snippets_file_exists(self):
-        """
-        Ensure that the main config file exists, otherwise write defaults.
-        """
-        if not self.snippets_file.exists():
-            default = {
-                'snippets': {"enabled": True,
-                             "folder": None,
-                             "label": "Welcome",
-                             "paste_style": "Clipboard",
-                             "snippet": "Welcome to QSnippets",
-                             "trigger": "/welcome"}
-            }
-            FileUtils.write_yaml(path=self.snippets_file, data=default)
 
     def flatten_yaml(self, items: dict) -> bool:
         """ Flatten yaml to dict and assign to attributes. """
@@ -328,6 +317,44 @@ class main():
             for name, size in font_dict.items()
         }
 
+    def check_if_already_running(self, process_name: str):
+        """Check if another instance of the given process is already running."""
+        current_pid = os.getpid()
+        target_name = process_name.lower().removesuffix(".exe")
+
+        # Setup dialog message box once
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowIcon(QIcon(self.images["icon_16"]))
+
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                pid = proc.info["pid"]
+                name = proc.info["name"]
+
+                if pid == current_pid or not name:
+                    # Not found, continue to next loop
+                    continue
+
+                if name.lower().removesuffix(".exe") == target_name:
+                    msg.setWindowTitle("Already Running")
+                    msg.setText(f"Another instance of '{process_name}' is already running.")
+                    msg.exec()
+                    sys.exit(1)
+            except psutil.AccessDenied:
+                msg.setWindowTitle("Access Denied")
+                msg.setText(f"Access was denied. Please try running as administrator.")
+                msg.exec()
+                sys.exit(1)
+            except psutil.NoSuchProcess:
+                # No Process Found, start app as normal
+                del current_pid
+                del target_name
+                del msg
+                del pid
+                del name
+                continue
+
     def start_program(self):
         """ Create and show the main window/tray"""
         self.qsnippet = QSnippet(parent=self)
@@ -335,13 +362,15 @@ class main():
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)    # Initialize QApplication
-    # Commented out for testing. Need to restore.
-    """try:
+    try:
         ex = main()
         sys.exit(ex.app.exec())
     except Exception as e:
-        QMessageBox.critical(None, "Fatal Error", str(e))
-        sys.exit(1)"""
-    
-    ex = main()
-    sys.exit(ex.app.exec())
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowIcon(QIcon(main.images["icon_16"]))
+        msg.setWindowTitle("Fatal Error")
+        msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
+        msg.exec()
+        sys.exit(1)
+        

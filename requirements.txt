@@ -5,3 +5,4 @@ pynput
 watchdog
 pyinstaller
 pywin32
+psutil
