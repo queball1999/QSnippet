@@ -4,5 +4,7 @@ pyperclip
 pynput
 watchdog
 pyinstaller
-pywin32
 psutil
+
+# Windows-only
+pywin32; sys_platform == "win32"
