@@ -5,8 +5,14 @@ import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QFont, QIcon
+
 # Load custom modules
-from utils import *
+if sys.platform == "win32":
+    from utils.reg_utils import RegUtils
+else:
+    RegUtils = None
+
+from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
 from ui import QSnippet
 from ui.widgets import AppMessageBox
 
@@ -201,11 +207,12 @@ class main():
 
     def handle_start_up_reg(self):
         """ Based on settings, set the correct registry key for startup """
-        if self.skip_reg:
+        if self.skip_reg or RegUtils is None:
             return
-        elif not RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"] == True:
+
+        if not RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"]:
             RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        elif RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"] == False:
+        elif RegUtils.is_in_run_key("QSnippet") and not self.settings["general"]["start_at_boot"]:
             RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):
