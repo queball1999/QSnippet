@@ -66,7 +66,7 @@ class SnippetTable(QTreeView):
         """
         self.entries = entries
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style'])
+        self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style','Tags'])
         self.folders = {}  # folder_name -> QStandardItem
 
         for entry in entries:
@@ -80,7 +80,8 @@ class SnippetTable(QTreeView):
                 # Just one call to appendRow, supplying one item per column:
                 self.model.appendRow([
                     folder_item,
-                    QStandardItem(),  # just placeholders in the other columns
+                    QStandardItem(),
+                    QStandardItem(),
                     QStandardItem(),
                     QStandardItem()
                 ])
@@ -93,10 +94,12 @@ class SnippetTable(QTreeView):
             trigger_item = QStandardItem(entry.get('trigger',''))
             enabled_item = QStandardItem('On' if entry.get('enabled',False) else 'Off')
             style_item = QStandardItem(entry.get('paste_style',''))
+            tags_item = QStandardItem(entry.get('tags',''))
 
             # Store full entry dict on first column
             label_item.setData(entry, Qt.UserRole)
-            parent.appendRow([label_item, trigger_item, enabled_item, style_item])
+
+            parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
 
         self.expandAll()
 

@@ -6,6 +6,8 @@ import random
 from pathlib import Path
 from typing import List, Dict, Any
 
+from .file_utils import FileUtils
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,8 +35,12 @@ class SnippetDB:
                 )
             """)
 
-    def insert_snippet(self, entry: Dict[str, Any]):
-        """Insert or update a snippet by trigger."""
+    def insert_snippet(self, entry: Dict[str, Any]) -> bool:
+        """Insert a new snippet or update existing. Returns True if new, False if updated."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM snippets WHERE trigger = ?", (entry["trigger"],))
+        exists = cur.fetchone() is not None
+
         with self.conn:
             self.conn.execute("""
                 INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
@@ -48,6 +54,8 @@ class SnippetDB:
                     folder = excluded.folder,
                     tags = excluded.tags
             """, entry)
+
+        return not exists   # True if it was new
 
     def delete_snippet(self, trigger: str):
         with self.conn:
@@ -97,6 +105,13 @@ class SnippetDB:
         with self.conn:
             self.conn.execute("DELETE FROM snippets WHERE folder = ?", (folder,))
 
+    def get_all_folders(self) -> List[str]:
+        """Return a list of distinct folder names."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT DISTINCT folder FROM snippets WHERE folder IS NOT NULL AND folder != ''")
+        rows = cur.fetchall()
+        return [row[0] for row in rows if row[0]]
+
     def rename_snippet(self, trigger: str, new_label: str):
         with self.conn:
             self.conn.execute("UPDATE snippets SET label = ? WHERE trigger = ?", (new_label, trigger))
@@ -111,16 +126,39 @@ class SnippetDB:
         cur.execute(query, (wildcard, wildcard, wildcard, wildcard))
         columns = [col[0] for col in cur.description]
         return [dict(zip(columns, row)) for row in cur.fetchall()]
+    
+    def get_all_tags(self) -> list[str]:
+        """Return a list of distinct tags (split by comma)."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT DISTINCT tags FROM snippets WHERE tags IS NOT NULL AND tags != ''")
+        rows = cur.fetchall()
+        tags = set()
+        for row in rows:
+            for tag in row[0].split(","):
+                tag = tag.strip().lower()
+                if tag:
+                    tags.add(tag)
+
+        return sorted(tags)
+    
+    def delete_tag(self, tag: str):
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, tags FROM snippets WHERE tags LIKE ?", (f"%{tag}%",))
+        rows = cur.fetchall()
+        for row in rows:
+            sid, tags = row
+            tag_list = [t.strip() for t in tags.split(",") if t.strip().lower() != tag.lower()]
+            new_tags = ",".join(tag_list)
+            with self.conn:
+                self.conn.execute("UPDATE snippets SET tags = ? WHERE id = ?", (new_tags, sid))
 
     def export_to_yaml(self, yaml_path: Path):
-        data = {'snippets': self.get_all_snippets()}
-        with open(yaml_path, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(data, f)
+        snippets = self.get_all_snippets()
+        FileUtils.export_snippets_yaml(yaml_path, snippets)
 
     def import_from_yaml(self, yaml_path: Path):
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f) or {}
-        for entry in data.get('snippets', []):
+        snippets = FileUtils.import_snippets_yaml(yaml_path)
+        for entry in snippets:
             self.insert_snippet(entry)
 
     def close(self):

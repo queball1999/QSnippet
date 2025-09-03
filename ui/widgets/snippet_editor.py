@@ -133,16 +133,31 @@ class SnippetEditor(QWidget):
         try:
             if not self.form.validate():
                 return
+
             entry = self.form.get_entry()
-            print(f"Save Entry: {entry}")
-            self.main.snippet_db.insert_snippet(entry)
+
+            # returns True if new, False if updated
+            is_new = self.main.snippet_db.insert_snippet(entry)
+
             self.load_config()
             self.table.select_entry(entry)
             self.show_new_form()
             self.trigger_reload.emit()  # Flag
-            self.main.message_box.info('Snippet Saved Successfully!', title='Snippet Saved')
+
+            if is_new:
+                self.main.message_box.info(
+                    f'New snippet "{entry["label"]}" created successfully!',
+                    title="Snippet Created"
+                )
+            else:
+                self.main.message_box.info(
+                    f'Snippet "{entry["label"]}" updated successfully!',
+                    title="Snippet Updated"
+                )
+
         except Exception as e:
-            self.main.message_box.info(f'Snippet Save Failed: {e}', title='Save Failed')
+            self.main.message_box.error(f'Snippet Save Failed: {e}', title="Save Failed")
+
 
     def on_delete(self):
         entry = self.table.current_entry()

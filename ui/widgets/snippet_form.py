@@ -2,10 +2,11 @@ import logging
 import re
 from PySide6.QtWidgets import (
     QWidget, QLabel, QLineEdit, QTextEdit, QGridLayout,
-    QPushButton, QHBoxLayout
+    QPushButton, QHBoxLayout, QComboBox, QSizePolicy
 )
 from PySide6.QtCore import Signal, Qt
 from .QAnimatedSwitch import QAnimatedSwitch
+from .CheckableComboBox import CheckableComboBox
 
 class SnippetForm(QWidget):
     # Signals to notify parent
@@ -118,23 +119,24 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.folder_label = QLabel("Folder")
         self.folder_label.setToolTip("Folder which your snippet is organized in.")
 
-        self.folder_input = QLineEdit(text="Default", clearButtonEnabled=True)
+        self.folder_input = QComboBox()
+        self.folder_input.setEditable(True)
         self.folder_input.setToolTip("Folder which your snippet is organized in.")
+        self.folder_input.setInsertPolicy(QComboBox.NoInsert)
         self.folder_input.setPlaceholderText("Default")
-
-        # self.style_label = QLabel("Paste Style")
-        # self.style_label.setToolTip(self.paste_style_tooltip)
-
-        # self.style_combo = QComboBox()
-        # self.style_combo.addItems(['Clipboard', 'Keystroke'])
-        # self.style_combo.setToolTip(self.paste_style_tooltip)
+        self.folder_input.setMinimumWidth(250)
+        self.folder_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.populate_folder_input()
 
         self.tags_label = QLabel("Tags")
         self.tags_label.setToolTip("Comma-separated tags to help organize and search snippets.")
 
-        self.tags_input = QLineEdit()
-        self.tags_input.setPlaceholderText("email, support, greeting")
+        self.tags_input = CheckableComboBox()
         self.tags_input.setToolTip("Comma-separated tags to help organize and search snippets.")
+        self.tags_input.setMinimumWidth(250)
+        self.tags_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.tags_input.tagDeleteRequested.connect(self.on_delete_tag)
+        self.populate_tags_input()
 
         # Snippet Input
         self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
@@ -198,12 +200,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     def clear_form(self):
         """ Clear all entries in the form. """
-        self.folder_input.clear()
+        self.folder_input.setCurrentText("Default")
         self.new_input.clear()
         self.trigger_input.clear()
         self.snippet_input.clear()
         self.enabled_switch.setChecked(False)
-        # self.style_combo.setCurrentIndex(0)
         self.tags_input.clear()
         self.style_switch.setChecked(False)
         self.return_switch.setChecked(False)
@@ -213,30 +214,31 @@ Snippets come in handy for text you enter often or for standard messages you sen
         Populate form fields from snippet entry dict
         {folder, label, trigger, snippet, enabled, paste_style}
         """
-        self.folder_input.setText(entry.get('folder', ''))
         self.new_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
         self.snippet_input.setPlainText(entry.get('snippet', ''))
         self.enabled_switch.setChecked(entry.get('enabled', True))
-        # self.style_combo.setCurrentText(entry.get('paste_style', 'Clipboard'))
-        self.tags_input.setText(entry.get('tags', ''))
+        self.folder_input.setCurrentText(entry.get('folder', 'Default'))
         self.style_switch.setChecked(entry.get('paste_style', 'Clipboard') == 'Clipboard')
         self.return_switch.setChecked(entry.get('return_press', False))
+        # Tags
+        raw_tags = entry.get('tags', '')
+        tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
+        self.tags_input.setCheckedItems(tags)
 
     def get_entry(self) -> dict:
         """
         Read form fields into snippet entry dict
         """
-        folder = self.folder_input.text().strip() or 'Default'
+        folder = self.folder_input.currentText().strip() or 'Default'
         label = self.new_input.text().strip()
         trigger = self.trigger_input.text().strip()
         snippet = self.snippet_input.toPlainText()
         enabled = self.enabled_switch.isChecked()
-        # paste_style = self.style_combo.currentText()
-        # Standardize tags
-        raw_tags = self.tags_input.text().strip()
-        tags = ','.join(tag.strip().lower() for tag in raw_tags.split(',') if tag.strip())
-
+        # Tags
+        tags = self.tags_input.checkedItems()
+        tags_str = ','.join(tag.lower() for tag in tags)
+        # Paste Style
         paste_style = "Clipboard" if self.style_switch.isChecked() else "Keystroke"
         return_press = self.return_switch.isChecked()
 
@@ -248,8 +250,31 @@ Snippets come in handy for text you enter often or for standard messages you sen
             'enabled': bool(enabled),
             'paste_style': paste_style,
             'return_press': bool(return_press),
-            'tags': tags
+            'tags': tags_str
         }
+
+    def populate_folder_input(self):
+        # Populate from DB if available
+        folders = self.main.snippet_db.get_all_folders()
+
+        if folders:
+            self.folder_input.addItems(folders)
+        # Optionally add "Default" if not present
+        if "Default" not in folders:
+            self.folder_input.insertItem(0, "Default")
+            self.folder_input.setCurrentText("Default")
+
+    def populate_tags_input(self):
+        tags = self.main.snippet_db.get_all_tags()
+        self.tags_input.clear() # clear and repopulate
+        if tags:
+            self.tags_input.addItems(tags)
+
+    def on_delete_tag(self, tag):
+        self.main.snippet_db.delete_tag(tag)
+        self.main.message_box.info(f"Tag '{tag}' deleted from all snippets.", title="Tag Deleted")
+        self.parent.load_config()   # refresh table
+        self.populate_tags_input()
 
     def validate(self) -> bool:
         """Ensure required fields are populated"""
@@ -333,4 +358,5 @@ Snippets come in handy for text you enter often or for standard messages you sen
         super().showEvent(event)
         # force focus when the form is shown
         self.new_input.setFocus(Qt.TabFocusReason)
+        self.populate_tags_input()
 

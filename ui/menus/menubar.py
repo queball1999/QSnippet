@@ -1,11 +1,11 @@
 from PySide6.QtWidgets import QMenuBar
 from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Qt
-
+from utils import FileUtils
 
 class MenuBar(QMenuBar):
-    def __init__(self, parent=None):
+    def __init__(self, main=None, parent=None):
         super().__init__(parent)
+        self.main = main
         self.parent = parent
         self._build_menus()
 
@@ -25,6 +25,19 @@ class MenuBar(QMenuBar):
         save_act.setShortcut("Ctrl+S")
         save_act.triggered.connect(self.editor.on_save)
         file_menu.addAction(save_act)
+
+        file_menu.addSeparator()
+
+        # --- Import/Export actions ---
+        import_icon = QIcon.fromTheme("document-import")
+        import_act = QAction(import_icon, "Import", self)
+        import_act.triggered.connect(lambda: FileUtils.import_snippets_with_dialog(self, self.main.snippet_db))
+        file_menu.addAction(import_act)
+
+        export_icon = QIcon.fromTheme("document-export")
+        export_act = QAction(export_icon, "Export", self)
+        export_act.triggered.connect(lambda: FileUtils.export_snippets_with_dialog(self, self.main.snippet_db))
+        file_menu.addAction(export_act)
 
         file_menu.addSeparator()
 

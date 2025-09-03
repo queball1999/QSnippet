@@ -2,7 +2,10 @@ import os
 import platform
 import logging
 import yaml
+from datetime import datetime
 from pathlib import Path
+from PySide6.QtWidgets import QFileDialog, QMessageBox
+
 
 class FileUtils:
     """
@@ -38,6 +41,77 @@ class FileUtils:
         except Exception as e:
             logging.error(f"Failed to write YAML file {path}: {e}")
             raise
+
+    @staticmethod
+    def export_snippets_yaml(path: Path, snippets: list[dict]):
+        """Export snippets to a YAML file."""
+        try:
+            data = {"snippets": snippets}
+            FileUtils.write_yaml(path, data)
+            logging.info(f"Exported {len(snippets)} snippets to {path}")
+        except Exception as e:
+            logging.error(f"Failed to export snippets to YAML: {e}")
+            raise
+
+    @staticmethod
+    def import_snippets_yaml(path: Path) -> list[dict]:
+        """Import snippets from a YAML file and return as a list of dicts."""
+        try:
+            data = FileUtils.read_yaml(path)
+            snippets = data.get("snippets", [])
+            if not isinstance(snippets, list):
+                raise ValueError("Invalid YAML format: 'snippets' must be a list.")
+            logging.info(f"Imported {len(snippets)} snippets from {path}")
+            return snippets
+        except Exception as e:
+            logging.error(f"Failed to import snippets from YAML: {e}")
+            raise
+
+    @staticmethod
+    def import_snippets_with_dialog(parent, db):
+        path, _ = QFileDialog.getOpenFileName(
+            parent,
+            "Import Snippets from YAML",
+            str(Path.home()),
+            "YAML Files (*.yaml *.yml)"
+        )
+        if not path:
+            return 0
+
+        snippets = FileUtils.import_snippets_yaml(Path(path))
+        new_count = 0
+        updated_count = 0
+
+        for entry in snippets:
+            is_new = db.insert_snippet(entry)
+            if is_new:
+                new_count += 1
+            else:
+                updated_count += 1
+
+        QMessageBox.information(
+            parent,
+            "Import Complete",
+            f"Imported {new_count} new snippets.\nUpdated {updated_count} existing snippets."
+        )
+        return new_count + updated_count
+
+
+    @staticmethod
+    def export_snippets_with_dialog(parent, db):
+        date = datetime.now().date()
+        path, _ = QFileDialog.getSaveFileName(
+            parent,
+            "Export Snippets to YAML",
+            str(Path.home() / f"qsnippets-export-{date}.yaml"),
+            "YAML Files (*.yaml *.yml)"
+        )
+        if not path:
+            return 0
+        snippets = db.get_all_snippets()
+        FileUtils.export_snippets_yaml(Path(path), snippets)
+        QMessageBox.information(parent, "Export Complete", f"Exported {len(snippets)} snippets.")
+        return len(snippets)
 
     @staticmethod
     def file_exists(path: Path) -> bool:

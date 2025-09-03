@@ -52,7 +52,7 @@ class QSnippet(QMainWindow):
             self.show()
 
     def init_menubar(self):
-        self.menubar = MenuBar(self)
+        self.menubar = MenuBar(main=self.parent, parent=self)
         self.setMenuBar(self.menubar)
 
     def init_toolbar(self):
