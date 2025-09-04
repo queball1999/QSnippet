@@ -43,7 +43,7 @@ jobs:
           echo "Program name: $NAME"
 
       - name: Run build script
-        run: ./tools/build.sh
+        run: chmod +x tools/build.sh && ./tools/build.sh
         shell: bash
 
       - name: Build Inno Setup Installer (Windows only)
