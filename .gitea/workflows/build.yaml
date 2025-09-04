@@ -12,6 +12,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
       - name: Checkout repo
         uses: actions/checkout@v3
 
@@ -84,8 +88,8 @@ jobs:
       - name: Read app version and name
         id: versioning
         run: |
-          VERSION=$(yq -r .app.version config.yaml)
-          NAME=$(yq -r .app.name config.yaml)
+          VERSION=$(yq -r .version config.yaml)
+          NAME=$(yq -r .program_name config.yaml)
           echo "APP_VERSION=$VERSION" >> $GITEA_ENV
           echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
 
