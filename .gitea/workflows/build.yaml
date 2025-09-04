@@ -1,0 +1,100 @@
+name: Build and Release QSnippet Binaries
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyyaml
+
+      - name: Install yq (for version parsing)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo wget https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64 -O /usr/bin/yq
+          sudo chmod +x /usr/bin/yq
+
+      - name: Read app version and name from config.yaml
+        id: versioning
+        run: |
+          VERSION=$(yq -r .app.version config.yaml)
+          NAME=$(yq -r .app.name config.yaml)
+          echo "APP_VERSION=$VERSION" >> $GITEA_ENV
+          echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
+          echo "App version: $VERSION"
+          echo "Program name: $NAME"
+
+      - name: Run build script
+        run: ./tools/build.sh
+        shell: bash
+
+      - name: Build Inno Setup Installer (Windows only)
+        if: matrix.os == 'windows-latest'
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" QSnippet_v2.iss
+
+      - name: Rename and prepare artifacts
+        run: |
+          mkdir -p release
+          OS_NAME=$(echo ${{ matrix.os }} | cut -d'-' -f1)
+          cp output/$OS_NAME/* release/
+
+      - name: Upload release artifacts to Gitea
+        if: ${{ gitea.ref_name == 'main' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-${{ matrix.os }}
+          path: release/
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Read app version and name
+        id: versioning
+        run: |
+          VERSION=$(yq -r .app.version config.yaml)
+          NAME=$(yq -r .app.name config.yaml)
+          echo "APP_VERSION=$VERSION" >> $GITEA_ENV
+          echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: dist/
+
+      - name: Tag the release
+        run: |
+          git config user.name "Gitea Actions"
+          git config user.email "actions@gitea.io"
+          git tag -a "v${{ env.APP_VERSION }}" -m "Release v${{ env.APP_VERSION }}"
+          git push origin "v${{ env.APP_VERSION }}"
+
+      - name: Publish release to Gitea
+        run: |
+          gitea release create "v${{ env.APP_VERSION }}" \
+            --title "QSnippet v${{ env.APP_VERSION }}" \
+            --note "Auto-built release from CI" \
+            --asset dist/**

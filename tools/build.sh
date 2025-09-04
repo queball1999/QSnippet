@@ -2,6 +2,9 @@
 
 set -e
 
+# Extract version from config.yaml using Python
+VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['app']['version'])")
+
 APP_NAME="QSnippet"
 ENTRY="QSnippet.py"
 DIST_DIR="output"
@@ -10,29 +13,43 @@ ICON_LINUX="./images/QSnippet.png"
 ICON_WINDOWS="./images/QSnippet.ico"
 ICON_MAC="./images/QSnippet.icns"
 
-OS=$(uname -s)
 PYINSTALLER_ARGS="--noconfirm --onefile --windowed"
 
-echo "Building $APP_NAME on $OS..."
+echo "Building $APP_NAME v$VERSION..."
 
-# Clean previous build artifacts
+# Clean old build artifacts
 rm -rf "$DIST_DIR" "$BUILD_DIR" "$APP_NAME.spec"
 
-# Detect and build per OS
+# Detect OS
+OS=$(uname -s)
+echo "Detected OS: $OS"
+
 case "$OS" in
   Linux*)
-    echo "Target: Linux"
-    pyinstaller $PYINSTALLER_ARGS --icon="$ICON_LINUX" --distpath "$DIST_DIR/linux" "$ENTRY"
+    echo "Building for Linux..."
+    pyinstaller $PYINSTALLER_ARGS \
+      --icon="$ICON_LINUX" \
+      --distpath "$DIST_DIR/linux" \
+      --name "$APP_NAME-$VERSION" \
+      "$ENTRY"
     ;;
 
   Darwin*)
-    echo "Target: macOS"
-    pyinstaller $PYINSTALLER_ARGS --icon="$ICON_MAC" --distpath "$DIST_DIR/macos" "$ENTRY"
+    echo "Building for macOS..."
+    pyinstaller $PYINSTALLER_ARGS \
+      --icon="$ICON_MAC" \
+      --distpath "$DIST_DIR/macos" \
+      --name "$APP_NAME-$VERSION" \
+      "$ENTRY"
     ;;
 
   MINGW*|MSYS*|CYGWIN*|Windows_NT)
-    echo "Target: Windows"
-    pyinstaller $PYINSTALLER_ARGS --icon="$ICON_WINDOWS" --distpath "$DIST_DIR/windows" "$ENTRY"
+    echo "Building for Windows..."
+    pyinstaller $PYINSTALLER_ARGS \
+      --icon="$ICON_WINDOWS" \
+      --distpath "$DIST_DIR/windows" \
+      --name "$APP_NAME-$VERSION" \
+      "$ENTRY"
     ;;
 
   *)
@@ -41,4 +58,4 @@ case "$OS" in
     ;;
 esac
 
-echo "Build complete for $OS."
+echo "Build complete: $DIST_DIR"
