@@ -53,6 +53,8 @@ class QSnippet(QMainWindow):
 
     def init_menubar(self):
         self.menubar = MenuBar(main=self.parent, parent=self)
+        self.menubar.importAction.connect(self.handle_import_action)
+        self.menubar.exportAction.connect(self.handle_export_action)
         self.setMenuBar(self.menubar)
 
     def init_toolbar(self):
@@ -108,6 +110,14 @@ class QSnippet(QMainWindow):
         self.parent.settings["general"]["start_at_boot"] = enabled
         FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
         QTimer.singleShot(1000, self.unset_skip_reg)
+
+    def handle_import_action(self):
+        FileUtils.import_snippets_with_dialog(self, self.parent.snippet_db)
+        self.editor.load_config() # Trigger refresh of snippets
+
+    def handle_export_action(self):
+        FileUtils.export_snippets_with_dialog(self, self.parent.snippet_db)
+        self.editor.load_config() # Trigger refresh of snippets
 
     def unset_skip_reg(self):
         self.parent.skip_reg = False

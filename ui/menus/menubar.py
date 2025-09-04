@@ -1,8 +1,12 @@
 from PySide6.QtWidgets import QMenuBar
 from PySide6.QtGui import QIcon, QAction
+from PySide6.QtCore import Signal
 from utils import FileUtils
 
 class MenuBar(QMenuBar):
+    importAction = Signal()
+    exportAction = Signal()
+
     def __init__(self, main=None, parent=None):
         super().__init__(parent)
         self.main = main
@@ -31,12 +35,12 @@ class MenuBar(QMenuBar):
         # --- Import/Export actions ---
         import_icon = QIcon.fromTheme("document-import")
         import_act = QAction(import_icon, "Import", self)
-        import_act.triggered.connect(lambda: FileUtils.import_snippets_with_dialog(self, self.main.snippet_db))
+        import_act.triggered.connect(self.importAction.emit)
         file_menu.addAction(import_act)
 
         export_icon = QIcon.fromTheme("document-export")
         export_act = QAction(export_icon, "Export", self)
-        export_act.triggered.connect(lambda: FileUtils.export_snippets_with_dialog(self, self.main.snippet_db))
+        export_act.triggered.connect(self.exportAction.emit)
         file_menu.addAction(export_act)
 
         file_menu.addSeparator()
