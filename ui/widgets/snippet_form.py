@@ -69,6 +69,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.instructions = QLabel(self.instructions_text)
         self.instructions.setWordWrap(True)
         self.instructions.setFont(self.main.small_font_size)
+        self.instructions.setFixedHeight(self.instructions.sizeHint().height())
+        self.instructions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
          # Enabled Switch
         start_state = "on" if self.mode == "new" else "off" # set state based on mode
@@ -221,7 +223,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.folder_input.setCurrentText(entry.get('folder', 'Default'))
         self.style_switch.setChecked(entry.get('paste_style', 'Clipboard') == 'Clipboard')
         self.return_switch.setChecked(entry.get('return_press', False))
+
         # Tags
+        self.populate_tags_input()  # load all tags
+
+        # Set all snippet tags as checked
         raw_tags = entry.get('tags', '')
         tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
         self.tags_input.setCheckedItems(tags)
@@ -235,9 +241,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         trigger = self.trigger_input.text().strip()
         snippet = self.snippet_input.toPlainText()
         enabled = self.enabled_switch.isChecked()
+
         # Tags
         tags = self.tags_input.checkedItems()
         tags_str = ','.join(tag.lower() for tag in tags)
+        
         # Paste Style
         paste_style = "Clipboard" if self.style_switch.isChecked() else "Keystroke"
         return_press = self.return_switch.isChecked()

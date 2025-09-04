@@ -308,7 +308,7 @@ class main():
                     pid = int(f.read().strip())
                 if psutil.pid_exists(pid):
                     # Already running
-                    self.message_box.info(f"Another instance of '{app_name}' is already running.",
+                    self.message_box.info(f"Another instance of '{app_name}' is already running.\nPlease check the task tray for the app icon.",
                                           title="Already Running")
                     sys.exit(1)
             except Exception:

@@ -17,6 +17,7 @@ class QSnippet(QMainWindow):
         self.parent = parent
         self.cfg = parent.cfg
         self.app = parent.app
+        self.state = "stopped"
 
         self.setWindowTitle(self.parent.program_name)
         self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
@@ -85,19 +86,37 @@ class QSnippet(QMainWindow):
 
     def start_service(self):
         self.snippet_service.start()
+        self.state = "running"
         if self.editor.isVisible():
             self.statusBar().showMessage(f"Service status: Running")
 
     def stop_service(self):
         self.snippet_service.stop()
+        self.state = "stopped"
         if self.editor.isVisible():
             self.statusBar().showMessage(f"Service status: Stopped")
 
-    def check_service_status(self):
-        if not self.snippet_service._thread.is_alive():
-            self.statusBar().showMessage(f"Service status: Stopped")
-        else:
+    def pause_service(self):
+        self.snippet_service.pause()
+        self.state = "paused"
+        if self.editor.isVisible():
+            self.statusBar().showMessage(f"Service status: Paused")
+
+    def resume_service(self):
+        self.snippet_service.resume()
+        self.state = "running"
+        if self.editor.isVisible():
             self.statusBar().showMessage(f"Service status: Running")
+
+    def check_service_status(self):
+        if self.snippet_service._thread.is_alive() and self.state == "running":
+            self.statusBar().showMessage(f"Service status: Running")
+        elif self.state == "paused":
+            self.statusBar().showMessage(f"Service status: Paused")
+        elif self.state == "stopped":
+            self.statusBar().showMessage(f"Service status: Stopped")
+        else:   # default to error message
+            self.statusBar().showMessage(f"Service status: Error")
 
     def handle_startup_signal(self, enabled: bool):
         if enabled:

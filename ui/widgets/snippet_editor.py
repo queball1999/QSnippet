@@ -1,5 +1,6 @@
 import yaml
 from pathlib import Path
+import re
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
@@ -23,7 +24,7 @@ class SnippetEditor(QWidget):
         self.parent = parent
 
         self.initUI()
-        self.load_config()
+        self.load_snippets()
 
     def initUI(self):
         self.splitter = QSplitter(Qt.Horizontal, self)
@@ -48,7 +49,7 @@ class SnippetEditor(QWidget):
         # Left: snippet table
         self.table = SnippetTable(main=self.main, parent=self)
         self.table.entrySelected.connect(self.on_entry_selected)
-        self.table.refreshSignal.connect(self.load_config)
+        self.table.refreshSignal.connect(self.load_snippets)
         # folder signals
         self.table.addFolder.connect(self.on_add_folder)
         self.table.addSubFolder.connect(self.on_add_subfolder)
@@ -90,21 +91,8 @@ class SnippetEditor(QWidget):
         vlay.addWidget(self.splitter)
         container.setLayout(vlay)
         self.setLayout(vlay)
-
-    def load_config_old(self):
-        # Set status label
-        old_text = self.parent.statusBar().currentMessage()
-        self.parent.statusBar().showMessage(f"Loading Snippets...")
-        # Load config
-        if not self.config_path.exists():
-            return
-        data = yaml.safe_load(self.config_path.read_text()) or {}
-        self.table.load_entries(data.get('snippets', []))
-
-        # Restore original text
-        self.parent.statusBar().showMessage(old_text)
     
-    def load_config(self):
+    def load_snippets(self):
         old_text = self.parent.statusBar().currentMessage()
         self.parent.statusBar().showMessage(f"Loading Snippets...")
         snippets = self.main.snippet_db.get_all_snippets()
@@ -120,10 +108,12 @@ class SnippetEditor(QWidget):
             self.stack.setCurrentWidget(self.home_widget)    
 
     def show_home_widget(self):
+        self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
 
     def show_new_form(self):
+        self.parent.pause_service()  # pause snippet service
         # Clear the table selection and form inputs, then swap in form
         self.table.clear_selection()
         self.form.clear_form()
@@ -133,13 +123,23 @@ class SnippetEditor(QWidget):
         try:
             if not self.form.validate():
                 return
-
+            
             entry = self.form.get_entry()
 
+            # Detect circular reference
+            all_snips = self.main.snippet_db.get_all_snippets()
+            if self.detect_circular_reference(entry, all_snips):
+                self.main.message_box.error(
+                    f'Snippet "{entry["label"]}" references itself or forms a circular chain.',
+                    title="Invalid Snippet"
+                )
+                return
+            
+            # Insert the snippet into the DB
             # returns True if new, False if updated
             is_new = self.main.snippet_db.insert_snippet(entry)
 
-            self.load_config()
+            self.load_snippets()
             self.table.select_entry(entry)
             self.show_new_form()
             self.trigger_reload.emit()  # Flag
@@ -158,14 +158,34 @@ class SnippetEditor(QWidget):
         except Exception as e:
             self.main.message_box.error(f'Snippet Save Failed: {e}', title="Save Failed")
 
-
     def on_delete(self):
         entry = self.table.current_entry()
         if not entry:
             return
         self.main.snippet_db.delete_snippet(entry["trigger"])
-        self.load_config()
+        self.load_snippets()
         self.stack.setCurrentIndex(0)
+
+    # ----- Helper for on_save -----
+    def detect_circular_reference(self, entry, all_snippets) -> bool:
+        """Return True if entry would introduce a circular reference."""
+        trigger = entry["trigger"]
+        visited = set()
+
+        def dfs(current_trigger):
+            if current_trigger in visited:
+                return True
+            visited.add(current_trigger)
+            snippet = next((s for s in all_snippets if s["trigger"] == current_trigger), None)
+            if not snippet:
+                return False
+            matches = re.findall(r"\{/(.+?)\}", snippet["snippet"])
+            for ref in matches:
+                if ref == trigger or dfs(ref):
+                    return True
+            return False
+
+        return dfs(trigger)
 
     # ----- Context Menu Actions -----
     def on_add_folder(self, parent_item):
@@ -191,7 +211,7 @@ class SnippetEditor(QWidget):
         if not ok or not new.strip() or new.strip() == old:
             return
         self.main.snippet_db.rename_folder(old, new.strip())
-        self.load_config()
+        self.load_snippets()
         self.main.message_box.info(f'"{old}" → "{new.strip()}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item):
@@ -212,7 +232,7 @@ class SnippetEditor(QWidget):
             return
         
         self.main.snippet_db.delete_folder(name)
-        self.load_config()
+        self.load_snippets()
 
     def on_edit_snippet(self, entry):
         self.on_entry_selected(entry)
@@ -227,7 +247,7 @@ class SnippetEditor(QWidget):
             return
         
         self.main.snippet_db.rename_snippet(entry['trigger'], new_label.strip())
-        self.load_config()
+        self.load_snippets()
         self.main.message_box.info(f'"{old_label}" → "{new_label.strip()}"', title='Snippet Renamed')
     
     def on_delete_snippet(self, entry):
@@ -242,7 +262,7 @@ class SnippetEditor(QWidget):
             return
 
         self.main.snippet_db.delete_snippet(entry['trigger'])
-        self.load_config()
+        self.load_snippets()
 
     def run_search(self):
         keyword = self.search_bar.text().strip()

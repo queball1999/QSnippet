@@ -33,7 +33,6 @@ class SnippetService():
 
     def refresh(self):
         """Force a reload of snippets from the database."""
-        print('reload!')
         self.expander.refresh_snippets()
 
     def _on_snippets_updated(self, new_snippets: list):
@@ -77,3 +76,13 @@ class SnippetService():
         self._stop_evt.set()
         self._thread.join(timeout=5)
         logging.info("SnippetService stopped.")
+
+    def pause(self):
+        """ Pause the snippet service momentarily """
+        logging.info("Pausing SnippetService…")
+        self.expander.pause()
+
+    def resume(self):
+        """ Resume the snippet service """
+        logging.info("Resuming SnippetService…")
+        self.expander.resume()

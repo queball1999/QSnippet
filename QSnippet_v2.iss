@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "QSnippet"
-#define MyAppVersion "0.0.1"
+#define MyAppVersion "0.0.2"
 #define MyAppPublisher "Quynn Bell"
 #define MyAppURL "https://quynnbell.com"
 #define MyAppExeName "QSnippet.exe"
@@ -21,13 +21,13 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DisableDirPage=yes
 DisableProgramGroupPage=yes
-LicenseFile=P:\Coding\Gitea Repos\QSnippet\LICENSE
+LicenseFile={#SourcePath}\LICENSE
 ; Remove the following line to run in administrative install mode (install for all users.)
 ; PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=P:\Coding\Gitea Repos\QSnippet\output
+OutputDir={#SourcePath}\output
 OutputBaseFilename=QSnippet-{#MyAppVersion}
-SetupIconFile=P:\Coding\Gitea Repos\QSnippet\images\QSnippet.ico
+SetupIconFile={#SourcePath}\images\QSnippet.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -39,10 +39,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "P:\Coding\Gitea Repos\QSnippet\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "P:\Coding\Gitea Repos\QSnippet\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "P:\Coding\Gitea Repos\QSnippet\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

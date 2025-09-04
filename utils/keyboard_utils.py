@@ -2,6 +2,7 @@ import logging
 import platform
 import pyperclip
 import re
+import datetime
 from pynput import keyboard
 from utils.snippet_db import SnippetDB
 
@@ -14,6 +15,7 @@ class SnippetExpander():
         self.snippets = self.snippets_db.get_all_snippets()
         self.parent = parent
 
+        self.disabled = False
         self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)
         self.keys_to_ignore = [keyboard.Key.space, keyboard.Key.shift, keyboard.Key.enter, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r]
         self.buffer = ""
@@ -68,6 +70,10 @@ class SnippetExpander():
     def _on_key_press(self, key):
         """ This function is called on every key press. """
         try:
+            # Detect if paused and skip if true
+            if self.disabled:
+                return
+            
             if self._handle_navigation_and_deletion(key):
                 return
             
@@ -163,8 +169,10 @@ class SnippetExpander():
                 self.controller.release(ch)
 
     def _expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool):
-        trigger_len = len(trigger)
+        # Preprocess for placeholders and nested snippets
+        snippet = self.process_snippet_text(snippet)
 
+        trigger_len = len(trigger)
         trigger_start = self.buffer.rfind(trigger)
         if trigger_start == -1:
             logger.warning("Trigger not found in buffer. Aborting expansion.")
@@ -191,11 +199,71 @@ class SnippetExpander():
             self.controller.press(keyboard.Key.enter)
             self.controller.release(keyboard.Key.enter) 
 
-        #self.is_expanding = False   # resume detection
+    def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
+        """Replace placeholders and nested snippet references with loop protection."""
+        if seen is None:
+            seen = set()
 
+        if depth > 5:  # configurable max depth
+            logger.warning("Max snippet recursion depth reached.")
+            return text
+
+        # --- Dynamic placeholders ---
+        now = datetime.datetime.now()
+        replacements = {
+            "{date}": now.strftime("%Y-%m-%d"),
+            "{time}": now.strftime("%H:%M"),
+            "{datetime}": now.strftime("%Y-%m-%d %H:%M"),
+            "{location}": "Unknown Location",
+        }
+        for key, val in replacements.items():
+            text = text.replace(key, val)
+
+        # --- Nested snippets ---
+        nested_pattern = re.compile(r"\{\W(.+?)\}")
+        matches = list(nested_pattern.finditer(text))
+
+        if not matches:
+            return text
+
+        result = []
+        last_idx = 0
+
+        for match in matches:
+            result.append(text[last_idx:match.start()])
+            trigger = match.group(0)[1:-1]
+
+            if trigger in seen:     # detect circular call
+                logger.error(f"Detected circular reference for trigger '{trigger}'")
+                replacement = f"{{/{trigger}}}"
+
+            elif trigger in self.trigger_map:   # check for trigger in map
+                seen.add(trigger)
+                nested_snip = self.trigger_map[trigger]["snippet"]
+                replacement = self.process_snippet_text(
+                    nested_snip, depth + 1, seen
+                )
+                seen.remove(trigger)
+
+            else:   # do nothing
+                replacement = f"{{/{trigger}}}"
+
+            result.append(replacement)
+            last_idx = match.end()
+
+        result.append(text[last_idx:])
+        return "".join(result)
+
+    # ---- Start/Stop Functions -----
     def start(self):
-        logging.info("Starting keyboard listener...")
         self.listener.start()
 
     def stop(self):
         self.listener.stop()
+
+    def pause(self):
+        self.disabled = True
+        self.clear_buffer()
+
+    def resume(self):
+        self.disabled = False
