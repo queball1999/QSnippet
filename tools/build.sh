@@ -3,7 +3,7 @@
 set -e
 
 # Extract version from config.yaml using Python
-VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['app']['version'])")
+VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['version'])")
 
 APP_NAME="QSnippet"
 ENTRY="QSnippet.py"
