@@ -54,8 +54,17 @@ jobs:
       - name: Rename and prepare artifacts
         run: |
           mkdir -p release
-          OS_NAME=$(echo ${{ matrix.os }} | cut -d'-' -f1)
-          cp output/$OS_NAME/* release/
+
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            PLATFORM="linux"
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            PLATFORM="macos"
+          else
+            PLATFORM="windows"
+          fi
+
+          cp output/$PLATFORM/* release/
+        shell: bash
 
       - name: Upload release artifacts to Gitea
         if: ${{ gitea.ref_name == 'main' }}
