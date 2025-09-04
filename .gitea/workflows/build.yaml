@@ -35,8 +35,8 @@ jobs:
       - name: Read app version and name from config.yaml
         id: versioning
         run: |
-          VERSION=$(yq -r .app.version config.yaml)
-          NAME=$(yq -r .app.name config.yaml)
+          VERSION=$(yq -r .version config.yaml)
+          NAME=$(yq -r .name config.yaml)
           echo "APP_VERSION=$VERSION" >> $GITEA_ENV
           echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
           echo "App version: $VERSION"
