@@ -1,5 +1,7 @@
 general:
   start_at_boot: false
   show_ui_at_start: false
+  disable_notices: false
+  dismissed_notices: []
 appearance:
   theme: dark

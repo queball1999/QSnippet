@@ -1,0 +1,12 @@
+id: "notice-2025-09-03"
+title: "QSnippet Updates - 09/03/25"
+message: |
+  A day full of refinements and UI enhancements.
+
+  **Features**
+    - Added dropdowns for folders and tags - better snippet organization.
+    - Implemented win32 detection for registry utilities.
+
+  **Fixes**
+    - Corrected RegUtils not being defined in main.
+    - Table now refreshes automatically when importing/exporting snippets.

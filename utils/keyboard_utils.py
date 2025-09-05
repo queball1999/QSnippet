@@ -210,11 +210,37 @@ class SnippetExpander():
 
         # --- Dynamic placeholders ---
         now = datetime.datetime.now()
+
+        # Greeting detection
+        hour = now.hour
+        if 5 <= hour < 11:
+            greeting = "Good Morning"
+        elif 11 <= hour < 17:
+            greeting = "Good Afternoon"
+        elif 17 <= hour < 22:
+            greeting = "Good Evening"
+        else:
+            greeting = "Hello"  # fallback
+
         replacements = {
-            "{date}": now.strftime("%Y-%m-%d"),
-            "{time}": now.strftime("%H:%M"),
-            "{datetime}": now.strftime("%Y-%m-%d %H:%M"),
-            "{location}": "Unknown Location",
+            # Dates
+            "{date}": now.strftime("%Y-%m-%d"),           # 2025-09-04
+            "{date_long}": now.strftime("%B %d, %Y"),     # September 04, 2025
+            "{weekday}": now.strftime("%A"),              # Thursday
+            "{month}": now.strftime("%B"),                # September
+            "{year}": now.strftime("%Y"),                 # 2025
+
+            # Times
+            "{time}": now.strftime("%H:%M"),              # 14:35
+            "{time_ampm}": now.strftime("%I:%M %p"),      # 02:35 PM
+            "{hour}": now.strftime("%H"),                 # 14
+            "{minute}": now.strftime("%M"),               # 35
+            "{second}": now.strftime("%S"),               # 07
+            "{datetime}": now.strftime("%Y-%m-%d %H:%M"), # 2025-09-04 14:35
+
+            # Contextual
+            "{greeting}": greeting,                       # Good afternoon
+            "{location}": "Unknown Location",             # still placeholder
         }
         for key, val in replacements.items():
             text = text.replace(key, val)

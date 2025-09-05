@@ -158,6 +158,10 @@ class FileUtils:
             raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
     
     def create_config_file(path):
+        if path.exists():
+            logging.debug(f"Config file already exists: {path}, skipping creation.")
+            return
+    
         default_config = {
         "program_name": "QSnippet",
         "version": "0.0.0",
@@ -252,10 +256,16 @@ class FileUtils:
         FileUtils.write_yaml(path, default_config)
 
     def create_settings_file(path):
+        if path.exists():
+            logging.debug(f"Settings file already exists: {path}, skipping creation.")
+            return
+        
         default_settings = {
             "general": {
                 "start_at_boot": False,
-                "show_ui_at_start": True
+                "show_ui_at_start": True,
+                "disable_notices": False,
+                "dismissed_notices": []
             },
             "appearance": {
                 "theme": "dark"
@@ -264,6 +274,10 @@ class FileUtils:
         FileUtils.write_yaml(path, default_settings)
 
     def create_snippets_db_file(path):
+        if path.exists():
+            logging.debug(f"DB already exists: {path}, skipping creation.")
+            return
+        
         from .snippet_db import SnippetDB
         db = SnippetDB(path)
         db._create_table()

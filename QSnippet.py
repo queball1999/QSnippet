@@ -1,9 +1,11 @@
 import sys
 import os
 import logging
+import yaml
+from pathlib import Path
 import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, QTimer
 from PySide6.QtGui import QFont, QIcon
 
 # Load custom modules
@@ -27,10 +29,14 @@ class main():
         self.load_settings()    # settings.yaml
         self.init_logger()
         self.fix_image_paths()
+        
         self.message_box = AppMessageBox(icon_path=self.images["icon_16"])
         self.check_if_already_running(self.program_name) # Check if application is already running
+        QTimer.singleShot(500, self.check_notices)
+
         self.scale_ui_cfg()
         self.start_program()
+        
 
     def create_global_variables(self):
         # Global Configuration Variables
@@ -318,6 +324,47 @@ class main():
         with open(lock_file, "w") as f:
             f.write(str(current_pid))
         return False
+    
+    def check_notices(self):
+        """Load notices and show any that aren't dismissed or globally disabled."""
+        notices_dir = Path(self.working_dir) / "notices"
+        notices_dir.mkdir(exist_ok=True)
+
+        general_settings = self.settings.setdefault("general", {})
+        if general_settings.get("disable_notices", False):
+            logger.info("Notices disabled globally.")
+            return
+
+        dismissed = set(general_settings.get("dismissed_notices", []))
+        settings_changed = False
+
+        for notice_file in sorted(notices_dir.glob("*.yaml")):
+            try:
+                notice = yaml.safe_load(notice_file.read_text())
+                nid = notice.get("id")
+                if not nid or nid in dismissed:
+                    continue
+
+                title = notice.get("title", "Update Notice")
+                message = notice.get("message", "")
+
+                never_show = self.message_box.notice(message, title, "Never show again")
+
+                if never_show:
+                    general_settings["disable_notices"] = True
+                    settings_changed = True
+                    break  # stop checking more notices if globally disabled
+
+                dismissed.add(nid)
+                settings_changed = True
+
+            except Exception as e:
+                logger.error(f"Failed to load notice {notice_file}: {e}")
+
+        if settings_changed:
+            general_settings["dismissed_notices"] = list(dismissed)
+            FileUtils.write_yaml(self.settings_file, self.settings)
+
 
     def start_program(self):
         """ Create and show the main window/tray"""

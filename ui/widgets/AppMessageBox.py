@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QCheckBox, QSizePolicy
 from PySide6.QtGui import QIcon
 
 class AppMessageBox(QMessageBox):
@@ -32,3 +32,26 @@ class AppMessageBox(QMessageBox):
         self._setup(title, text, QMessageBox.Question, buttons)
         self.setDefaultButton(default_button)
         return self.exec()
+    
+    def notice(self, text: str, title: str = "Notice", checkbox_text: str = "Never show again") -> bool:
+        """
+        Show a notice with a single OK button and a 'Never show again' checkbox.
+        Returns True if the checkbox was checked.
+        """
+        box = QMessageBox()
+        box.setWindowIcon(QIcon(self._icon_path) if self._icon_path else QIcon())
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setIcon(QMessageBox.Information)
+        box.setStandardButtons(QMessageBox.Ok)
+
+        self.setCheckBox(None)
+        checkbox = QCheckBox(checkbox_text)
+        box.setCheckBox(checkbox)
+
+        box.exec()
+        return checkbox.isChecked()
+    
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.resize(max(self.width(), 500), max(self.height(), 250))

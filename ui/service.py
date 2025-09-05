@@ -44,7 +44,7 @@ class SnippetService():
         while not self._stop_evt.is_set():
             time.sleep(1)
 
-        logging.info("SnippetService monitor shutting down…")
+        logging.info("SnippetService monitor shutting down...")
         self.expander.stop()
         # self.loader.stop()
 
@@ -72,17 +72,17 @@ class SnippetService():
         if not self._thread:
             return
 
-        logging.info("Stopping SnippetService…")
+        logging.info("Stopping SnippetService...")
         self._stop_evt.set()
         self._thread.join(timeout=5)
         logging.info("SnippetService stopped.")
 
     def pause(self):
         """ Pause the snippet service momentarily """
-        logging.info("Pausing SnippetService…")
+        logging.info("Pausing SnippetService...")
         self.expander.pause()
 
     def resume(self):
         """ Resume the snippet service """
-        logging.info("Resuming SnippetService…")
+        logging.info("Resuming SnippetService...")
         self.expander.resume()

@@ -8,6 +8,7 @@ class TrayMenu(QMenu):
     edit_signal = Signal()      # Signal to bring up UI
     exit_signal = Signal()      # Signal to exit app
     startup_signal = Signal(bool)
+    showui_signal = Signal(bool)
 
     def __init__(self, main=None, parent=None):
         super().__init__(parent)
@@ -18,22 +19,23 @@ class TrayMenu(QMenu):
         self.add_actions()
 
     def add_actions(self):
-        """ self.start_action = self.addAction("Start Service") #Define QIcon to set icon
-        self.start_action.setData("Start Service")
-        # Remember to set font
-        self.start_action.triggered.connect(self.start_signal.emit)
-
-        self.stop_action = self.addAction("Stop Service")
-        self.stop_action.setData("Stop Service")
-        self.stop_action.triggered.connect(self.stop_signal.emit)
-        """
-
         # Launch at Startup (Checkbox style)
-        self.launch_action = self.addAction("Launch at startup")
-        self.launch_action.setData("Launch at startup")
-        self.launch_action.setCheckable(True)  # Enable checkbox behavior
-        self.launch_action.setChecked(True)  # Set initial state
+        self.launch_action = self.addAction("Launch at boot")
+        self.launch_action.setData("Launch at boot")
+        self.launch_action.setCheckable(True)
+        self.launch_action.setChecked(
+            self.main.settings.get("general", {}).get("start_at_boot", False)
+        )
         self.launch_action.toggled.connect(lambda checked: self.startup_signal.emit(checked))
+
+        # Show UI at Start (Checkbox style)
+        self.showui_action = self.addAction("Show UI at start")
+        self.showui_action.setData("Show UI at start")
+        self.showui_action.setCheckable(True)
+        self.showui_action.setChecked(
+            self.main.settings.get("general", {}).get("show_ui_at_start", False)
+        )
+        self.showui_action.toggled.connect(lambda checked: self.showui_signal.emit(checked))
 
         self.addSeparator() # Add seperator
 

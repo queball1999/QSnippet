@@ -28,7 +28,8 @@ class QSnippet(QMainWindow):
 
         self._status_timer = QTimer(self)
         self._status_timer.timeout.connect(self.check_service_status)
-        self._status_timer.start(5000)
+        # commentiung out 09/04/25
+        # self._status_timer.start(5000)
 
         self.snippet_service = SnippetService(self.parent.snippet_db_file)
 
@@ -77,6 +78,7 @@ class QSnippet(QMainWindow):
         menu.edit_signal.connect(self.show)
         menu.exit_signal.connect(self.exit)
         menu.startup_signal.connect(self.handle_startup_signal)
+        menu.showui_signal.connect(self.handle_show_ui_signal)
 
         self.tray.setContextMenu(menu)
         self.tray.show()
@@ -129,6 +131,10 @@ class QSnippet(QMainWindow):
         self.parent.settings["general"]["start_at_boot"] = enabled
         FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
         QTimer.singleShot(1000, self.unset_skip_reg)
+
+    def handle_show_ui_signal(self, checked: bool):
+        self.parent.settings["general"]["show_ui_at_start"] = checked
+        FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
 
     def handle_import_action(self):
         FileUtils.import_snippets_with_dialog(self, self.parent.snippet_db)

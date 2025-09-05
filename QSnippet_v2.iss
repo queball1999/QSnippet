@@ -28,6 +28,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#SourcePath}\output
 OutputBaseFilename=QSnippet-{#MyAppVersion}
 SetupIconFile={#SourcePath}\images\QSnippet.ico
+UninstallDisplayIcon={app}\images\QSnippet.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -41,6 +42,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#SourcePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
