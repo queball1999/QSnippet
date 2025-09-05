@@ -3,7 +3,7 @@
 
 #define MyAppVersion "0.0.2"
 #define MyAppName "QSnippet"
-#define MyAppExeBase "output/windows/QSnippet-" + MyAppVersion
+#define MyAppExeBase "QSnippet-" + MyAppVersion
 #define MyAppExeName MyAppExeBase + ".exe"
 #define MyAppPublisher "Quynn Bell"
 #define MyAppURL "https://quynnbell.com"
@@ -41,7 +41,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#SourcePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\output\windows\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourcePath}\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
