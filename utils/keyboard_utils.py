@@ -45,7 +45,6 @@ class SnippetExpander():
         logger.debug(self.trigger_regex)
 
     def refresh_snippets(self):
-        print("refresh snippets")
         self.snippets = self.snippets_db.get_all_snippets()
         self.build_trigger_map()
         logging.info("SnippetExpander reloaded snippets from DB.")

@@ -74,6 +74,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
          # Enabled Switch
         start_state = "on" if self.mode == "new" else "off" # set state based on mode
+        print(self.mode)
         self.enabled_switch = QAnimatedSwitch(objectName="enabled_switch",
                                            on_text="Enabled",
                                            off_text="Disabled",

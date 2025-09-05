@@ -117,8 +117,10 @@ class SnippetEditor(QWidget):
         # Clear the table selection and form inputs, then swap in form
         self.table.clear_selection()
         self.form.clear_form()
+        self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
 
+    # ----- Handlers -----
     def on_save(self):
         try:
             if not self.form.validate():
