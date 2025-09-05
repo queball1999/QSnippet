@@ -1,60 +1,49 @@
-# build.ps1
 param()
 
 $ErrorActionPreference = "Stop"
 
+# Ensure script runs from repo root
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location (Join-Path $ScriptDir "..")
+
 # Extract version from config.yaml using Python
 $VERSION = python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['version'])"
 
-$APP_NAME   = "QSnippet"
-$ENTRY      = "QSnippet.py"
-$DIST_DIR   = "output"
-$BUILD_DIR  = "build"
-$ICON_LINUX = "./images/QSnippet.png"
-$ICON_WINDOWS = "./images/QSnippet.ico"
-$ICON_MAC   = "./images/QSnippet.icns"
+$APP_NAME     = "QSnippet"
+$ENTRY        = "QSnippet.py"
+$ICON_WINDOWS = (Resolve-Path "./images/QSnippet.ico").Path
 
-$PYINSTALLER_ARGS = "--noconfirm --onefile --windowed"
+# Define custom paths to keep root clean
+$BUILD_DIR    = "build"   # work + spec files
+$DIST_DIR     = (Resolve-Path "./output/windows").Path
+
+$PYINSTALLER_ARGS = @(
+    "--noconfirm",
+    "--onefile",
+    "--windowed",
+    "--icon=$ICON_WINDOWS",
+    "--distpath", $DIST_DIR,
+    "--workpath", "$BUILD_DIR/work",
+    "--specpath", "$BUILD_DIR/spec",
+    "--name", "$APP_NAME-$VERSION",
+    $ENTRY
+)
 
 Write-Host "Building $APP_NAME v$VERSION..."
 
 # Clean old build artifacts
-if (Test-Path $DIST_DIR) { Remove-Item $DIST_DIR -Recurse -Force }
 if (Test-Path $BUILD_DIR) { Remove-Item $BUILD_DIR -Recurse -Force }
-if (Test-Path "$APP_NAME.spec") { Remove-Item "$APP_NAME.spec" -Force }
 
 # Detect OS
 $OS = $env:OS
-if (-not $OS) {
-    # Fallback for non-Windows systems
-    $OS = (uname -s)
-}
+if (-not $OS) { $OS = (uname -s) }
 Write-Host "Detected OS: $OS"
 
 switch -Regex ($OS) {
     "Windows_NT" {
         Write-Host "Building for Windows..."
-        & pyinstaller $PYINSTALLER_ARGS `
-            --icon=$ICON_WINDOWS `
-            --distpath "$DIST_DIR/windows" `
-            --name "$APP_NAME-$VERSION" `
-            $ENTRY
-    }
-    "Darwin" {
-        Write-Host "Building for macOS..."
-        & pyinstaller $PYINSTALLER_ARGS `
-            --icon=$ICON_MAC `
-            --distpath "$DIST_DIR/macos" `
-            --name "$APP_NAME-$VERSION" `
-            $ENTRY
-    }
-    "Linux" {
-        Write-Host "Building for Linux..."
-        & pyinstaller $PYINSTALLER_ARGS `
-            --icon=$ICON_LINUX `
-            --distpath "$DIST_DIR/linux" `
-            --name "$APP_NAME-$VERSION" `
-            $ENTRY
+        Write-Host "Running: pyinstaller $PYINSTALLER_ARGS"
+        & pyinstaller @PYINSTALLER_ARGS
     }
     default {
         Write-Error "Unsupported OS: $OS"
@@ -62,4 +51,4 @@ switch -Regex ($OS) {
     }
 }
 
-Write-Host "Build complete: $DIST_DIR"
+Write-Host "Build complete: exe in repo root"

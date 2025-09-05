@@ -2,6 +2,10 @@
 
 set -e
 
+# Ensure script runs from repo root
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR/.."
+
 # Extract version from config.yaml using Python
 VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['version'])")
 
@@ -39,15 +43,6 @@ case "$OS" in
     pyinstaller $PYINSTALLER_ARGS \
       --icon="$ICON_MAC" \
       --distpath "$DIST_DIR/macos" \
-      --name "$APP_NAME-$VERSION" \
-      "$ENTRY"
-    ;;
-
-  MINGW*|MSYS*|CYGWIN*|Windows_NT)
-    echo "Building for Windows..."
-    pyinstaller $PYINSTALLER_ARGS \
-      --icon="$ICON_WINDOWS" \
-      --distpath "$DIST_DIR/windows" \
       --name "$APP_NAME-$VERSION" \
       "$ENTRY"
     ;;
