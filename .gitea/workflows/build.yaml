@@ -5,117 +5,109 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
+  build-linux:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.13'
           cache: 'pip'
 
-      - name: Install Python dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyyaml
-
-      - name: Install APT dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
+      - run: |
           sudo apt-get update
           sudo apt-get install -y libzbar0 jq \
-            libxcb-cursor0 \
-            libxcb-xkb1 \
-            libxkbcommon-x11-0 \
-            libxcb-keysyms1 \
-            libxcb-icccm4 \
-            libxcb-shape0 \
-            libpulse0
+            libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
 
-      - name: Install yq (for version parsing)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
+      - run: |
           sudo wget https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
 
-      - name: Read app version and name from config.yaml
-        id: versioning
+      - id: versioning
         run: |
           VERSION=$(yq -r .version config.yaml)
           NAME=$(yq -r .program_name config.yaml)
           echo "APP_VERSION=$VERSION" >> $GITEA_ENV
           echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
-          echo "App version: $VERSION"
-          echo "Program name: $NAME"
 
-      - name: Run build script
-        run: chmod +x tools/build.sh && ./tools/build.sh
-        shell: bash
+      - run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - name: Build Inno Setup Installer (Windows only)
-        if: matrix.os == 'windows-latest'
-        run: |
+      - run: mkdir -p release && cp output/linux/* release/
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
+          path: release/
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - run: chmod +x tools/build.sh && ./tools/build.sh
+
+      - run: mkdir -p release && cp output/macos/* release/
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
+          path: release/
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - run: tools/build.ps1
+        shell: pwsh
+
+      - run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" QSnippet_v2.iss
 
-      - name: Rename and prepare artifacts
-        run: |
-          mkdir -p release
+      - run: mkdir release; cp output/windows/* release/
+        shell: pwsh
 
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            PLATFORM="linux"
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            PLATFORM="macos"
-          else
-            PLATFORM="windows"
-          fi
-
-          cp output/$PLATFORM/* release/
-        shell: bash
-
-      - name: Upload release artifacts to Gitea
-        if: ${{ gitea.ref_name == 'main' }}
-        uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-${{ matrix.os }}
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows
           path: release/
 
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build-linux, build-macos, build-windows]
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Read app version and name
-        id: versioning
-        run: |
+      - run: |
           VERSION=$(yq -r .version config.yaml)
           NAME=$(yq -r .program_name config.yaml)
           echo "APP_VERSION=$VERSION" >> $GITEA_ENV
           echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
 
-      - name: Download all release artifacts
-        uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v3
         with:
           path: dist/
 
-      - name: Tag the release
-        run: |
+      - run: |
           git config user.name "Gitea Actions"
           git config user.email "actions@gitea.io"
           git tag -a "v${{ env.APP_VERSION }}" -m "Release v${{ env.APP_VERSION }}"
           git push origin "v${{ env.APP_VERSION }}"
 
-      - name: Publish release to Gitea
-        run: |
+      - run: |
           gitea release create "v${{ env.APP_VERSION }}" \
             --title "QSnippet v${{ env.APP_VERSION }}" \
             --note "Auto-built release from CI" \
