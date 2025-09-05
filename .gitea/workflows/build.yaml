@@ -32,13 +32,15 @@ jobs:
       - name: Run Build Script
         run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - name: Copy to release folder
-        run: mkdir -p release && cp -R output/linux/* release/
+      - name: Package Linux build
+        run: |
+          cd output/linux
+          zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip ./*
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
-          path: release/
+          name: QSnippet-linux
+          path: output/linux/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
 
   build-macos:
     runs-on: macos-latest
@@ -60,13 +62,15 @@ jobs:
       - name: Run Build Script
         run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - name: Copy to release folder
-        run: mkdir -p release && cp -R output/macos/* release/
+      - name: Package macOS build
+        run: |
+          cd output/macos
+          zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip ./*
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
-          path: release/
+          name: QSnippet-macos
+          path: output/macos/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
 
   build-windows:
     runs-on: windows-latest
@@ -93,14 +97,16 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" '/Qp' "QSnippet_v2.iss"
 
-      - name: Copy to release folder
-        run: mkdir release; cp output/windows/* release/
+      - name: Package Windows build
+        run: |
+          cd output/windows
+          Compress-Archive -Path * -DestinationPath ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
         shell: powershell
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows
-          path: release/
+          name: QSnippet-windows
+          path: output/windows/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
 
   release:
     runs-on: ubuntu-latest
@@ -123,17 +129,17 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
           path: dist/linux/
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
           path: dist/macos/
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
           path: dist/windows/
 
       - name: Tag the release
