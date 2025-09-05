@@ -15,7 +15,7 @@ $ICON_WINDOWS = (Resolve-Path "./images/QSnippet.ico").Path
 
 # Define custom paths to keep root clean
 $BUILD_DIR    = "build"   # work + spec files
-$DIST_DIR     = (Resolve-Path "./output/windows").Path
+$DIST_DIR     = "output/windows"
 
 $PYINSTALLER_ARGS = @(
     "--noconfirm",
