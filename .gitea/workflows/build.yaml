@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: QSnippet-linux
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
           path: output/linux/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
 
   build-macos:
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: QSnippet-macos
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
           path: output/macos/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
 
   build-windows:
@@ -105,7 +105,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: QSnippet-windows
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
           path: output/windows/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
 
   release:
