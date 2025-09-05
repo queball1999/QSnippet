@@ -91,7 +91,7 @@ jobs:
 
       - name: Run Inno Setup
         run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" QSnippet_v2.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" '/Qp' "QSnippet_v2.iss"
 
       - name: Copy to release folder
         run: mkdir release; cp output/windows/* release/
