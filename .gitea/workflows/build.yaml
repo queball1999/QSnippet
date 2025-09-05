@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
 
@@ -54,16 +54,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
-
-      - name: Install Python via Homebrew
-        run: |
-          brew update
-          brew install python
-
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
-          cache: 'pip'
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
