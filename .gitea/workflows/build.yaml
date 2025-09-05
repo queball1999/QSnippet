@@ -44,12 +44,12 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v3
-
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: 'latest'
           check-latest: true
+          
+      - uses: actions/checkout@v3
 
       - uses: actions/setup-python@v4
         with:
