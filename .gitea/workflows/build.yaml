@@ -15,10 +15,19 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
+      - name: Fix APT sources for Ubuntu 22.04
+        run: |
+          sudo tee /etc/apt/sources.list <<EOF
+          deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
+          deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+          EOF
+          sudo apt-get update -o Acquire::ForceIPv4=true
+
+
       - name: Install APT Dependencies
         run: |
-          sudo sed -i 's|http://|https://|g' /etc/apt/sources.list
-          sudo apt-get update -o Acquire::ForceIPv4=true
           sudo apt-get install -y libzbar0 jq \
             libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
             libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
@@ -45,6 +54,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Install Python via Homebrew
+        run: |
+          brew update
+          brew install python
 
       - uses: actions/setup-python@v4
         with:
