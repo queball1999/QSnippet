@@ -28,18 +28,10 @@ jobs:
       - name: Read app version and name
         id: versioning
         run: |
-          python - <<'EOF'
-          import yaml
-          with open("config.yaml") as f:
-              cfg = yaml.safe_load(f)
-          version = cfg.get("version")
-          name = cfg.get("program_name")
-          print(f"APP_VERSION={version}")
-          print(f"PROGRAM_NAME={name}")
-          with open(os.environ["GITEA_ENV"], "a") as envfile:
-              envfile.write(f"APP_VERSION={version}\n")
-              envfile.write(f"PROGRAM_NAME={name}\n")
-          EOF
+          python -c "import yaml, os; cfg=yaml.safe_load(open('config.yaml')); \
+          print(f'APP_VERSION={cfg.get(\"version\")}'); \
+          print(f'PROGRAM_NAME={cfg.get(\"program_name\")}'); \
+          open(os.environ['GITEA_ENV'],'a').write(f'APP_VERSION={cfg.get(\"version\")}\nPROGRAM_NAME={cfg.get(\"program_name\")}\n')"
 
       - name: Run Build Script
         run: chmod +x tools/build.sh && ./tools/build.sh
@@ -68,18 +60,10 @@ jobs:
       - name: Read app version and name
         id: versioning
         run: |
-          python - <<'EOF'
-          import yaml
-          with open("config.yaml") as f:
-              cfg = yaml.safe_load(f)
-          version = cfg.get("version")
-          name = cfg.get("program_name")
-          print(f"APP_VERSION={version}")
-          print(f"PROGRAM_NAME={name}")
-          with open(os.environ["GITEA_ENV"], "a") as envfile:
-              envfile.write(f"APP_VERSION={version}\n")
-              envfile.write(f"PROGRAM_NAME={name}\n")
-          EOF
+          python -c "import yaml, os; cfg=yaml.safe_load(open('config.yaml')); \
+          print(f'APP_VERSION={cfg.get(\"version\")}'); \
+          print(f'PROGRAM_NAME={cfg.get(\"program_name\")}'); \
+          open(os.environ['GITEA_ENV'],'a').write(f'APP_VERSION={cfg.get(\"version\")}\nPROGRAM_NAME={cfg.get(\"program_name\")}\n')"
 
       - name: Run Build Script
         run: chmod +x tools/build.sh && ./tools/build.sh
@@ -108,18 +92,10 @@ jobs:
       - name: Read app version and name
         id: versioning
         run: |
-          python - <<'EOF'
-          import yaml
-          with open("config.yaml") as f:
-              cfg = yaml.safe_load(f)
-          version = cfg.get("version")
-          name = cfg.get("program_name")
-          print(f"APP_VERSION={version}")
-          print(f"PROGRAM_NAME={name}")
-          with open(os.environ["GITEA_ENV"], "a") as envfile:
-              envfile.write(f"APP_VERSION={version}\n")
-              envfile.write(f"PROGRAM_NAME={name}\n")
-          EOF
+          python -c "import yaml, os; cfg=yaml.safe_load(open('config.yaml')); \
+          print(f'APP_VERSION={cfg.get(\"version\")}'); \
+          print(f'PROGRAM_NAME={cfg.get(\"program_name\")}'); \
+          open(os.environ['GITEA_ENV'],'a').write(f'APP_VERSION={cfg.get(\"version\")}\nPROGRAM_NAME={cfg.get(\"program_name\")}\n')"
 
       - name: Run Build Script
         run: tools/build.ps1
@@ -148,18 +124,10 @@ jobs:
       - name: Read app version and name
         id: versioning
         run: |
-          python - <<'EOF'
-          import yaml
-          with open("config.yaml") as f:
-              cfg = yaml.safe_load(f)
-          version = cfg.get("version")
-          name = cfg.get("program_name")
-          print(f"APP_VERSION={version}")
-          print(f"PROGRAM_NAME={name}")
-          with open(os.environ["GITEA_ENV"], "a") as envfile:
-              envfile.write(f"APP_VERSION={version}\n")
-              envfile.write(f"PROGRAM_NAME={name}\n")
-          EOF
+          python -c "import yaml, os; cfg=yaml.safe_load(open('config.yaml')); \
+          print(f'APP_VERSION={cfg.get(\"version\")}'); \
+          print(f'PROGRAM_NAME={cfg.get(\"program_name\")}'); \
+          open(os.environ['GITEA_ENV'],'a').write(f'APP_VERSION={cfg.get(\"version\")}\nPROGRAM_NAME={cfg.get(\"program_name\")}\n')"
 
       - uses: actions/download-artifact@v3
         with:
