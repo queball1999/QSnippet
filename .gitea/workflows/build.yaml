@@ -15,26 +15,37 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      - run: |
+      - name: Install APT Dependencies
+        run: |
           sudo apt-get update
           sudo apt-get install -y libzbar0 jq \
             libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
             libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
 
-      - run: |
-          sudo wget https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64 -O /usr/bin/yq
-          sudo chmod +x /usr/bin/yq
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
-      - id: versioning
+      - name: Read app version and name
+        id: versioning
         run: |
-          VERSION=$(yq -r .version config.yaml)
-          NAME=$(yq -r .program_name config.yaml)
-          echo "APP_VERSION=$VERSION" >> $GITEA_ENV
-          echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
+          python - <<'EOF'
+          import yaml
+          with open("config.yaml") as f:
+              cfg = yaml.safe_load(f)
+          version = cfg.get("version")
+          name = cfg.get("program_name")
+          print(f"APP_VERSION={version}")
+          print(f"PROGRAM_NAME={name}")
+          with open(os.environ["GITEA_ENV"], "a") as envfile:
+              envfile.write(f"APP_VERSION={version}\n")
+              envfile.write(f"PROGRAM_NAME={name}\n")
+          EOF
 
-      - run: chmod +x tools/build.sh && ./tools/build.sh
+      - name: Run Build Script
+        run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - run: mkdir -p release && cp output/linux/* release/
+      - name: Copy to release folder
+        run: mkdir -p release && cp output/linux/* release/
 
       - uses: actions/upload-artifact@v3
         with:
@@ -51,9 +62,30 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      - run: chmod +x tools/build.sh && ./tools/build.sh
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
-      - run: mkdir -p release && cp output/macos/* release/
+      - name: Read app version and name
+        id: versioning
+        run: |
+          python - <<'EOF'
+          import yaml
+          with open("config.yaml") as f:
+              cfg = yaml.safe_load(f)
+          version = cfg.get("version")
+          name = cfg.get("program_name")
+          print(f"APP_VERSION={version}")
+          print(f"PROGRAM_NAME={name}")
+          with open(os.environ["GITEA_ENV"], "a") as envfile:
+              envfile.write(f"APP_VERSION={version}\n")
+              envfile.write(f"PROGRAM_NAME={name}\n")
+          EOF
+
+      - name: Run Build Script
+        run: chmod +x tools/build.sh && ./tools/build.sh
+
+      - name: Copy to release folder
+        run: mkdir -p release && cp output/macos/* release/
 
       - uses: actions/upload-artifact@v3
         with:
@@ -70,14 +102,36 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      - run: tools/build.ps1
-        shell: pwsh
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
-      - run: |
+      - name: Read app version and name
+        id: versioning
+        run: |
+          python - <<'EOF'
+          import yaml
+          with open("config.yaml") as f:
+              cfg = yaml.safe_load(f)
+          version = cfg.get("version")
+          name = cfg.get("program_name")
+          print(f"APP_VERSION={version}")
+          print(f"PROGRAM_NAME={name}")
+          with open(os.environ["GITEA_ENV"], "a") as envfile:
+              envfile.write(f"APP_VERSION={version}\n")
+              envfile.write(f"PROGRAM_NAME={name}\n")
+          EOF
+
+      - name: Run Build Script
+        run: tools/build.ps1
+        shell: powershell
+
+      - name: Run Inno Setup
+        run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" QSnippet_v2.iss
 
-      - run: mkdir release; cp output/windows/* release/
-        shell: pwsh
+      - name: Copy to release folder
+        run: mkdir release; cp output/windows/* release/
+        shell: powershell
 
       - uses: actions/upload-artifact@v3
         with:
@@ -91,23 +145,35 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - run: |
-          VERSION=$(yq -r .version config.yaml)
-          NAME=$(yq -r .program_name config.yaml)
-          echo "APP_VERSION=$VERSION" >> $GITEA_ENV
-          echo "PROGRAM_NAME=$NAME" >> $GITEA_ENV
+      - name: Read app version and name
+        id: versioning
+        run: |
+          python - <<'EOF'
+          import yaml
+          with open("config.yaml") as f:
+              cfg = yaml.safe_load(f)
+          version = cfg.get("version")
+          name = cfg.get("program_name")
+          print(f"APP_VERSION={version}")
+          print(f"PROGRAM_NAME={name}")
+          with open(os.environ["GITEA_ENV"], "a") as envfile:
+              envfile.write(f"APP_VERSION={version}\n")
+              envfile.write(f"PROGRAM_NAME={name}\n")
+          EOF
 
       - uses: actions/download-artifact@v3
         with:
           path: dist/
 
-      - run: |
+      - name: Tag the release
+        run: |
           git config user.name "Gitea Actions"
           git config user.email "actions@gitea.io"
           git tag -a "v${{ env.APP_VERSION }}" -m "Release v${{ env.APP_VERSION }}"
           git push origin "v${{ env.APP_VERSION }}"
 
-      - run: |
+      - name: Publish release to Gitea
+        run: |
           gitea release create "v${{ env.APP_VERSION }}" \
             --title "QSnippet v${{ env.APP_VERSION }}" \
             --note "Auto-built release from CI" \
