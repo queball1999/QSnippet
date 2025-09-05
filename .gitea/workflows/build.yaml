@@ -48,6 +48,11 @@ jobs:
           python3 --version
           python3 -c "print('Hello from Python on macOS!')"
 
+      - name: Ensure pip is installed (macOS system Python)
+        run: |
+          curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+          python3 get-pip.py --user
+          python3 -m pip --version
 
       - name: Install Python dependencies
         run: python3 -m pip install -r requirements.txt
