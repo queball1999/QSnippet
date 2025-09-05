@@ -109,6 +109,14 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
       - name: Read app version and name
         id: versioning
         run: python tools/versioning.py
