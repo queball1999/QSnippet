@@ -17,7 +17,8 @@ jobs:
 
       - name: Install APT Dependencies
         run: |
-          sudo apt-get update
+          sudo sed -i 's|http://|https://|g' /etc/apt/sources.list
+          sudo apt-get update -o Acquire::ForceIPv4=true
           sudo apt-get install -y libzbar0 jq \
             libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
             libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
