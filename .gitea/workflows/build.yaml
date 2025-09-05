@@ -10,18 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Fix APT sources for Ubuntu 22.04
-        run: |
-          sudo tee /etc/apt/sources.list <<EOF
-          deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
-          deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
-          deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
-          deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
-          EOF
-          sudo apt-get update -o Acquire::ForceIPv4=true
-
       - name: Install APT Dependencies
         run: |
+          sudo apt-get update
           sudo apt-get install -y libzbar0 jq \
             libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
             libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0 \
