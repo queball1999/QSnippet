@@ -42,7 +42,7 @@ jobs:
           path: release/
 
   build-macos:
-    runs-on: macos-latest=node:20-bullseye
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
 
