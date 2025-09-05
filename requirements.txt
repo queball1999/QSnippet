@@ -8,3 +8,6 @@ psutil
 
 # Windows-only
 pywin32; sys_platform == "win32"
+
+# Linux only
+evdev; sys_platform == "linux"
