@@ -33,7 +33,7 @@ jobs:
         run: chmod +x tools/build.sh && ./tools/build.sh
 
       - name: Copy to release folder
-        run: mkdir -p release && cp output/linux/* release/
+        run: mkdir -p release && cp -R output/linux/* release/
 
       - uses: actions/upload-artifact@v3
         with:
@@ -61,7 +61,7 @@ jobs:
         run: chmod +x tools/build.sh && ./tools/build.sh
 
       - name: Copy to release folder
-        run: mkdir -p release && cp output/macos/* release/
+        run: mkdir -p release && cp -R output/macos/* release/
 
       - uses: actions/upload-artifact@v3
         with:
