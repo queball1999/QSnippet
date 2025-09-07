@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
           path: output/linux/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
 
   build-macos:
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
           path: output/macos/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
 
   build-windows:
@@ -93,10 +93,6 @@ jobs:
         run: tools/build.ps1
         shell: powershell
 
-      - name: Run Inno Setup
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" '/Qp' "QSnippet_v2.iss"
-
       - name: Package Windows build
         run: |
           cd output/windows
@@ -105,7 +101,7 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows
           path: output/windows/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
 
   release:
@@ -129,17 +125,17 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
           path: dist/linux/
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
           path: dist/macos/
 
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows.zip
+          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-windows
           path: dist/windows/
 
       - name: Tag the release

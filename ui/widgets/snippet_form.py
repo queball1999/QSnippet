@@ -2,9 +2,11 @@ import logging
 import re
 from PySide6.QtWidgets import (
     QWidget, QLabel, QLineEdit, QTextEdit, QGridLayout,
-    QPushButton, QHBoxLayout, QComboBox, QSizePolicy
+    QPushButton, QHBoxLayout, QComboBox, QSizePolicy,
+    QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QEvent, QTimer
+from PySide6.QtGui import QTextCursor
 from .QAnimatedSwitch import QAnimatedSwitch
 from .CheckableComboBox import CheckableComboBox
 
@@ -144,9 +146,33 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
         self.snippet_label.setToolTip(self.snippet_tooltip)
 
-        self.snippet_input = QTextEdit()
+        self.snippet_input = QTextEdit(self)
         self.snippet_input.setToolTip(self.snippet_tooltip)
-        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut...")
+        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type { to insert placeholders...")
+        self.snippet_input.setFocusPolicy(Qt.StrongFocus)
+        self.snippet_input.installEventFilter(self)
+
+        # Popup list (looks like intellisense)
+        self.intellisense_popup = QListWidget(self)
+        self.intellisense_popup.hide()
+        # self.intellisense_popup.setWindowFlags(Qt.Popup)
+        self.intellisense_popup.setWindowFlags(
+            Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        )
+
+        self.intellisense_popup.setFocusPolicy(Qt.NoFocus)
+        self.intellisense_popup.itemActivated.connect(self.insert_completion)
+        self.intellisense_popup.itemClicked.connect(self.insert_completion)
+
+        # Fill with placeholders + sub-snippets
+        self.completions = [
+            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
+            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
+        ]
+        # Add snippet triggers too
+        self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])
+        for c in self.completions:
+            QListWidgetItem(c, self.intellisense_popup)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -305,6 +331,76 @@ Snippets come in handy for text you enter often or for standard messages you sen
             return False
         return True
     
+    # ----- Pop-Up Menu -----
+    def show_intellisense(self):
+        """ Function to setup and show intellisense pop-up """
+        cursor = self.snippet_input.textCursor()
+        rect = self.snippet_input.cursorRect(cursor)
+        pos = self.snippet_input.mapToGlobal(rect.bottomRight())
+
+        self.intellisense_popup.move(pos)
+        # self.intellisense_popup.setCurrentRow(0)
+        self.intellisense_popup.show()
+        self.snippet_input.setFocus()
+
+    def insert_completion(self, item):
+        """ Function to move cursor and insert completion. """
+        if not item:
+            return
+        cursor = self.snippet_input.textCursor()
+        # Delete everything typed since the '{'
+        start = getattr(self, "start_brace_pos", None)
+        if start is not None:
+            cursor.setPosition(start, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+
+        # Strip and format text
+        formatted = item.text().strip("{}")
+        completion = f"{{{formatted}}}"
+
+        # Insert the full completion
+        cursor.insertText(completion)
+        self.snippet_input.setTextCursor(cursor)
+        self.intellisense_popup.hide()
+        self.snippet_input.setFocus()
+
+    def update_prefix(self):
+        """ Recompute prefix from text and update popup """
+        cursor = self.snippet_input.textCursor()
+        current_text = self.snippet_input.toPlainText()
+        pos = cursor.position()
+        start = current_text.rfind("{", 0, pos)
+        if start != -1:
+            prefix = current_text[start:pos]
+            self.filter_intellisense(prefix)
+        else:
+            self.intellisense_popup.hide()
+
+    def filter_intellisense(self, prefix: str):
+        """ Filter popup items to only those starting with prefix """
+        self.intellisense_popup.clear()
+
+        # strip brackets to ensure we match snippets too
+        raw_prefix = prefix.strip("{}")
+
+        for c in self.completions:
+            candidate = c.lower()
+
+            if c.startswith("{"):
+                # Check inside placeholder name
+                if raw_prefix in candidate[1:-1]:  # skip surrounding { }
+                    QListWidgetItem(c, self.intellisense_popup)
+            else:
+                # Plain snippet trigger
+                if raw_prefix in candidate:
+                    QListWidgetItem(c, self.intellisense_popup)
+
+        if self.intellisense_popup.count() > 0:
+            self.intellisense_popup.setCurrentRow(0)
+        else:
+            self.intellisense_popup.hide()
+
+    # ----- Styling Functions -----
     def applyStyles(self):
         # Font Sizing
         self.form_title.setFont(self.main.large_font_size)
@@ -361,7 +457,48 @@ Snippets come in handy for text you enter often or for standard messages you sen
             QPushButton {{
                 padding: 5px
             }}""")
-        
+    
+    # ----- Event Handlers -----
+    def eventFilter(self, obj, event):
+        if obj is self.snippet_input and event.type() == QEvent.KeyPress:
+            """ Event handler for snippet input that detects { character """
+            # Detect opening {
+            if event.text() == "{":
+                self.start_brace_pos = self.snippet_input.textCursor().position()
+                self.show_intellisense()
+                return False
+
+            if self.intellisense_popup.isVisible():
+                if event.key() == Qt.Key_Down:
+                    row = (self.intellisense_popup.currentRow() + 1) % self.intellisense_popup.count()
+                    self.intellisense_popup.setCurrentRow(row)
+                    return True
+                elif event.key() == Qt.Key_Up:
+                    row = (self.intellisense_popup.currentRow() - 1) % self.intellisense_popup.count()
+                    self.intellisense_popup.setCurrentRow(row)
+                    return True
+                elif event.key() in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter):
+                    self.insert_completion(self.intellisense_popup.currentItem())
+                    return True
+                elif event.key() in (Qt.Key_Escape, Qt.Key_Right):
+                    self.intellisense_popup.hide()
+                    return True
+                elif event.key() == Qt.Key_Space:
+                    # Hide the popup but still insert the space into the text
+                    self.intellisense_popup.hide()
+                    return False
+                elif event.key() == Qt.Key_Backspace:
+                    QTimer.singleShot(0, self.update_prefix)
+
+                    # Check if user deleted the opening brace
+                    cursor = self.snippet_input.textCursor()
+                    if hasattr(self, "start_brace_pos") and cursor.position() <= self.start_brace_pos + 1:
+                        self.intellisense_popup.hide()
+                        return False
+                else:
+                     QTimer.singleShot(0, self.update_prefix)
+        return super().eventFilter(obj, event)
+
     def showEvent(self, event):
         super().showEvent(event)
         # force focus when the form is shown

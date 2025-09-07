@@ -2,6 +2,7 @@ import os
 import platform
 import logging
 import yaml
+import sys
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -144,14 +145,20 @@ class FileUtils:
             FileUtils.ensure_dir(documents)
             FileUtils.ensure_dir(log_dir)
 
-            # Get current working directory
-            cwd = Path.cwd()
+            # Detect runtime working directory
+            if hasattr(sys, "_MEIPASS"):
+                # Running inside a PyInstaller bundle
+                resource_dir = Path(sys._MEIPASS)
+            else:
+                # Running from source / dev
+                resource_dir = Path.cwd()
 
             return {
                 "app_data": app_data,
                 "documents": documents,
                 "log_dir": log_dir,
-                "working_dir": cwd
+                "working_dir": Path.cwd(),
+                "resource_dir": resource_dir
             }
         except Exception as e:
             logging.critical("Could not retrieve OS specific directories!")
