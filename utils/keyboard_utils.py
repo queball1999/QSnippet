@@ -45,8 +45,13 @@ class SnippetExpander():
         logger.debug(self.trigger_regex)
 
     def refresh_snippets(self):
+        """ Reload snippets from the database and rebuild trigger map."""
+        logger.info("Refreshing snippets from database...")
         self.snippets = self.snippets_db.get_all_snippets()
-        self.build_trigger_map()
+        self.build_trigger_map()    # Rebuild trigger map
+        # This single line fixes the issue where new snippets don't get recognized until restart
+        # smh...
+        self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)   # Reload prefixes
         logging.info("SnippetExpander reloaded snippets from DB.")
 
     def retrieve_trigger_chars(self, snippets):
@@ -61,7 +66,7 @@ class SnippetExpander():
         return trigger_prefixs
 
     def clear_buffer(self):
-        logger.debug("Clearing Buffer!")
+        # logger.debug("Clearing Buffer!")
         self.buffer = ""
         self.cursor_pos = 0
         self.trigger_flag = False
@@ -73,22 +78,26 @@ class SnippetExpander():
             if self.disabled:
                 return
             
+            # Handle navigation and deletion keys
             if self._handle_navigation_and_deletion(key):
                 return
             
+            # Clear buffer on certain keys
             if self._should_clear_on(key):
                 self.clear_buffer()
-                return
-                
-            
+                return   
+
+            # Handle character keys
             if hasattr(key, "char") and key.char:
+                # Exit if not in trigger mode and char not a trigger prefix
                 if not self.trigger_flag and key.char not in self.trigger_prefixs:  # Exit if true
                     self.clear_buffer()
                     return
                 
+                # Handle character input
                 self._handle_char(char=key.char)
             else:
-                # any other special key resets us
+                # any other special key resets buffer
                 self.clear_buffer()
         except Exception:
             logger.exception("Error in key handler, resetting buffer")
@@ -159,13 +168,22 @@ class SnippetExpander():
             self.controller.release("v")
 
     def _expand_keystrokes(self, snippet):
-        for ch in snippet:
-            if ch == "\n":
-                self.controller.press(keyboard.Key.enter)
-                self.controller.release(keyboard.Key.enter)
-            else:
-                self.controller.press(ch)
-                self.controller.release(ch)
+        self.disabled = True    # Disable service temporarily
+        try:
+            # Simulate keystrokes for each character in the snippet
+            for ch in snippet:
+                if ch == "\n":
+                    self.controller.press(keyboard.Key.enter)
+                    self.controller.release(keyboard.Key.enter)
+                else:
+                    self.controller.press(ch)
+                    self.controller.release(ch)
+        except Exception as e:
+            logger.error(f"Error occured while expanding keystrokes: {e}")
+        finally:
+            # Re-enable listener
+            # Always re-enable to avoid errors
+            self.disabled = False
 
     def _expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool):
         # Preprocess for placeholders and nested snippets
@@ -181,22 +199,33 @@ class SnippetExpander():
         chars_before_cursor = self.cursor_pos - trigger_start
         chars_after_cursor = trigger_end - self.cursor_pos
 
+        # Delete the trigger from the input
         for _ in range(chars_before_cursor):
             self.controller.press(keyboard.Key.backspace)
             self.controller.release(keyboard.Key.backspace)
 
+        # Delete any characters after the cursor that are part of the trigger
         for _ in range(chars_after_cursor):
             self.controller.press(keyboard.Key.delete)
             self.controller.release(keyboard.Key.delete)
+        
+        logger.debug("Stopping listener to prevent feedback")
+        # Temporarily disable event processing, but do NOT stop listener
+        self.disabled = True
 
-        if paste_style == "Clipboard":
-            self._expand_clipboard(snippet)
-        else:
-            self._expand_keystrokes(snippet)
+        # Expand the snippet
+        try:
+            if paste_style == "Clipboard":
+                self._expand_clipboard(snippet)
+            else:
+                self._expand_keystrokes(snippet)
 
-        if return_press:
-            self.controller.press(keyboard.Key.enter)
-            self.controller.release(keyboard.Key.enter) 
+            if return_press:
+                self.controller.press(keyboard.Key.enter)
+                self.controller.release(keyboard.Key.enter) 
+        finally:
+            logger.debug("Restarting listener")
+            self.disabled = False
 
     def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
         """Replace placeholders and nested snippet references with loop protection."""

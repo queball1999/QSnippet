@@ -17,6 +17,7 @@ class SnippetDB:
         logging.info(f"SQLite Path: {db_path}")
         self.conn = sqlite3.connect(self.db_path)
         self._create_table()
+        self._create_indexes()
 
     def _create_table(self):
         """Ensure the table exists."""
@@ -34,6 +35,14 @@ class SnippetDB:
                     tags TEXT DEFAULT ''
                 )
             """)
+
+    def _create_indexes(self):
+        """Create indexes for faster lookups"""
+        with self.conn:
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_enabled ON snippets(enabled);")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_folder ON snippets(folder);")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_label ON snippets(label);")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_tags ON snippets(tags);")
 
     def insert_snippet(self, entry: Dict[str, Any]) -> bool:
         """Insert a new snippet or update existing. Returns True if new, False if updated."""

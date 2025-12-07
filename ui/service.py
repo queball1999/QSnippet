@@ -86,3 +86,7 @@ class SnippetService():
         """ Resume the snippet service """
         logging.info("Resuming SnippetService...")
         self.expander.resume()
+
+    def active(self) -> bool:
+        """Return True if the service monitor thread is running and not stopped."""
+        return bool(self._thread and self._thread.is_alive() and not self._stop_evt.is_set())

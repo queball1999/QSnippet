@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout, QGridLayout
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap
 
 class HomeWidget(QWidget):
@@ -52,16 +52,19 @@ class HomeWidget(QWidget):
 
         self.setLayout(self.main_layout)
 
+    # ----- Styling Functions -----
     def applyStyles(self):
         # Font Sizing
         self.welcome_label.setFont(self.main.extra_large_font_size)
         self.second_label.setFont(self.main.small_font_size)
         self.third_label.setFont(self.main.small_font_size)
         self.create_label.setFont(self.main.small_font_size)
+        self.test_entry.setFont(self.main.small_font_size)
 
+        # Button Styling
         self.create_button.setFont(self.main.small_font_size)
-        # Button Sizing
         self.create_button.setFixedSize(self.main.small_button_size)
+
         # StyleSheet
         self.update_stylesheet()
 

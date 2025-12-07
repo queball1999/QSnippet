@@ -10,6 +10,9 @@ from utils.reg_utils import RegUtils
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 class QSnippet(QMainWindow):
     def __init__(self, parent=None):
@@ -20,7 +23,7 @@ class QSnippet(QMainWindow):
         self.state = "stopped"
 
         self.setWindowTitle(self.parent.program_name)
-        self.setWindowIcon(QIcon(self.parent.images["icon_16"]))
+        self.setWindowIcon(QIcon(self.parent.images["icon"]))
 
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
@@ -65,23 +68,52 @@ class QSnippet(QMainWindow):
         self.addToolBar(self.toolbar)
 
     def init_tray_menu(self):
-        # install the system tray icon
-        icon = QIcon(self.parent.images["icon_16"])
-        self.tray = QSystemTrayIcon(icon, self.app)
-        self.tray.setToolTip('QSnippet')
-        # Allow left clicks of tray icon to show UI
-        self.tray.activated.connect(self.on_tray_icon_activated)
+        logger = logging.getLogger(__name__)
+        logger.debug("init_tray_menu: starting initialization of system tray")
 
-        menu = TrayMenu(main=self.parent)
-        menu.start_signal.connect(self.start_service)
-        menu.stop_signal.connect(self.stop_service)
-        menu.edit_signal.connect(self.show)
-        menu.exit_signal.connect(self.exit)
-        menu.startup_signal.connect(self.handle_startup_signal)
-        menu.showui_signal.connect(self.handle_show_ui_signal)
+        try:
+            icon_path = None
+            try:
+                print(self.parent.images)
+                icon_path = self.parent.images.get("icon")
+                logger.debug("init_tray_menu: icon path resolved: %s", icon_path)
+            except Exception:
+                logger.exception("init_tray_menu: failed to read icon path from parent.images")
 
-        self.tray.setContextMenu(menu)
-        self.tray.show()
+            icon = QIcon(icon_path)
+            logger.debug("init_tray_menu: QIcon created (isNull=%s)", icon.isNull())
+
+            self.tray = QSystemTrayIcon(icon, self.app)
+            self.tray.setToolTip('QSnippet')
+            logger.debug("init_tray_menu: QSystemTrayIcon created and tooltip set")
+
+            # Allow left clicks of tray icon to show UI
+            self.tray.activated.connect(self.on_tray_icon_activated)
+            logger.debug("init_tray_menu: connected activated -> on_tray_icon_activated")
+
+            menu = TrayMenu(main=self.parent)
+            logger.debug("init_tray_menu: TrayMenu instance created")
+
+            # Connect menu signals with logging for each connection
+            menu.edit_signal.connect(self.show_window)
+            logger.debug("init_tray_menu: connected edit_signal -> show_window")
+
+            menu.exit_signal.connect(self.exit)
+            logger.debug("init_tray_menu: connected exit_signal -> exit")
+
+            menu.startup_signal.connect(self.handle_startup_signal)
+            logger.debug("init_tray_menu: connected startup_signal -> handle_startup_signal")
+
+            menu.showui_signal.connect(self.handle_show_ui_signal)
+            logger.debug("init_tray_menu: connected showui_signal -> handle_show_ui_signal")
+
+            self.tray.setContextMenu(menu)
+            logger.debug("init_tray_menu: context menu set on tray")
+
+            self.tray.show()
+            logger.info("init_tray_menu: system tray icon shown successfully")
+        except Exception:
+            logger.exception("init_tray_menu: unexpected error while initializing system tray")
 
     def run(self):
         sys.exit(self.app.exec())
@@ -138,11 +170,13 @@ class QSnippet(QMainWindow):
 
     def handle_import_action(self):
         FileUtils.import_snippets_with_dialog(self, self.parent.snippet_db)
-        self.editor.load_config() # Trigger refresh of snippets
+        self.snippet_service.refresh()  # Refresh Snippet Service
+        self.editor.load_snippets() # Trigger editor to re-load snippets
 
     def handle_export_action(self):
         FileUtils.export_snippets_with_dialog(self, self.parent.snippet_db)
-        self.editor.load_config() # Trigger refresh of snippets
+        self.snippet_service.refresh()  # Refresh Snippet Service
+        self.editor.load_snippets() # Trigger refresh of snippets
 
     def unset_skip_reg(self):
         self.parent.skip_reg = False
@@ -152,10 +186,14 @@ class QSnippet(QMainWindow):
         if event == QSystemTrayIcon.Trigger:
             # Left click
             if not self.isVisible():
-                self.show()
+                self.show_window()
             else:
                 self.raise_()  # bring to front
                 self.activateWindow()
+
+    def show_window(self):
+        self.show()
+        QTimer.singleShot(500, self.parent.check_notices)
 
     def exit(self):
         self.stop_service()

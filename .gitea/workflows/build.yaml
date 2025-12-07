@@ -2,75 +2,76 @@ name: Build and Release QSnippet Binaries
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v3
+  # build-linux:
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v3
 
-      - name: Install APT Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3-dev python3-pip \
-          libzbar0 jq libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
-          libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
+  #     - name: Install APT Dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y build-essential python3-dev python3-pip \
+  #         libzbar0 jq libxcb-cursor0 libxcb-xkb1 libxkbcommon-x11-0 \
+  #         libxcb-keysyms1 libxcb-icccm4 libxcb-shape0 libpulse0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          cache: 'pip'
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #         cache: 'pip'
 
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
+  #     - name: Install Python dependencies
+  #       run: pip install -r requirements.txt
 
-      - name: Read app version and name
-        id: versioning
-        run: python tools/versioning.py
+  #     - name: Read app version and name
+  #       id: versioning
+  #       run: python tools/versioning.py
 
-      - name: Run Build Script
-        run: chmod +x tools/build.sh && ./tools/build.sh
+  #     - name: Run Build Script
+  #       run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - name: Package Linux build
-        run: |
-          cd output/linux
-          zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip ./*
+  #     - name: Package Linux build
+  #       run: |
+  #         cd output/linux
+  #         zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip ./*
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
-          path: output/linux/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
+  #     - uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
+  #         path: output/linux/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux.zip
 
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v3
+  # build-macos:
+  #   runs-on: macos-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          cache: 'pip'
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.13'
+  #         cache: 'pip'
 
-      - name: Install Python dependencies
-        run: python3 -m pip install -r requirements.txt
+  #     - name: Install Python dependencies
+  #       run: python3 -m pip install -r requirements.txt
 
-      - name: Read app version and name
-        id: versioning
-        run: python tools/versioning.py
+  #     - name: Read app version and name
+  #       id: versioning
+  #       run: python tools/versioning.py
 
-      - name: Run Build Script
-        run: chmod +x tools/build.sh && ./tools/build.sh
+  #     - name: Run Build Script
+  #       run: chmod +x tools/build.sh && ./tools/build.sh
 
-      - name: Package macOS build
-        run: |
-          cd output/macos
-          zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip ./*
+  #     - name: Package macOS build
+  #       run: |
+  #         cd output/macos
+  #         zip -r ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip ./*
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
-          path: output/macos/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
+  #     - uses: actions/upload-artifact@v3
+  #       with:
+  #         name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
+  #         path: output/macos/${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos.zip
 
   build-windows:
     runs-on: windows-latest
@@ -106,7 +107,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-windows]
 
     steps:
       - uses: actions/checkout@v3
@@ -123,15 +124,15 @@ jobs:
         id: versioning
         run: python tools/versioning.py
 
-      - uses: actions/download-artifact@v3
-        with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
-          path: dist/linux/
+      # - uses: actions/download-artifact@v3
+      #   with:
+      #     name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-linux
+      #     path: dist/linux/
 
-      - uses: actions/download-artifact@v3
-        with:
-          name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
-          path: dist/macos/
+      # - uses: actions/download-artifact@v3
+      #   with:
+      #     name: ${{ env.PROGRAM_NAME }}-${{ env.APP_VERSION }}-macos
+      #     path: dist/macos/
 
       - uses: actions/download-artifact@v3
         with:
