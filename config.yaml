@@ -3,7 +3,8 @@ version: "0.0.4"
 log_level: DEBUG
 
 support_info:
-  email: support@quynnsoftware.com
+  email: admin@quynnbell.com
+  site: https://github.com/queball1999/QSnippet
 
 colors:
   primary_background_active: "#FFFFFF"

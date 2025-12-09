@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QHBoxLayout, QComboBox
 )
 from PySide6.QtGui import QStandardItem
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
@@ -121,6 +121,8 @@ class SnippetEditor(QWidget):
 
     # ----- Handlers -----
     def on_save(self, *_):
+        # FIXME: Need to edit in place for existing snippets.
+        #        As of now, we create a copy.
         try:
             if not self.form.validate():
                 return
@@ -163,13 +165,14 @@ class SnippetEditor(QWidget):
             self.main.message_box.error(f'Snippet Save Failed: {e}', title="Save Failed")
 
     def on_delete(self, *_):
+        print("Delete Entry")
         entry = self.table.current_entry()
+        print(entry)
         if not entry:
+            self.showStatus("Could not delete entry!")
             return
-        self.main.snippet_db.delete_snippet(entry["trigger"])
-        self.load_snippets()
-        self.navigate_home()
-
+        self.on_delete_snippet(entry)
+        
     # ----- Helper for on_save -----
     def detect_circular_reference(self, entry, all_snippets) -> bool:
         """Return True if entry would introduce a circular reference."""
@@ -254,7 +257,7 @@ class SnippetEditor(QWidget):
         self.load_snippets()
         self.main.message_box.info(f'"{old_label}" → "{new_label.strip()}"', title='Snippet Renamed')
     
-    def on_delete_snippet(self, entry=None, *_):
+    def on_delete_snippet(self, entry):
         confirm = self.main.message_box.question(
             f'Delete snippet "{entry.get("label","")}"?',
             title="Delete Snippet",
@@ -267,6 +270,7 @@ class SnippetEditor(QWidget):
 
         self.main.snippet_db.delete_snippet(entry['trigger'])
         self.load_snippets()
+        self.navigate_home()
 
     def run_search(self):
         keyword = self.search_bar.text().strip()
@@ -293,6 +297,11 @@ class SnippetEditor(QWidget):
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)
+
+    def showStatus(self, msg=""):
+        original_msg = self.parent.statusBar().currentMessage() or ""
+        self.parent.statusBar().showMessage(msg)
+        QTimer.singleShot(5000, lambda: self.parent.statusBar().showMessage(original_msg))
 
     def navigate_home(self):
         self.resume_service()

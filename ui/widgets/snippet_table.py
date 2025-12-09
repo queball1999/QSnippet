@@ -195,7 +195,13 @@ class SnippetTable(QTreeView):
     def current_entry(self):
         idx = self.currentIndex()
         if not idx.isValid():
+            # logger.info("Not Valid IDX!")
             return None
+        
+        # Always use column 0 where snippet data is stored
+        # Fixes Issue #20
+        idx = idx.sibling(idx.row(), 0)
+
         src_idx = self.proxy.mapToSource(idx)
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)

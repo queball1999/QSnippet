@@ -47,6 +47,11 @@ Source: "{#SourcePath}\output\windows\{#MyAppExeName}"; DestDir: "{app}"; Permis
 Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
 Source: "{#SourcePath}\README.md"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
+; Alyways overwrite config.yaml
+Source: "{#SourcePath}\config.yaml"; DestDir: "{localappdata}\QSnippet"; DestName: "config.yaml"; Flags: ignoreversion
+; Copy settings.yaml if it is missing
+; Settings - ONLY copy if missing
+Source: "{#SourcePath}\settings.yaml"; DestDir: "{localappdata}\QSnippet"; DestName: "settings.yaml"; Flags: onlyifdoesntexist
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Dirs]

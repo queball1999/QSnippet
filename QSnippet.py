@@ -138,7 +138,7 @@ class main():
     def init_logger(self):
         """ Initialize the logger class """
         try:
-            print("Setting up Logger")
+            logging.info("Setting up Logger")
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
             logging.info("Logger initialized!")
         except Exception as e:
