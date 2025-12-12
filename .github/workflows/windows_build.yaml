@@ -39,8 +39,8 @@ jobs:
         with:
           name: windows-build
           path: |
-            output/windows/*.exe
-            **/QSnippet*.exe
+            output/windows/QSnippet-*-windows-installer.exe
+            output/windows/QSnippet-*-windows-portable.exe
 
   release:
     runs-on: ubuntu-latest

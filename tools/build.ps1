@@ -42,8 +42,11 @@ Write-Host "Running PyInstaller..."
 & pyinstaller @PYINSTALLER_ARGS
 
 # Create portable version
+# NOTE:
+# exePath (QSnippet.exe) is intentionally left for Inno Setup.
+# It is not uploaded as an artifact.
 $exePath     = Join-Path $DIST_DIR "$APP_NAME.exe"
-$portableExe = Join-Path $DIST_DIR "$APP_NAME-$VERSION-portable.exe"
+$portableExe = Join-Path $DIST_DIR "$APP_NAME-$VERSION-windows-portable.exe"
 
 if (Test-Path $exePath) {
     Copy-Item $exePath $portableExe -Force
