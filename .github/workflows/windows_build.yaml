@@ -31,7 +31,7 @@ jobs:
       - name: Build Windows installer (Inno Setup)
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: installer/QSnippet.iss
+          path: QSnippet.iss
           options: /O+
 
       - name: Upload Windows executables
