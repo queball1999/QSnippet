@@ -25,7 +25,7 @@ jobs:
           flake8 . --exit-zero --format=default | tee flake8-report.txt
 
       - name: Upload Flake8 Lint Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: flake8-report
           path: flake8-report.txt
