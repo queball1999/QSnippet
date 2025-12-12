@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QHBoxLayout, QComboBox
 )
 from PySide6.QtGui import QStandardItem
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
@@ -86,14 +86,12 @@ class SnippetEditor(QWidget):
         self.splitter.addWidget(self.stack)
 
         # layout just needs to host the splitter
-        container = QWidget(self)
-        vlay = QVBoxLayout(container)
+        vlay = QVBoxLayout()
         vlay.addWidget(self.splitter)
-        container.setLayout(vlay)
         self.setLayout(vlay)
     
     def load_snippets(self):
-        old_text = self.parent.statusBar().currentMessage()
+        old_text = self.parent.statusBar().currentMessage() or ""
         self.parent.statusBar().showMessage(f"Loading Snippets...")
         snippets = self.main.snippet_db.get_all_snippets()
         self.table.load_entries(snippets)
@@ -107,21 +105,24 @@ class SnippetEditor(QWidget):
         else:
             self.stack.setCurrentWidget(self.home_widget)    
 
-    def show_home_widget(self):
+    def show_home_widget(self, *_):
         self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
 
-    def show_new_form(self):
-        self.parent.pause_service()  # pause snippet service
+    def show_new_form(self, *_):
+        self.pause_service()  # Pause snippet service
+
         # Clear the table selection and form inputs, then swap in form
-        self.table.clear_selection()
+        # self.table.clear_selection()
         self.form.clear_form()
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
 
     # ----- Handlers -----
-    def on_save(self):
+    def on_save(self, *_):
+        # FIXME: Need to edit in place for existing snippets.
+        #        As of now, we create a copy.
         try:
             if not self.form.validate():
                 return
@@ -141,11 +142,6 @@ class SnippetEditor(QWidget):
             # returns True if new, False if updated
             is_new = self.main.snippet_db.insert_snippet(entry)
 
-            self.load_snippets()
-            self.table.select_entry(entry)
-            self.show_new_form()
-            self.trigger_reload.emit()  # Flag
-
             if is_new:
                 self.main.message_box.info(
                     f'New snippet "{entry["label"]}" created successfully!',
@@ -157,17 +153,26 @@ class SnippetEditor(QWidget):
                     title="Snippet Updated"
                 )
 
+            self.load_snippets()    # Reload snippets to reflect changes
+            self.table.select_entry(entry)
+            self.trigger_reload.emit()  # Flag
+
+            # Here we could go home or stay on new form
+            # Should make this a setting, for now go home
+            self.navigate_home()
+
         except Exception as e:
             self.main.message_box.error(f'Snippet Save Failed: {e}', title="Save Failed")
 
-    def on_delete(self):
+    def on_delete(self, *_):
+        print("Delete Entry")
         entry = self.table.current_entry()
+        print(entry)
         if not entry:
+            self.showStatus("Could not delete entry!")
             return
-        self.main.snippet_db.delete_snippet(entry["trigger"])
-        self.load_snippets()
-        self.stack.setCurrentIndex(0)
-
+        self.on_delete_snippet(entry)
+        
     # ----- Helper for on_save -----
     def detect_circular_reference(self, entry, all_snippets) -> bool:
         """Return True if entry would introduce a circular reference."""
@@ -190,14 +195,14 @@ class SnippetEditor(QWidget):
         return dfs(trigger)
 
     # ----- Context Menu Actions -----
-    def on_add_folder(self, parent_item):
+    def on_add_folder(self, parent_item=None, *_):
         name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
         if not ok or not name.strip():
             return
         self.show_new_form()
         self.form.folder_input.setText(name.strip())
 
-    def on_add_subfolder(self, parent_item):
+    def on_add_subfolder(self, parent_item=None, *_):
         parent_name = parent_item.text()
         prompt = f'Sub-folder under "{parent_name}":'
         name, ok = QInputDialog.getText(self, 'New Sub-Folder', prompt)
@@ -207,7 +212,7 @@ class SnippetEditor(QWidget):
         self.show_new_form()
         self.form.folder_input.setText(full)
         
-    def on_rename_folder(self, folder_item):
+    def on_rename_folder(self, folder_item=None, *_):
         old = folder_item.text()
         new, ok = QInputDialog.getText(self, 'Rename Folder', f'New name for "{old}":', text=old)
         if not ok or not new.strip() or new.strip() == old:
@@ -216,12 +221,12 @@ class SnippetEditor(QWidget):
         self.load_snippets()
         self.main.message_box.info(f'"{old}" → "{new.strip()}"', title='Folder Renamed')
 
-    def on_add_snippet(self, parent_item):
+    def on_add_snippet(self, parent_item=None, *_):
         self.show_new_form()
         if isinstance(parent_item, QStandardItem):
             self.form.folder_input.setText(parent_item.text())
 
-    def on_delete_folder(self, folder_item):
+    def on_delete_folder(self, folder_item=None, *_):
         name = folder_item.text()
         confirm = self.main.message_box.question(
             f'Delete folder "{name}" and all its snippets?',
@@ -236,10 +241,10 @@ class SnippetEditor(QWidget):
         self.main.snippet_db.delete_folder(name)
         self.load_snippets()
 
-    def on_edit_snippet(self, entry):
+    def on_edit_snippet(self, entry=None, *_):
         self.on_entry_selected(entry)
 
-    def on_rename_snippet(self, entry):
+    def on_rename_snippet(self, entry=None, *_):
         old_label = entry.get('label', '')
         new_label, ok = QInputDialog.getText(
             self, 'Rename Snippet', 'New label:', text=old_label
@@ -265,6 +270,7 @@ class SnippetEditor(QWidget):
 
         self.main.snippet_db.delete_snippet(entry['trigger'])
         self.load_snippets()
+        self.navigate_home()
 
     def run_search(self):
         keyword = self.search_bar.text().strip()
@@ -291,3 +297,20 @@ class SnippetEditor(QWidget):
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)
+
+    def showStatus(self, msg=""):
+        original_msg = self.parent.statusBar().currentMessage() or ""
+        self.parent.statusBar().showMessage(msg)
+        QTimer.singleShot(5000, lambda: self.parent.statusBar().showMessage(original_msg))
+
+    def navigate_home(self):
+        self.resume_service()
+        self.stack.setCurrentIndex(0)   # go home
+
+    def pause_service(self):
+        self.parent.statusBar().showMessage(f"Service status: Paused")
+        self.parent.snippet_service.pause()
+
+    def resume_service(self):
+        self.parent.statusBar().showMessage(f"Service status: Running")
+        self.parent.snippet_service.resume()

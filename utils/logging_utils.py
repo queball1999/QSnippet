@@ -51,7 +51,6 @@ Example Usage: logging.info("This is a log message")
 """
 class AppLogger:
     def __init__(self, log_filepath, log_level, max_bytes=25 * 1024 * 1024, backup_count=5):
-        print("Init Logger")
         self.log_filepath = log_filepath
         self.log_level = log_level
         self.max_bytes = max_bytes

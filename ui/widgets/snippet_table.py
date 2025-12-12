@@ -154,22 +154,23 @@ class SnippetTable(QTreeView):
 
             if data is None:
                 # folder row
-                menu.addAction('Add Item', lambda: self.addSnippet.emit(item))
-                menu.addAction('Add Sub-Folder', lambda: self.addSubFolder.emit(item))
+                menu.addAction('Add Item', lambda item=item: self.addSnippet.emit(item))
+                menu.addAction('Add Sub-Folder', lambda item=item: self.addSubFolder.emit(item))
                 menu.addSeparator()
-                menu.addAction('Rename Folder', lambda: self.renameFolder.emit(item))
+                menu.addAction("Rename Folder", lambda item=item: self.renameFolder.emit(item))
                 menu.addAction('Delete Folder', lambda: self.deleteFolder.emit(item))
             else:
                 # snippet row
-                menu.addAction('Edit Item', lambda: self.editSnippet.emit(data))
-                menu.addAction('Rename Item', lambda: self.renameSnippet.emit(data))
-                menu.addAction('Delete Item', lambda: self.deleteSnippet.emit(data))
+                menu.addAction('Edit Item', lambda data=data: self.editSnippet.emit(data))
+                menu.addAction('Rename Item', lambda data=data: self.renameSnippet.emit(data))
+                menu.addAction('Delete Item', lambda data=data: self.deleteSnippet.emit(data))
 
         menu.exec(event.globalPos())
 
     def clear_selection(self):
         self.clearSelection()
-        self.entrySelected.emit(None)
+        # Commenting out as it is causing issues
+        # self.entrySelected.emit(QStandardItem)
 
     def select_entry(self, entry):
         """Find and select the row matching entry['trigger']."""
@@ -194,7 +195,13 @@ class SnippetTable(QTreeView):
     def current_entry(self):
         idx = self.currentIndex()
         if not idx.isValid():
+            # logger.info("Not Valid IDX!")
             return None
+        
+        # Always use column 0 where snippet data is stored
+        # Fixes Issue #20
+        idx = idx.sibling(idx.row(), 0)
+
         src_idx = self.proxy.mapToSource(idx)
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)

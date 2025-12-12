@@ -1,16 +1,19 @@
 from PySide6.QtWidgets import QMenuBar
-from PySide6.QtGui import QIcon, QAction
-from PySide6.QtCore import Signal
-from utils import FileUtils
+from PySide6.QtGui import QIcon, QAction, QActionGroup
+from PySide6.QtCore import Signal, QSize
 
 class MenuBar(QMenuBar):
     importAction = Signal()
     exportAction = Signal()
+    collectLogsRequested = Signal()
+    logLevelChanged = Signal(str)
+    showAppInfo = Signal()
 
     def __init__(self, main=None, parent=None):
         super().__init__(parent)
         self.main = main
         self.parent = parent
+        
         self._build_menus()
 
     def _build_menus(self):
@@ -33,25 +36,27 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
 
         # --- Import/Export actions ---
-        import_icon = QIcon.fromTheme("document-import")
+        import_icon = QIcon.fromTheme("document-open")
         import_act = QAction(import_icon, "Import", self)
+        import_act.setShortcut("Ctrl+I")
         import_act.triggered.connect(self.importAction.emit)
         file_menu.addAction(import_act)
 
-        export_icon = QIcon.fromTheme("document-export")
+        export_icon = QIcon.fromTheme("folder-open")
         export_act = QAction(export_icon, "Export", self)
+        export_act.setShortcut("Ctrl+E")
         export_act.triggered.connect(self.exportAction.emit)
         file_menu.addAction(export_act)
 
         file_menu.addSeparator()
 
-        close_icon = QIcon.fromTheme("application-close")
+        close_icon = QIcon.fromTheme("window-close")
         close_icon = QAction(close_icon, "Close", self)
         close_icon.setShortcut("Ctrl+Q")
         close_icon.triggered.connect(self.parent.close)
         file_menu.addAction(close_icon)
         
-        exit_icon = QIcon.fromTheme("application-exit")
+        exit_icon = QIcon.fromTheme("system-shutdown")
         exit_act = QAction(exit_icon, "Exit", self)
         exit_act.setShortcut("Ctrl+Shift+Q")
         exit_act.triggered.connect(self.parent.exit)
@@ -94,35 +99,90 @@ class MenuBar(QMenuBar):
 
         # ----- Tools Menu -----
         tools_menu = self.addMenu("Tools")
-        # These placeholders, need to mirror logic in utils/keyboard_utils.py
-        # Define groups: group_label -> { item_label: (token, tooltip) }
+
+        # Create top-level submenus with icons
+        # FIXME: Need to set icon here
+        datetime_icon = QIcon.fromTheme("")
+        context_icon = QIcon.fromTheme("preferences-desktop-locale")
+
+        datetime_menu = tools_menu.addMenu(datetime_icon, "Date/Time")
+        context_menu  = tools_menu.addMenu(context_icon, "Context")
+
+        # Define token groups (no icons for individual items)
         placeholders = {
-            "Date/Time": {
+            datetime_menu: {
                 "Date": ("{date}", "Insert date (YYYY-MM-DD)"),
-                "Date (long)": ("{date_long}", "Insert long date (e.g. September 04, 2025)"),
-                "Time": ("{time}", "Insert time (24hr, HH:MM)"),
-                "Time (12hr)": ("{time_ampm}", "Insert time (12hr, e.g. 02:30 PM)"),
-                "Date & Time": ("{datetime}", "Insert full datetime (YYYY-MM-DD HH:MM)"),
-                "Weekday": ("{weekday}", "Insert weekday name (e.g. Thursday)"),
-                "Month": ("{month}", "Insert month name (e.g. September)"),
-                "Year": ("{year}", "Insert year (e.g. 2025)"),
+                "Date (long)": ("{date_long}", "Insert long date"),
+                "Time": ("{time}", "Insert time (24hr)"),
+                "Time (12hr)": ("{time_ampm}", "Insert time (12hr)"),
+                "Date & Time": ("{datetime}", "Insert full datetime"),
+                "Weekday": ("{weekday}", "Insert weekday name"),
+                "Month": ("{month}", "Insert month name"),
+                "Year": ("{year}", "Insert year"),
             },
-            "Context": {
-                "Greeting": ("{greeting}", "Insert context-aware greeting (Good morning/afternoon/evening)"),
+            context_menu: {
+                "Greeting": ("{greeting}", "Insert context-aware greeting"),
                 "Location": ("{location}", "Insert configured location"),
             }
         }
 
-        # Build submenus
-        for group, items in placeholders.items():
-            submenu = tools_menu.addMenu(group)
+        # Build submenu items (no icons here)
+        for menu, items in placeholders.items():
             for label, (token, tip) in items.items():
                 act = QAction(label, self)
                 act.setStatusTip(tip)
                 act.triggered.connect(lambda checked=False, t=token: self.insert_token(t))
-                submenu.addAction(act)
+                menu.addAction(act)
+
+        # ----- Help Menu -----
+        help_menu = self.addMenu("Help")
+        help_menu.setMinimumWidth(150)
+
+        # Collect Logs
+        logs_icon = QIcon.fromTheme("folder-open")
+        collect_logs_act = QAction(logs_icon, "Collect Logs", self)
+        collect_logs_act.setShortcut("F7")
+        collect_logs_act.setStatusTip("Export logs to Downloads folder")
+        collect_logs_act.triggered.connect(self.collectLogsRequested.emit)
+        help_menu.addAction(collect_logs_act)
+
+        # Log Level submenu
+        debug_icon = QIcon.fromTheme("document-properties")
+        log_level_menu = help_menu.addMenu(debug_icon, "Log Level")
+        log_level_menu.setStatusTip("Set log level within application")
+
+        # Create an exclusive action group (only one checked at a time)
+        self.log_level_group = QActionGroup(self)
+        self.log_level_group.setExclusive(True)
+
+        for level in ["ERROR", "WARNING", "INFO", "DEBUG"]:
+            act = QAction(level, self)
+            act.setCheckable(True)
+
+            # Add action to group to enforce single selection
+            self.log_level_group.addAction(act)
+
+            # Mark current log level
+            log_level = self.main.log_level if hasattr(self.main, "log_level") else "ERROR"
+            if level == log_level:
+                act.setChecked(True)
+
+            act.triggered.connect(lambda checked=False, lvl=level: self._set_log_level(lvl))
+            log_level_menu.addAction(act)
+
+
+        # About App
+        about_icon = QIcon.fromTheme("help-about")
+        about_act = QAction(about_icon, "About", self)
+        about_act.setShortcut("F2")
+        about_act.setStatusTip("View information about your installation")
+        about_act.triggered.connect(self.showAppInfo.emit)
+        help_menu.addAction(about_act)
 
     # ----- HELPER FUNCTIONS -----
+    def _set_log_level(self, level: str):
+        """Emit signal with new log level."""
+        self.logLevelChanged.emit(level)
 
     def _do_edit_action(self, action: str):
         """Perform an edit action on the currently focused widget."""

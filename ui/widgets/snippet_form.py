@@ -194,10 +194,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         btn_layout.addWidget(self.cancel_btn)
 
         # Connect signals
-        self.new_btn.pressed.connect(self.newClicked)
-        self.save_btn.pressed.connect(self.saveClicked)
-        self.delete_btn.pressed.connect(self.deleteClicked)
-        self.cancel_btn.pressed.connect(self.cancelPressed.emit)
+        self.new_btn.pressed.connect(lambda *_: self.newClicked.emit())
+        self.save_btn.pressed.connect(lambda *_: self.saveClicked.emit())
+        self.delete_btn.pressed.connect(lambda *_: self.deleteClicked.emit())
+        self.cancel_btn.pressed.connect(lambda *_: self.cancelPressed.emit())
+
 
         # Add Widgets to Grid
         first_row = QGridLayout()
@@ -334,14 +335,17 @@ Snippets come in handy for text you enter often or for standard messages you sen
     # ----- Pop-Up Menu -----
     def show_intellisense(self):
         """ Function to setup and show intellisense pop-up """
+        if not self.isVisible():    # Exit if not visible
+            return
+
         cursor = self.snippet_input.textCursor()
         rect = self.snippet_input.cursorRect(cursor)
         pos = self.snippet_input.mapToGlobal(rect.bottomRight())
 
         self.intellisense_popup.move(pos)
-        # self.intellisense_popup.setCurrentRow(0)
         self.intellisense_popup.show()
         self.snippet_input.setFocus()
+        
 
     def insert_completion(self, item):
         """ Function to move cursor and insert completion. """
@@ -366,15 +370,25 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     def update_prefix(self):
         """ Recompute prefix from text and update popup """
+        if not self.snippet_input.isVisible():  # Exit if snippet input is not visible
+            return
+
         cursor = self.snippet_input.textCursor()
         current_text = self.snippet_input.toPlainText()
         pos = cursor.position()
+
+        # Look backwards for last '{'
         start = current_text.rfind("{", 0, pos)
         if start != -1:
+            # make sure the char before cursor is still a '{'
+            if pos > 0 and current_text[pos - 1] == "{":
+                self.start_brace_pos = start
+                self.show_intellisense()
             prefix = current_text[start:pos]
             self.filter_intellisense(prefix)
         else:
             self.intellisense_popup.hide()
+
 
     def filter_intellisense(self, prefix: str):
         """ Filter popup items to only those starting with prefix """
@@ -415,8 +429,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.trigger_input.setFont(self.main.small_font_size)
         self.snippet_label.setFont(self.main.small_font_size)
         self.snippet_input.setFont(self.main.small_font_size)
-        # self.style_label.setFont(self.main.small_font_size)
-        # self.style_combo.setFont(self.main.small_font_size)
+        self.intellisense_popup.setFont(self.main.small_font_size)
         
         self.new_btn.setFont(self.main.small_font_size)
         self.save_btn.setFont(self.main.small_font_size)
@@ -466,7 +479,10 @@ Snippets come in handy for text you enter often or for standard messages you sen
             if event.text() == "{":
                 self.start_brace_pos = self.snippet_input.textCursor().position()
                 self.show_intellisense()
+                QTimer.singleShot(0, self.update_prefix)
                 return False
+            elif event.text() == "}":
+                self.intellisense_popup.hide()
 
             if self.intellisense_popup.isVisible():
                 if event.key() == Qt.Key_Down:
@@ -496,7 +512,12 @@ Snippets come in handy for text you enter often or for standard messages you sen
                         self.intellisense_popup.hide()
                         return False
                 else:
-                     QTimer.singleShot(0, self.update_prefix)
+                    QTimer.singleShot(0, self.update_prefix)    # Recompute regarless if visible
+
+            # Recompute on backspace so it can trigger pop-up again
+            if event.key() in (Qt.Key_Backspace, Qt.Key_Delete):
+                QTimer.singleShot(0, self.update_prefix)
+
         return super().eventFilter(obj, event)
 
     def showEvent(self, event):

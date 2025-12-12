@@ -20,7 +20,6 @@ from ui.widgets import AppMessageBox
 
 logger = logging.getLogger(__name__)
 
-
 class main():
     def __init__(self):
         # Main Program Execution
@@ -30,14 +29,17 @@ class main():
         self.init_logger()
         self.fix_image_paths()
         
-        self.message_box = AppMessageBox(icon_path=self.images["icon_16"])
+        self.message_box = AppMessageBox(icon_path=self.images["icon"])
         self.check_if_already_running(self.program_name) # Check if application is already running
-        QTimer.singleShot(500, self.check_notices)
 
         self.scale_ui_cfg()
         self.start_program()
-        
 
+        if self.settings["general"]["show_ui_at_start"]:
+            # Only show if the UI will show on boot.
+            # Otherwise, we load later when opening UI.
+            QTimer.singleShot(500, self.check_notices)
+        
     def create_global_variables(self):
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
@@ -136,7 +138,7 @@ class main():
     def init_logger(self):
         """ Initialize the logger class """
         try:
-            print("Setting up Logger")
+            logging.info("Setting up Logger")
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
             logging.info("Logger initialized!")
         except Exception as e:

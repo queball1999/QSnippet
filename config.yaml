@@ -1,9 +1,10 @@
 program_name: QSnippet
-version: "0.0.3"
+version: "0.0.4"
 log_level: DEBUG
 
 support_info:
-  email: support@quynnsoftware.com
+  email: admin@quynnbell.com
+  site: https://github.com/queball1999/QSnippet
 
 colors:
   primary_background_active: "#FFFFFF"
@@ -28,11 +29,11 @@ colors:
   light_text_color_disabled: "#FFFFFF"
 
 images:
-  icon_256: "QSnippet_256x256.png"
-  icon_128: "QSnippet_128x128.png"
-  icon_64: "QSnippet_64x64.png"
-  icon_32: "QSnippet_32x32.png"
-  icon_16: "QSnippet_16x16.png"
+  icon_128: "icon_128x128.png"
+  icon_64: "icon_64x64.png"
+  icon_32: "icon_32x32.png"
+  icon_16: "icon_16x16.png"
+  icon: "QSnippet.ico"
 
 fonts:
   primary_font: "Inter"
