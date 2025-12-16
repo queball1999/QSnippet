@@ -1,0 +1,11 @@
+id: "notice-2025-12-15"
+title: "December 15, 2025"
+message: |
+  This update kicks off work on **v0.0.5** and introduces a new way to handle notices inside the app.
+
+  ### What’s New
+  - Added a new notice dialog that supports **multiple notices** and **markdown rendering**.
+
+  ### Improvements
+  - Added method for notice lifecycle handling so notices are mantained more reliably.
+  - Improved date detection to ensure notices are shown at the right time.

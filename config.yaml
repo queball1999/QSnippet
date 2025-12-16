@@ -1,5 +1,5 @@
 program_name: QSnippet
-version: "0.0.4"
+version: "0.0.5"
 log_level: DEBUG
 
 support_info:

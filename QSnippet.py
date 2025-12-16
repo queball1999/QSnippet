@@ -2,6 +2,8 @@ import sys
 import os
 import logging
 import yaml
+from datetime import datetime
+import re
 from pathlib import Path
 import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -17,11 +19,13 @@ else:
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
 from ui import QSnippet
 from ui.widgets import AppMessageBox
+from ui.widgets.notice_carousel import NoticeCarouselDialog
 
 logger = logging.getLogger(__name__)
 
 class main():
     def __init__(self):
+        print("Start")
         # Main Program Execution
         self.create_global_variables()
         self.load_config()      # config.yaml
@@ -30,15 +34,18 @@ class main():
         self.fix_image_paths()
         
         self.message_box = AppMessageBox(icon_path=self.images["icon"])
+        
         self.check_if_already_running(self.program_name) # Check if application is already running
-
         self.scale_ui_cfg()
-        self.start_program()
 
         if self.settings["general"]["show_ui_at_start"]:
             # Only show if the UI will show on boot.
             # Otherwise, we load later when opening UI.
-            QTimer.singleShot(500, self.check_notices)
+            print("Checking For Notices...")
+            QTimer.singleShot(1000, self.check_notices)
+
+        self.start_program()    # start program
+
         
     def create_global_variables(self):
         # Global Configuration Variables
@@ -329,45 +336,49 @@ class main():
         return False
     
     def check_notices(self):
-        """Load notices and show any that aren't dismissed or globally disabled."""
-        notices_dir = Path(self.working_dir) / "notices"
-        notices_dir.mkdir(exist_ok=True)
+        """
+        Load unread notices and display them in a slideshow-style dialog.
+        """
+        logger.debug("check_notices: starting")
 
         general_settings = self.settings.setdefault("general", {})
         if general_settings.get("disable_notices", False):
-            logger.info("Notices disabled globally.")
+            logger.info("check_notices: notices globally disabled")
             return
 
+        notices_dir = Path(self.working_dir) / "notices"
+        notices_dir.mkdir(exist_ok=True)
+
         dismissed = set(general_settings.get("dismissed_notices", []))
-        settings_changed = False
+        logger.debug(f"check_notices: dismissed = {dismissed}")
 
-        for notice_file in sorted(notices_dir.glob("*.yaml")):
-            try:
-                notice = yaml.safe_load(notice_file.read_text())
-                nid = notice.get("id")
-                if not nid or nid in dismissed:
-                    continue
+        unread = NoticeCarouselDialog.load_notices(notices_dir, dismissed)
 
-                title = notice.get("title", "Update Notice")
-                message = notice.get("message", "")
+        if not unread:
+            logger.info("check_notices: no unread notices")
+            return
 
-                never_show = self.message_box.notice(message, title, "Never show again")
+        logger.info(f"check_notices: displaying {len(unread)} notices")
 
-                if never_show:
-                    general_settings["disable_notices"] = True
-                    settings_changed = True
-                    break  # stop checking more notices if globally disabled
+        dialog = NoticeCarouselDialog(
+            unread,
+            icon_path=QIcon(self.images["icon"]),
+            parent=self
+        )
+        dialog.exec()
 
-                dismissed.add(nid)
-                settings_changed = True
+        # Persist dismissals
+        for notice in unread:
+            dismissed.add(notice["id"])
 
-            except Exception as e:
-                logger.error(f"Failed to load notice {notice_file}: {e}")
+        if dialog.disable_future:
+            general_settings["disable_notices"] = True
+            logger.info("check_notices: user disabled future notices")
 
-        if settings_changed:
-            general_settings["dismissed_notices"] = list(dismissed)
-            FileUtils.write_yaml(self.settings_file, self.settings)
+        general_settings["dismissed_notices"] = list(dismissed)
+        FileUtils.write_yaml(self.settings_file, self.settings)
 
+        logger.debug("check_notices: finished")
 
     def start_program(self):
         """ Create and show the main window/tray"""
