@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/github/license/queball1999/QSnippet" alt="License"/>
   <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Platform"/>
   <img src="https://img.shields.io/badge/python-3.13-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/last%20updated-12/12/25-green" alt="Last Edited"/>
+  <img src="https://img.shields.io/badge/last%20updated-12/16/25-green" alt="Last Edited"/>
 </div>
 
 </br>
@@ -39,6 +39,9 @@ QSnippet helps you:
 - Work faster without relying on cloud services or browser extensions
 
 ## Screenshots
+
+Demo
+<img src="images/QSnippet_demo.gif" alt="Demo of QSnippet" style="align:center;"/>
 
 Homepage
 <img src="images/homepage.png" alt="Photo of QSnippet" style="align:center;"/>

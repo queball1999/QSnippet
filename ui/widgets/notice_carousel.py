@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 
 from PySide6.QtWidgets import (
-    QDialog, QLabel, QTextEdit, QPushButton,
+    QDialog, QLabel, QTextBrowser, QPushButton,
     QHBoxLayout, QVBoxLayout, QCheckBox,
 )
 from PySide6.QtCore import Qt
@@ -52,10 +52,10 @@ class NoticeCarouselDialog(QDialog):
         self.title_label = QLabel()
         self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
 
-        self.body = QTextEdit()
-        self.body.setReadOnly(True)
+        self.body = QTextBrowser()
+        self.body.setOpenExternalLinks(True)
         self.body.setAlignment(Qt.AlignCenter)
-        self.body.setFrameShape(QTextEdit.NoFrame)
+        self.body.setFrameShape(QTextBrowser.NoFrame)
 
         # Navigation
         self.prev_btn = QPushButton("<")
