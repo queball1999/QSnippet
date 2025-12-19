@@ -85,6 +85,31 @@ or
 python -m PyInstaller --noconfirm --onefile --windowed --icon ".\images\QSnippet.ico" --add-data ".\images:images" ".\QSnippet.py"
 ```
 
+## Verifying Downloads
+
+All QSnippet releases are cryptographically signed using GPG. Each downloadable file is accompanied by a corresponding `.sig` signature that allows you to verify its integrity and authenticity.
+
+These steps assume you have downloaded the project’s public signing key [gpg-public.asc](./gpg-public.asc) and want to verify a release file.
+
+1. Import the public key:
+    ```
+    gpg --import gpg-public.asc
+    ```
+
+2. Verify checksum:
+    ```
+    gpg --verify SHA256SUMS.txt.sig SHA256SUMS.txt
+    ```
+
+3. Verify binary:
+    ```
+    sha256sum -c SHA256SUMS.txt
+    ```
+
+
+> **Important:** Do not run any downloaded files unless they successfully verify.
+
+
 ## License
 
 QSnippet is released under the MIT License.  
