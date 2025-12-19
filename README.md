@@ -85,6 +85,25 @@ or
 python -m PyInstaller --noconfirm --onefile --windowed --icon ".\images\QSnippet.ico" --add-data ".\images:images" ".\QSnippet.py"
 ```
 
+## Verifying Downloads
+
+All QSnippet releases are signed with GPG.
+
+1. Import the public key:
+    ```
+    gpg --import gpg-public.asc
+    ```
+
+2. Verify checksum:
+    ```
+    gpg --verify SHA256SUMS.txt.sig SHA256SUMS.txt
+    ```
+
+3. Verify binary:
+    ```
+    sha256sum -c SHA256SUMS.txt
+    ```
+
 ## License
 
 QSnippet is released under the MIT License.  

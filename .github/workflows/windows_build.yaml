@@ -90,6 +90,5 @@ jobs:
             dist/**/*.exe
             dist/**/*.sig
             dist/SHA256SUMS.txt
-            dist/SHA256SUMS.txt.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
