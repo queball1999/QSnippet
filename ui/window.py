@@ -20,7 +20,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 class QSnippet(QMainWindow):
+    """
+    Main application window for QSnippet.
+    Handles UI, system tray, service lifecycle,
+    and user-facing actions.
+    """
+
     def __init__(self, parent=None):
+        logger.info("Initializing QSnippet Main Window")
+        
         super().__init__()
         self.parent = parent
         self.cfg = parent.cfg
@@ -33,11 +41,7 @@ class QSnippet(QMainWindow):
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
         self.resize(width, height)
-
-        self._status_timer = QTimer(self)
-        self._status_timer.timeout.connect(self.check_service_status)
-        # commentiung out 09/04/25
-        # self._status_timer.start(5000)
+        logger.debug("Window dimensions set: %sx%s", width, height)
 
         self.snippet_service = SnippetService(self.parent.snippet_db_file)
 
@@ -47,7 +51,14 @@ class QSnippet(QMainWindow):
         self.init_tray_menu()
         self.start_service()
 
+        logger.info("QSnippet Main Window initialized successfully")
+
     def initUI(self):
+        """
+        Initialize the main editor UI.
+        """
+        logger.info("Initializing main UI")
+
         container = QWidget()
         layout = QHBoxLayout(container)
 
@@ -58,10 +69,17 @@ class QSnippet(QMainWindow):
         layout.addWidget(self.editor)
         container.setLayout(layout)
         self.setCentralWidget(container)
+
         if self.parent.general_show_ui_at_start:
+            logger.debug("Showing UI at startup")
             self.show()
 
     def init_menubar(self):
+        """
+        Initialize application menu bar and connect actions.
+        """
+        logger.info("Initializing menu bar")
+
         self.menubar = MenuBar(main=self.parent, parent=self)
         self.menubar.importAction.connect(self.handle_import_action)
         self.menubar.exportAction.connect(self.handle_export_action)
@@ -71,162 +89,214 @@ class QSnippet(QMainWindow):
         self.setMenuBar(self.menubar)
 
     def init_toolbar(self):
-        # install the toolbar
+        """
+        Initialize toolbar.
+        """
+        logger.info("Initializing toolbar")
+
         self.toolbar = ToolbarMenu(self)
         self.addToolBar(self.toolbar)
 
     def init_tray_menu(self):
-        logger = logging.getLogger(__name__)
-        logger.debug("init_tray_menu: starting initialization of system tray")
+        """
+        Initialize the system tray icon and context menu.
+        """
+        logger.info("Initializing system tray menu")
 
         try:
-            icon_path = None
-            try:
-                icon_path = self.parent.images.get("icon")
-                logger.debug("init_tray_menu: icon path resolved: %s", icon_path)
-            except Exception:
-                logger.exception("init_tray_menu: failed to read icon path from parent.images")
+            icon_path = self.parent.images.get("icon")
+            logger.debug("Tray icon path: %s", icon_path)
 
             icon = QIcon(icon_path)
-            logger.debug("init_tray_menu: QIcon created (isNull=%s)", icon.isNull())
+            logger.debug("Tray icon loaded (isNull=%s)", icon.isNull())
 
             self.tray = QSystemTrayIcon(icon, self.app)
-            self.tray.setToolTip('QSnippet')
-            logger.debug("init_tray_menu: QSystemTrayIcon created and tooltip set")
+            self.tray.setToolTip("QSnippet")
 
-            # Allow left clicks of tray icon to show UI
             self.tray.activated.connect(self.on_tray_icon_activated)
-            logger.debug("init_tray_menu: connected activated -> on_tray_icon_activated")
 
             menu = TrayMenu(main=self.parent)
-            logger.debug("init_tray_menu: TrayMenu instance created")
 
-            # Connect menu signals with logging for each connection
             menu.edit_signal.connect(self.show_window)
-            logger.debug("init_tray_menu: connected edit_signal -> show_window")
-
             menu.exit_signal.connect(self.exit)
-            logger.debug("init_tray_menu: connected exit_signal -> exit")
-
             menu.startup_signal.connect(self.handle_startup_signal)
-            logger.debug("init_tray_menu: connected startup_signal -> handle_startup_signal")
-
             menu.showui_signal.connect(self.handle_show_ui_signal)
-            logger.debug("init_tray_menu: connected showui_signal -> handle_show_ui_signal")
 
             self.tray.setContextMenu(menu)
-            logger.debug("init_tray_menu: context menu set on tray")
-
             self.tray.show()
-            logger.info("init_tray_menu: system tray icon shown successfully")
+
+            logger.info("System tray initialized successfully")
+
         except Exception:
-            logger.exception("init_tray_menu: unexpected error while initializing system tray")
+            logger.exception("Failed to initialize system tray")
 
     def run(self):
+        """
+        Run the Qt application event loop.
+        """
+        logger.info("Starting Qt application event loop")
         sys.exit(self.app.exec())
 
+    # Serivce Control
+
     def start_service(self):
+        logger.info("Starting snippet service")
         self.snippet_service.start()
         self.state = "running"
-        if self.editor.isVisible():
-            self.statusBar().showMessage(f"Service status: Running")
+        self._update_status_bar("Running")
 
     def stop_service(self):
+        logger.info("Stopping snippet service")
         self.snippet_service.stop()
         self.state = "stopped"
-        if self.editor.isVisible():
-            self.statusBar().showMessage(f"Service status: Stopped")
+        self._update_status_bar("Stopped")
 
     def pause_service(self):
+        logger.info("Pausing snippet service")
         self.snippet_service.pause()
         self.state = "paused"
-        if self.editor.isVisible():
-            self.statusBar().showMessage(f"Service status: Paused")
+        self._update_status_bar("Paused")
 
     def resume_service(self):
+        logger.info("Resuming snippet service")
         self.snippet_service.resume()
         self.state = "running"
-        if self.editor.isVisible():
-            self.statusBar().showMessage(f"Service status: Running")
+        self._update_status_bar("Running")
 
     def check_service_status(self):
-        if self.snippet_service._thread.is_alive() and self.state == "running":
-            self.statusBar().showMessage(f"Service status: Running")
+        """
+        Update status bar based on service state.
+        """
+        logger.debug("Checking service status")
+
+        if self.snippet_service.active():
+            self._update_status_bar("Running")
         elif self.state == "paused":
-            self.statusBar().showMessage(f"Service status: Paused")
+            self._update_status_bar("Paused")
         elif self.state == "stopped":
-            self.statusBar().showMessage(f"Service status: Stopped")
-        else:   # default to error message
-            self.statusBar().showMessage(f"Service status: Error")
+            self._update_status_bar("Stopped")
+        else:
+            self._update_status_bar("Error")
+
+    def _update_status_bar(self, status: str):
+        if self.editor.isVisible():
+            self.statusBar().showMessage(f"Service status: {status}")
+
+    # Handlers
 
     def handle_startup_signal(self, enabled: bool):
-        if enabled:
-            RegUtils.add_to_run_key(app_exe_path=self.parent.app_exe, entry_name="QSnippet")
-        else:
-            RegUtils.remove_from_run_key(entry_name="QSnippet")
+        """
+        Enable or disable startup at boot.
+        """
+        logger.info("Updating startup setting: %s", enabled)
 
-        # Update YAML settings
-        self.parent.skip_reg = False    # Force a skip so we only load reg key once
-        self.parent.settings["general"]["start_at_boot"] = enabled
-        FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
-        QTimer.singleShot(1000, self.unset_skip_reg)
+        try:
+            if enabled:
+                RegUtils.add_to_run_key(
+                    app_exe_path=self.parent.app_exe,
+                    entry_name="QSnippet",
+                )
+            else:
+                RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+            self.parent.skip_reg = False
+            self.parent.settings["general"]["start_at_boot"] = enabled
+            FileUtils.write_yaml(
+                self.parent.settings_file,
+                self.parent.settings,
+            )
+
+            QTimer.singleShot(1000, self.unset_skip_reg)
+
+        except Exception:
+            logger.exception("Failed to update startup setting")
 
     def handle_show_ui_signal(self, checked: bool):
+        """
+        Persist show UI at startup preference.
+        """
+        logger.info("Updating show UI at startup: %s", checked)
+
         self.parent.settings["general"]["show_ui_at_start"] = checked
-        FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
+        FileUtils.write_yaml(
+            self.parent.settings_file,
+            self.parent.settings,
+        )
 
     def handle_import_action(self):
-        FileUtils.import_snippets_with_dialog(self, self.parent.snippet_db)
-        self.snippet_service.refresh()  # Refresh Snippet Service
-        self.editor.load_snippets() # Trigger editor to re-load snippets
+        """
+        Import snippets via dialog and refresh UI.
+        """
+        logger.info("Importing snippets via menu action")
+
+        FileUtils.import_snippets_with_dialog(
+            self,
+            self.parent.snippet_db,
+        )
+        self.snippet_service.refresh()
+        self.editor.load_snippets()
 
     def handle_export_action(self):
-        FileUtils.export_snippets_with_dialog(self, self.parent.snippet_db)
-        self.snippet_service.refresh()  # Refresh Snippet Service
-        self.editor.load_snippets() # Trigger refresh of snippets
+        """
+        Export snippets via dialog.
+        """
+        logger.info("Exporting snippets via menu action")
+
+        FileUtils.export_snippets_with_dialog(
+            self,
+            self.parent.snippet_db,
+        )
+        self.snippet_service.refresh()
+        self.editor.load_snippets()
 
     def handle_collect_logs(self):
-        """Collect logs and relevant config into a ZIP in Downloads."""
+        """
+        Collect logs and configuration files into a ZIP archive.
+        """
+        logger.info("Collecting logs")
+
         try:
             downloads_dir = Path.home() / "Downloads"
             downloads_dir.mkdir(exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            zip_name = f"QSnippet_Logs_{timestamp}.zip"
-            zip_path = downloads_dir / zip_name
+            zip_path = downloads_dir / f"QSnippet_Logs_{timestamp}.zip"
 
             log_dir = Path(self.parent.logs_dir)
-            app_data_dir = Path(self.parent.app_data_dir)
             config_file = Path(self.parent.config_file)
             settings_file = Path(self.parent.settings_file)
 
             if not log_dir.exists():
-                QMessageBox.information(self, "No Logs Found",
-                                        "No logs directory exists yet.")
+                logger.info("No logs directory found")
+                QMessageBox.information(
+                    self,
+                    "No Logs Found",
+                    "No logs directory exists yet.",
+                )
                 return
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-
-                # Add logs
                 for file in log_dir.rglob("*"):
                     if file.is_file():
-                        arcname = file.relative_to(log_dir)
-                        zipf.write(file, f"logs/{arcname}")
+                        zipf.write(
+                            file,
+                            f"logs/{file.relative_to(log_dir)}",
+                        )
 
-                # Add config files
                 zipf.write(config_file, "config/config.yaml")
                 zipf.write(settings_file, "config/settings.yaml")
-                
-                # Add about info
+
                 info = self.build_about_info()
                 if info:
                     zipf.writestr("about_info.txt", info["text"])
+
+            logger.info("Logs collected: %s", zip_path)
 
             reply = QMessageBox.question(
                 self,
                 "Logs Collected",
                 f"Logs exported to:\n\n{zip_path}\n\nOpen folder?",
-                QMessageBox.Yes | QMessageBox.No
+                QMessageBox.Yes | QMessageBox.No,
             )
 
             if reply == QMessageBox.Yes:
@@ -237,47 +307,64 @@ class QSnippet(QMainWindow):
                 else:
                     subprocess.call(["xdg-open", downloads_dir])
 
-        except Exception as e:
-            logging.exception("Failed to collect logs")
-            QMessageBox.critical(self, "Error Collecting Logs", str(e))
-    
+        except Exception:
+            logger.exception("Failed to collect logs")
+            QMessageBox.critical(
+                self,
+                "Error Collecting Logs",
+                "An unexpected error occurred while collecting logs.",
+            )
+
     def handle_log_level(self, level: str):
-        """Set log level through AppLogger and persist to settings.yaml."""
+        """
+        Update application log level and persist to settings.
+        """
+        logger.info("Updating log level to %s", level)
+
         try:
-            # Convert string → logging constant
             mapping = {
                 "ERROR": logging.ERROR,
                 "WARNING": logging.WARNING,
                 "INFO": logging.INFO,
-                "DEBUG": logging.DEBUG
+                "DEBUG": logging.DEBUG,
             }
-
             new_level = mapping.get(level.upper(), logging.ERROR)
 
-            # Update logger immediately
             root = logging.getLogger()
             root.setLevel(new_level)
-            logging.info(f"Log level changed to {level}")
 
-            # Update YAML settings
             self.parent.settings["log_level"] = level
-            FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
-
-            # Re-init logger class
-            self.parent.logger = AppLogger(
-                log_filepath=self.parent.log_path,
-                log_level=new_level
+            FileUtils.write_yaml(
+                self.parent.settings_file,
+                self.parent.settings,
             )
 
-        except Exception as e:
-            logging.exception("Failed to update log level")
-            QMessageBox.critical(self, "Error", f"Failed to set log level:\n{e}")
+            self.parent.logger = AppLogger(
+                log_filepath=self.parent.log_path,
+                log_level=new_level,
+            )
 
+        except Exception:
+            logger.exception("Failed to update log level")
+            QMessageBox.critical(
+                self,
+                "Error",
+                "Failed to update log level.",
+            )
 
     def handle_show_info(self):
+        """
+        Display About dialog.
+        """
+        logger.info("Showing application info dialog")
+
         info = self.build_about_info()
         if not info:
-            QMessageBox.critical(self, "Error", "Unable to load application info.")
+            QMessageBox.critical(
+                self,
+                "Error",
+                "Unable to load application info.",
+            )
             return
 
         box = QMessageBox(self)
@@ -286,7 +373,6 @@ class QSnippet(QMainWindow):
         box.setTextInteractionFlags(Qt.TextBrowserInteraction)
         box.setText(info["html"])
         box.exec()
-
 
     def build_about_info(self):
         """Return dict with 'html' and 'text' fields or False on failure."""
@@ -385,28 +471,44 @@ class QSnippet(QMainWindow):
             return False
 
     def unset_skip_reg(self):
+        """
+        Reset registry skip flag.
+        """
+        logger.debug("Resetting skip_reg flag")
         self.parent.skip_reg = False
 
     def on_tray_icon_activated(self, event):
-        """ Handle left-click event and show UI """
+        """
+        Handle tray icon activation.
+        """
         if event == QSystemTrayIcon.Trigger:
-            # Left click
             if not self.isVisible():
                 self.show_window()
             else:
-                self.raise_()  # bring to front
+                self.raise_()
                 self.activateWindow()
 
     def show_window(self):
+        """
+        Show main application window.
+        """
+        logger.info("Showing main window")
         self.show()
         QTimer.singleShot(500, self.parent.check_notices)
 
     def exit(self):
+        """
+        Exit application cleanly.
+        """
+        logger.info("Exiting QSnippet")
         self.stop_service()
         self.tray.hide()
         sys.exit()
 
     def closeEvent(self, event):
-        # Override close to hide instead of exiting app
+        """
+        Override close event to hide window instead of exiting.
+        """
+        logger.debug("Close event intercepted; hiding window")
         event.ignore()
         self.hide()

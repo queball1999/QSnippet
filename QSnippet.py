@@ -25,13 +25,15 @@ logger = logging.getLogger(__name__)
 
 class main():
     def __init__(self):
-        print("Start")
         # Main Program Execution
+        # NOTE: logging is NOT fully initialized until after init_logger
         self.create_global_variables()
         self.load_config()      # config.yaml
         self.load_settings()    # settings.yaml
         self.init_logger()
         self.fix_image_paths()
+
+        logger.info("Application bootstrap complete")
         
         self.message_box = AppMessageBox(icon_path=self.images["icon"])
         
@@ -41,7 +43,6 @@ class main():
         if self.settings["general"]["show_ui_at_start"]:
             # Only show if the UI will show on boot.
             # Otherwise, we load later when opening UI.
-            print("Checking For Notices...")
             QTimer.singleShot(1000, self.check_notices)
 
         self.start_program()    # start program
@@ -97,15 +98,6 @@ class main():
 
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
-
-    def migrate_yaml_to_sqlite(self, yaml_path, db: SnippetDB):
-        import yaml
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        for entry in data.get("snippets", []):
-            entry["tags"] = ""
-            entry["return_press"] = False
-            db.insert_snippet(entry)
         
     def ensure_directories_exist(self, directories: list = []):
         """
@@ -337,28 +329,27 @@ class main():
     
     def check_notices(self):
         """
-        Load unread notices and display them in a slideshow-style dialog.
+        Load and display unread notices.
         """
-        logger.debug("check_notices: starting")
+        logger.debug("Checking for unread notices")
 
         general_settings = self.settings.setdefault("general", {})
+
         if general_settings.get("disable_notices", False):
-            logger.info("check_notices: notices globally disabled")
+            logger.info("Notices disabled by user")
             return
 
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
         dismissed = set(general_settings.get("dismissed_notices", []))
-        logger.debug(f"check_notices: dismissed = {dismissed}")
-
         unread = NoticeCarouselDialog.load_notices(notices_dir, dismissed)
 
         if not unread:
-            logger.info("check_notices: no unread notices")
+            logger.debug("No unread notices found")
             return
 
-        logger.info(f"check_notices: displaying {len(unread)} notices")
+        logger.info(f"displaying {len(unread)} notices")
 
         dialog = NoticeCarouselDialog(
             unread,
@@ -373,15 +364,18 @@ class main():
 
         if dialog.disable_future:
             general_settings["disable_notices"] = True
-            logger.info("check_notices: user disabled future notices")
+            logger.info("user disabled future notices")
 
         general_settings["dismissed_notices"] = list(dismissed)
         FileUtils.write_yaml(self.settings_file, self.settings)
 
-        logger.debug("check_notices: finished")
+        logger.debug("finished")
 
     def start_program(self):
-        """ Create and show the main window/tray"""
+        """
+        Create and launch the main application window.
+        """
+        logger.info("Starting QSnippet UI")
         self.qsnippet = QSnippet(parent=self)
         self.qsnippet.run()
 

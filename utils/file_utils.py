@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+logger = logging.getLogger(__name__)
+
 
 class FileUtils:
     """
@@ -15,6 +17,8 @@ class FileUtils:
     @staticmethod
     def ensure_dir(path: Path):
         """Create directory if it doesn"t exist."""
+        logger.debug("Ensuring directory exists: %s", path)
+
         try:
             path.mkdir(parents=True, exist_ok=True)
         except Exception as e:
@@ -24,9 +28,13 @@ class FileUtils:
     @staticmethod
     def read_yaml(path: Path) -> dict:
         """Read a YAML file and return its contents as a dict."""
+        logger.debug("Reading YAML file: %s", path)
+
         try:
             with path.open("r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
+                data = yaml.safe_load(f) or {}
+            logger.debug("YAML file loaded successfully: %s", path)
+            return data
         except Exception as e:
             logging.error(f"Failed to read YAML file {path}: {e}")
             return {}
@@ -34,11 +42,13 @@ class FileUtils:
     @staticmethod
     def write_yaml(path: Path, data: dict):
         """Write a dict to a YAML file atomically."""
+        logger.debug("Writing YAML file: %s", path)
         temp_path = path.with_suffix(path.suffix + ".tmp")
         try:
             with temp_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(data, f)
             temp_path.replace(path)
+            logger.info("YAML file written successfully: %s", path)
         except Exception as e:
             logging.error(f"Failed to write YAML file {path}: {e}")
             raise
@@ -46,10 +56,11 @@ class FileUtils:
     @staticmethod
     def export_snippets_yaml(path: Path, snippets: list[dict]):
         """Export snippets to a YAML file."""
+        logger.debug("Exporting %d snippets to %s", len(snippets), path)
         try:
             data = {"snippets": snippets}
             FileUtils.write_yaml(path, data)
-            logging.info(f"Exported {len(snippets)} snippets to {path}")
+            logger.info("Exported %d snippets to %s", len(snippets), path)
         except Exception as e:
             logging.error(f"Failed to export snippets to YAML: {e}")
             raise
@@ -57,12 +68,15 @@ class FileUtils:
     @staticmethod
     def import_snippets_yaml(path: Path) -> list[dict]:
         """Import snippets from a YAML file and return as a list of dicts."""
+        logger.debug("Importing snippets from YAML: %s", path)
+
         try:
             data = FileUtils.read_yaml(path)
             snippets = data.get("snippets", [])
             if not isinstance(snippets, list):
                 raise ValueError("Invalid YAML format: 'snippets' must be a list.")
-            logging.info(f"Imported {len(snippets)} snippets from {path}")
+            
+            logger.info("Imported %d snippets from %s", len(snippets), path)
             return snippets
         except Exception as e:
             logging.error(f"Failed to import snippets from YAML: {e}")
@@ -70,6 +84,9 @@ class FileUtils:
 
     @staticmethod
     def import_snippets_with_dialog(parent, db):
+        """Prompt user to import snippets from YAML."""
+        logger.debug("Opening import snippets dialog")
+
         path, _ = QFileDialog.getOpenFileName(
             parent,
             "Import Snippets from YAML",
@@ -77,6 +94,7 @@ class FileUtils:
             "YAML Files (*.yaml *.yml)"
         )
         if not path:
+            logger.debug("Import cancelled by user")
             return 0
 
         snippets = FileUtils.import_snippets_yaml(Path(path))
@@ -90,6 +108,12 @@ class FileUtils:
             else:
                 updated_count += 1
 
+        logger.info(
+            "Snippet import complete: %d new, %d updated",
+            new_count,
+            updated_count,
+        )
+
         QMessageBox.information(
             parent,
             "Import Complete",
@@ -100,18 +124,33 @@ class FileUtils:
 
     @staticmethod
     def export_snippets_with_dialog(parent, db):
+        """Prompt user to export snippets to YAML."""
         date = datetime.now().date()
+        default_name = f"qsnippets-export-{date}.yaml"
+
+        logger.debug("Opening export snippets dialog")
+    
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Export Snippets to YAML",
-            str(Path.home() / f"qsnippets-export-{date}.yaml"),
-            "YAML Files (*.yaml *.yml)"
+            str(Path.home() / default_name),
+            "YAML Files (*.yaml *.yml)",
         )
+
         if not path:
+            logger.debug("Export cancelled by user")
             return 0
+
         snippets = db.get_all_snippets()
         FileUtils.export_snippets_yaml(Path(path), snippets)
-        QMessageBox.information(parent, "Export Complete", f"Exported {len(snippets)} snippets.")
+
+        QMessageBox.information(
+            parent,
+            "Export Complete",
+            f"Exported {len(snippets)} snippets.",
+        )
+
+        logger.info("Snippet export completed: %s", path)
         return len(snippets)
 
     @staticmethod
@@ -124,6 +163,8 @@ class FileUtils:
         """
         Retrieve default directories based on the operating system.
         """
+        logger.debug("Resolving default OS paths")
+
         try:
             system = platform.system()
             user_home = Path.home()
@@ -149,6 +190,7 @@ class FileUtils:
             if hasattr(sys, "_MEIPASS"):
                 # Running inside a PyInstaller bundle
                 resource_dir = Path(sys._MEIPASS)
+                logger.debug("Detected PyInstaller runtime")
             else:
                 # Running from source / dev
                 resource_dir = Path.cwd()
@@ -168,7 +210,8 @@ class FileUtils:
         if path.exists():
             logging.debug(f"Config file already exists: {path}, skipping creation.")
             return
-    
+
+        logger.info("Creating default config file: %s", path)
         default_config = {
         "program_name": "QSnippet",
         "version": "0.0.0",
@@ -279,6 +322,8 @@ class FileUtils:
                 "theme": "dark"
             }
         }
+
+        logger.info("Creating default settings file: %s", path)
         FileUtils.write_yaml(path, default_settings)
 
     def create_snippets_db_file(path):
@@ -286,6 +331,10 @@ class FileUtils:
             logging.debug(f"DB already exists: {path}, skipping creation.")
             return
         
+        # This import statement is required here
+        # This prevents circular import and allows access when necessary.
+        # Do NOT remove.
         from .snippet_db import SnippetDB
+        logger.info("Creating snippets database: %s", path)
         db = SnippetDB(path)
         db._create_table()
