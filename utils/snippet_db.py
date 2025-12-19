@@ -118,9 +118,10 @@ class SnippetDB:
         logger.debug(f"Entry: {entry}")
         entry_id = entry.get("id")
 
-        if entry_id is None:
+        # Commenting out as this breaks making new snippets
+        """ if entry_id is None:
             logger.info("No valid entry id was detected. Skipping...")
-            return None
+            return None """
         
         try:
             with self.conn:
@@ -166,15 +167,15 @@ class SnippetDB:
             logger.error(f"An error occured while inserting a snippet into the database: {e}")
             return None
 
-    def delete_snippet(self, trigger: str):
+    def delete_snippet(self, snippet_id: id):
         """ Delete a snippet from the database. """
         # FIXME: This needs to be updated to id!
         logger.info("Deleting snippet from the database.")
-        logger.debug(f"Trigger: {trigger}")
+        logger.debug(f"Snippet ID: {snippet_id}")
 
         try:
             with self.conn:
-                self.conn.execute("DELETE FROM snippets WHERE trigger = ?", (trigger,))
+                self.conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
                 logger.info("Snippet deleted from the database")
 
         except Exception as e:
@@ -205,15 +206,14 @@ class SnippetDB:
             logger.error(f"An error occured while retrieving snippets from the database: {e}")
             return None
 
-    def get_snippet(self, trigger: str) -> Dict[str, Any]:
+    def get_snippet(self, snippet_id: int) -> Dict[str, Any]:
         """ Get single snippets from the database. """
-        # FIXME: This needs to be updated to id!
         logger.info("Fetching snippet from the database.")
-        logger.debug(f"Trigger: {trigger}")
+        logger.debug(f"Snippet ID: {snippet_id}")
 
         try:
             cur = self.conn.cursor()
-            cur.execute("SELECT * FROM snippets WHERE trigger = ?", (trigger,))
+            cur.execute("SELECT * FROM snippets WHERE trigger = ?", (snippet_id,))
             row = cur.fetchone()
 
             if row:
@@ -301,17 +301,17 @@ class SnippetDB:
             logger.error(f"An error occured while fetching all folders from the database: {e}")
             return None
 
-    def rename_snippet(self, trigger: str, new_label: str):
+    def rename_snippet(self, snippet_id: int, new_label: str):
         """
         Rename a snippet by updating its label.
         """
         # FIXME: This needs to be updated to id!
         logger.info("Renaming a snippet within the database.")
-        logger.debug(f"Trigger: {trigger} | New Label: {new_label}")
+        logger.debug(f"Snippet ID: {snippet_id} | New Label: {new_label}")
 
         try:
             with self.conn:
-                self.conn.execute("UPDATE snippets SET label = ? WHERE trigger = ?", (new_label, trigger))
+                self.conn.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
                 logger.info("Successfully renamed snippet.")
 
         except Exception as e:
