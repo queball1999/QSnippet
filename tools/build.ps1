@@ -7,7 +7,8 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location (Join-Path $ScriptDir "..")
 
 # Extract version from config.yaml using Python
-$VERSION = python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['version'])"
+# updating dir 12/22/25 to reflect new config path
+$VERSION = python -c "import yaml; print(yaml.safe_load(open('config\config.yaml'))['version'])"
 
 $APP_NAME     = "QSnippet"
 $ENTRY        = "QSnippet.py"

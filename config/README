@@ -1,0 +1,3 @@
+This folder contains all the default configuration files.
+
+Upon running the program, we will check existing files against these and merge into user files.

@@ -205,127 +205,102 @@ class FileUtils:
         except Exception as e:
             logging.critical("Could not retrieve OS specific directories!")
             raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
+
+    @staticmethod
+    def merge_dict(default: dict, user: dict) -> dict:
+        """
+        Recursively merge default values into user values.
+        User values treated as source of truth. 
+        Only Missing keys are added.
+        """
+        if not isinstance(default, dict):
+            return user
+
+        merged = dict(user)
+
+        for key, default_val in default.items():
+            if key not in merged:
+                merged[key] = default_val
+            else:
+                user_val = merged[key]
+                if isinstance(default_val, dict) and isinstance(user_val, dict):
+                    merged[key] = FileUtils.merge_dict(default_val, user_val)
+
+        return merged
+
+    @staticmethod
+    def create_config_file(default_dir: Path, user_path: Path, parent=None):
+        """
+        Create the user config.yaml by copying from the default config directory.
+        Does NOT overwrite existing user config.
+        """
+        if user_path.exists():
+            logger.debug("Config file already exists, skipping: %s", user_path)
+            return
+
+        source = default_dir / "config.yaml"
+
+        if not source.exists():
+            logger.critical("Default config file missing: %s", source)
+
+            QMessageBox.critical(
+                parent,
+                "Configuration Error",
+                "The default configuration file could not be found.\n\n"
+                "Please reinstall the application or report an issue."
+            )
+            raise FileNotFoundError(f"Missing default config file: {source}")
+
+        try:
+            FileUtils.ensure_dir(user_path.parent)
+            user_path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.info("Copied default config to user location: %s", user_path)
+        except Exception as e:
+            logger.critical("Failed to copy config file: %s", e)
+            QMessageBox.critical(
+                parent,
+                "Configuration Error",
+                f"Failed to create configuration file.\n\n{e}"
+            )
+            raise
+
+    @staticmethod
+    def create_settings_file(default_dir: Path, user_path: Path, parent=None):
+        """
+        Create the user settings.yaml by copying from the default config directory.
+        Does NOT overwrite existing user settings.
+        """
+        if user_path.exists():
+            logger.debug("Settings file already exists, skipping: %s", user_path)
+            return
+
+        source = default_dir / "settings.yaml"
+
+        if not source.exists():
+            logger.critical("Default settings file missing: %s", source)
+
+            QMessageBox.critical(
+                parent,
+                "Configuration Error",
+                "The default settings file could not be found.\n\n"
+                "Please reinstall the application or report an issue."
+            )
+            raise FileNotFoundError(f"Missing default settings file: {source}")
+
+        try:
+            FileUtils.ensure_dir(user_path.parent)
+            user_path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.info("Copied default settings to user location: %s", user_path)
+        except Exception as e:
+            logger.critical("Failed to copy settings file: %s", e)
+            QMessageBox.critical(
+                parent,
+                "Configuration Error",
+                f"Failed to create settings file.\n\n{e}"
+            )
+            raise
     
-    def create_config_file(path):
-        if path.exists():
-            logging.debug(f"Config file already exists: {path}, skipping creation.")
-            return
-
-        logger.info("Creating default config file: %s", path)
-        default_config = {
-        "program_name": "QSnippet",
-        "version": "0.0.0",
-        "log_level": "DEBUG",
-        "support_info": {
-            "email": "support@quynnsoftware.com"
-        },
-        "colors": {
-            "primary_background_active": "#FFFFFF",
-            "primary_background_disabled": "#e1e1e1",
-            "secondary_background_active": "#e1e1e1",
-            "secondary_background_disabled": "#7f7f7f",
-            "primary_accent_active": "#0a51cf",
-            "primary_accent_pressed": "#4895f6",
-            "primary_accent_disabled": "#cee9fe",
-            "secondary_accent_active": "#5c5e70",
-            "secondary_accent_pressed": "#abadba",
-            "secondary_accent_disabled": "#e3e4e8",
-            "tertiary_accent_active": "#0a8dcf",
-            "tertiary_accent_pressed": "#48d4f6",
-            "tertiary_accent_disabled": "#cefefd",
-            "success_color": "#00cc6a",
-            "fail_color": "#e81123",
-            "overlay_color": "#2a4252",
-            "dark_text_color_active": "#151a30",
-            "dark_text_color_disabled": "#7580ae",
-            "light_text_color_active": "#FFFFFF",
-            "light_text_color_disabled": "#FFFFFF"
-        },
-        "images": {
-            "icon_256": "icon_256x256.png",
-            "icon_128": "icon_128x128.png",
-            "icon_64": "icon_64x64.png",
-            "icon_32": "icon_32x32.png",
-            "icon_16": "icon_16x16.png",
-            "icon": "QSnippet.ico"
-        },
-        "fonts": {
-            "primary_font": "Inter",
-            "secondary_font": "DM Sans",
-            "sizes": {
-            "small": 12,
-            "medium": 14,
-            "large": 20,
-            "extra_large": 26,
-            "humongous": 32
-            }
-        },
-        "dimensions": {
-            "windows": {
-            "main": {
-                "width": 1200,
-                "height": 800
-            }
-            },
-            "buttons": {
-            "mini_slim": {
-                "width": 75,
-                "height": 25,
-                "radius": 4
-            },
-            "mini": {
-                "width": 100,
-                "height": 25,
-                "radius": 8
-            },
-            "small": {
-                "width": 125,
-                "height": 35,
-                "radius": 8
-            },
-            "medium": {
-                "width": 200,
-                "height": 45,
-                "radius": 8
-            },
-            "large": {
-                "width": 250,
-                "height": 65,
-                "radius": 8
-            }
-            },
-            "toggles": {
-            "small": {
-                "width": 60,
-                "height": 45,
-                "radius": 10
-            }
-            }
-        }
-        }
-
-        FileUtils.write_yaml(path, default_config)
-
-    def create_settings_file(path):
-        if path.exists():
-            logging.debug(f"Settings file already exists: {path}, skipping creation.")
-            return
-        
-        default_settings = {
-            "general": {
-                "start_at_boot": False,
-                "show_ui_at_start": True,
-                "disable_notices": False,
-                "dismissed_notices": []
-            },
-            "appearance": {
-                "theme": "dark"
-            }
-        }
-
-        logger.info("Creating default settings file: %s", path)
-        FileUtils.write_yaml(path, default_settings)
-
+    @staticmethod
     def create_snippets_db_file(path):
         if path.exists():
             logging.debug(f"DB already exists: {path}, skipping creation.")
@@ -338,3 +313,32 @@ class FileUtils:
         logger.info("Creating snippets database: %s", path)
         db = SnippetDB(path)
         db._create_table()
+
+    @staticmethod
+    def load_and_merge_yaml(default_path: Path, user_path: Path) -> dict:
+        """
+        Load default YAML and merge it into the user YAML.
+        Writes merged result back to user_path.
+        User values are treated as the source of truth.
+        """
+        logger.debug("Loading default YAML: %s", default_path)
+        default_data = FileUtils.read_yaml(default_path)
+
+        if user_path.exists():
+            logger.debug("Loading user YAML: %s", user_path)
+            user_data = FileUtils.read_yaml(user_path)
+        else:
+            logger.info("User YAML missing, creating new: %s", user_path)
+            user_data = {}
+
+        merged = FileUtils.merge_dict(default_data, user_data)
+
+        # Only write if file missing or structure changed
+        if not user_path.exists() or merged != user_data:
+            logger.info("Writing merged YAML to: %s", user_path)
+            FileUtils.ensure_dir(user_path.parent)
+            FileUtils.write_yaml(user_path, merged)
+        else:
+            logger.debug("User YAML already up to date: %s", user_path)
+
+        return merged

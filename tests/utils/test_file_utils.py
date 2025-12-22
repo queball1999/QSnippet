@@ -78,26 +78,27 @@ def test_import_snippets_yaml_invalid_format(tmp_path):
 
 # Default file creators
 def test_create_config_file(tmp_path):
-    path = tmp_path / "config.yaml"
+    default_dir = tmp_path / "default_dir"
+    user_path = tmp_path / "config.yaml"
 
-    FileUtils.create_config_file(path)
+    FileUtils.create_config_file(default_dir, user_path)
 
-    assert path.exists()
+    assert user_path.exists()
 
-    data = FileUtils.read_yaml(path)
+    data = FileUtils.read_yaml(user_path)
     assert data["program_name"] == "QSnippet"
     assert "colors" in data
     assert "images" in data
 
-
 def test_create_settings_file(tmp_path):
-    path = tmp_path / "settings.yaml"
+    default_dir = tmp_path / "default_dir"
+    user_path = tmp_path / "settings.yaml"
 
-    FileUtils.create_settings_file(path)
+    FileUtils.create_settings_file(default_dir, user_path)
 
-    assert path.exists()
+    assert user_path.exists()
 
-    data = FileUtils.read_yaml(path)
+    data = FileUtils.read_yaml(user_path)
     assert "general" in data
     assert data["general"]["start_at_boot"] is False
 
@@ -110,8 +111,7 @@ def test_create_snippets_db_file(tmp_path):
     assert path.exists()
     assert path.stat().st_size > 0
 
-
-# get_default_paths (safe subset)
+# get_default_paths
 def test_get_default_paths_structure(monkeypatch, tmp_path):
     """
     Validate keys and path types without touching real OS locations.

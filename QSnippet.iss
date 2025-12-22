@@ -42,10 +42,11 @@ Source: "{#SourcePath}\output\windows\{#MyAppExeName}"; DestDir: "{app}"; Permis
 Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
 Source: "{#SourcePath}\README.md"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
-; Always overwrite config.yaml
-Source: "{#SourcePath}\config.yaml"; DestDir: "{localappdata}\QSnippet"; DestName: "config.yaml"; Flags: ignoreversion
-; Copy settings.yaml if it is missing
-Source: "{#SourcePath}\settings.yaml"; DestDir: "{localappdata}\QSnippet"; DestName: "settings.yaml"; Flags: onlyifdoesntexist
+
+; Copy config files, overwriting old default configuration files.
+; The application will pick up and handle these files accordingly.
+Source: "{#SourcePath}\config\config.yaml"; DestDir: "{app}\config"; Permissions: users-modify; Flags: ignoreversion
+Source: "{#SourcePath}\config\settings.yaml"; DestDir: "{app}\config"; Permissions: users-modify; Flags: ignoreversion
 
 [Dirs]
 Name: "{commonappdata}\QSnippet\logs"; Permissions: users-modify; Flags: uninsalwaysuninstall

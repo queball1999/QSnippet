@@ -7,7 +7,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/.."
 
 # Extract version from config.yaml using Python
-VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yaml'))['version'])")
+# updating dir 12/22/25 to reflect new config path
+VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])")
 
 APP_NAME="QSnippet"
 ENTRY="QSnippet.py"

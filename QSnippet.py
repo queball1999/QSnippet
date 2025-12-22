@@ -46,7 +46,6 @@ class main():
             QTimer.singleShot(1000, self.check_notices)
 
         self.start_program()    # start program
-
         
     def create_global_variables(self):
         # Global Configuration Variables
@@ -66,6 +65,7 @@ class main():
         self.resource_dir = FileUtils.get_default_paths()["resource_dir"]
         self.default_os_paths = FileUtils.get_default_paths()
 
+        self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
         self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
@@ -80,25 +80,64 @@ class main():
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.config_file = self.app_data_dir / "config.yaml"
-        self.settings_file = self.app_data_dir / "settings.yaml"
         self.snippet_db_file = self.app_data_dir / "snippets.db"
-        
-        # Ensure files exist
-        self.ensure_files_exist([
-            {"file": self.config_file, "function": FileUtils.create_config_file(self.config_file)},
-            {"file": self.settings_file, "function": FileUtils.create_settings_file(self.settings_file)},
-            {"file": self.snippet_db_file, "function": FileUtils.create_snippets_db_file(self.snippet_db_file)}
-        ])
-        
-        self.snippet_db = SnippetDB(self.snippet_db_file)
-
-        # Uncomment to run migration
-        # self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
-
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
+
+        # Config and Settings files
+
+        # These are the default config files
+        self.default_config_file   = self.config_dir / "config.yaml"
+        self.default_settings_file = self.config_dir / "settings.yaml"
+
+        # These are the user config files
+        self.config_file   = self.app_data_dir / "config.yaml"
+        self.settings_file = self.app_data_dir / "settings.yaml"
+
+        # Use this to ensure files exist
+        # Define files in a list of dicts with "file" and "function" keys
+        self.ensure_files_exist([
+            {
+                "file": self.snippet_db_file,
+                "function": lambda p=self.snippet_db_file:
+                    FileUtils.create_snippets_db_file(p)
+            },
+            {
+                "file": self.config_file,
+                "function": lambda p=self.config_file:
+                    FileUtils.create_config_file(
+                        default_dir=self.config_dir,
+                        user_path=p,
+                        parent=self
+                    )
+            },
+            {
+                "file": self.settings_file,
+                "function": lambda p=self.settings_file:
+                    FileUtils.create_settings_file(
+                        default_dir=self.config_dir,
+                        user_path=p,
+                        parent=self
+                    )
+            },
+        ])
+
+        # Load and Merge
+        self.config = FileUtils.load_and_merge_yaml(
+            default_path=self.default_config_file,
+            user_path=self.config_file,
+        )
+
+        self.settings = FileUtils.load_and_merge_yaml(
+            default_path=self.default_settings_file,
+            user_path=self.settings_file,
+        )
         
+        # Initialize Snippet DB instance
+        self.snippet_db = SnippetDB(self.snippet_db_file)
+
+        logger.info("Global variables created")
+
     def ensure_directories_exist(self, directories: list = []):
         """
         Ensures that all directories in the given list exist.
@@ -166,7 +205,7 @@ class main():
         except:
             logger.error("Failed to flatten config")
             return False
-        
+
     def load_config(self):
         """ This function loads a yaml config file and flattens its entries into attributes. """
         # Check for config

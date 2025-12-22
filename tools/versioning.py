@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import yaml, os
 
-with open("config.yaml") as f:
+# updating dir 12/22/25 to reflect new config path
+with open("config/config.yaml") as f:
     cfg = yaml.safe_load(f)
 
 version = cfg.get("version")
