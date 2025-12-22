@@ -1,3 +1,4 @@
+# Default Config
 program_name: QSnippet
 version: "0.0.5"
 log_level: DEBUG
@@ -34,6 +35,8 @@ images:
   icon_32: "icon_32x32.png"
   icon_16: "icon_16x16.png"
   icon: "QSnippet.ico"
+  snail: "snail.jpg"
+  cat: "cat.jpg"
 
 fonts:
   primary_font: "Inter"

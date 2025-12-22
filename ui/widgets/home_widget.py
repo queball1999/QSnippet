@@ -1,6 +1,12 @@
-from PySide6.QtWidgets import QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout, QGridLayout
-from PySide6.QtCore import Qt, Signal, QSize
+import logging
+from PySide6.QtWidgets import (
+    QWidget, QLabel, QTextEdit, QPushButton, QHBoxLayout, QGridLayout,
+    QMessageBox
+)
+from PySide6.QtCore import Qt, Signal, QDateTime
 from PySide6.QtGui import QPixmap
+
+logger = logging.getLogger(__name__)
 
 class HomeWidget(QWidget):
     new_snippet = Signal()
@@ -10,6 +16,12 @@ class HomeWidget(QWidget):
         super().__init__(parent)
         self.main = main
         self.parent = parent
+
+        # Easter Egg
+        # If user clicks the logo 5 times in 5 seconds, show snail image
+        self._icon_clicks = []
+        self._EASTER_WINDOW = 5000  # ms
+        self._EASTER_COUNT = 5
         
         self.initUI()
         self.applyStyles()
@@ -22,10 +34,14 @@ class HomeWidget(QWidget):
         # Welcome Hearer w/ Logo
         self.welcome_label = QLabel("Welcome to QSnippets")
         self.second_label = QLabel("Give your snippets a try below. It looks like you may want to create one to test here!")
-        
+
         self.pixmap = QPixmap(self.main.images["icon_64"])
         self.program_logo = QLabel()
         self.program_logo.setPixmap(self.pixmap)
+
+        if self.main.general_easter_eggs_enabled:
+            logger.debug("Easter Eggs are enabled in HomeWidget.")
+            self.program_logo.mousePressEvent = self.on_icon_clicked
 
         self.test_entry = QTextEdit()
 
@@ -51,6 +67,32 @@ class HomeWidget(QWidget):
         self.main_layout.addLayout(self.create_row, 4, 0, 1, 1)
 
         self.setLayout(self.main_layout)
+
+    def on_icon_clicked(self, event: None):
+        now = QDateTime.currentMSecsSinceEpoch()
+        self._icon_clicks.append(now)
+
+        # Keep only clicks in the last 5 seconds
+        cutoff = now - self._EASTER_WINDOW
+        self._icon_clicks = [t for t in self._icon_clicks if t >= cutoff]
+
+        if len(self._icon_clicks) >= self._EASTER_COUNT:
+            self._icon_clicks.clear()
+            self.show_snail()
+
+    def show_snail(self):
+        box = QMessageBox(self)
+        box.setWindowTitle("Easy there partner!")
+        box.setText(
+            "You almost ran me over!\n" \
+            "Enjoy this photo I took of a snail :)\n\n" \
+            "You can turn off easter eggs in the settings.\n\n"
+        )
+
+        pixmap = QPixmap(self.main.images["snail"])
+        box.setIconPixmap(pixmap.scaledToWidth(256, Qt.SmoothTransformation))
+
+        box.exec()
 
     # ----- Styling Functions -----
     def applyStyles(self):

@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/github/license/queball1999/QSnippet" alt="License"/>
   <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Platform"/>
   <img src="https://img.shields.io/badge/python-3.13-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/last%20updated-12/16/25-green" alt="Last Edited"/>
+  <img src="https://img.shields.io/badge/last%20updated-12/21/25-green" alt="Last Edited"/>
 </div>
 
 </br>
@@ -85,7 +85,7 @@ or
 python -m PyInstaller --noconfirm --onefile --windowed --icon ".\images\QSnippet.ico" --add-data ".\images:images" ".\QSnippet.py"
 ```
 
-## Verifying Downloads
+### Verifying Downloads
 
 All QSnippet releases are cryptographically signed using GPG. Each downloadable file is accompanied by a corresponding `.sig` signature that allows you to verify its integrity and authenticity.
 
@@ -109,6 +109,35 @@ These steps assume you have downloaded the project’s public signing key [gpg-p
 
 > **Important:** Do not run any downloaded files unless they successfully verify.
 
+
+### Unit Testing
+To help mitigate breaking changes, I have added some unit tests to verify the core functionality working. I still need to add additional testing to include the UI elements, but this should do for now.
+
+In order to run these tests, run the following command:
+
+```
+pytest
+```
+
+You should see something like the following output:
+```
+===================== test session starts =====================
+platform win32 -- Python 3.13.11, pytest-8.4.1, pluggy-1.6.0
+rootdir: ...\QSnippet
+plugins: Faker-37.4.0
+collected 53 items                                  
+
+tests\core\test_flatten_yaml.py ...             [  5%]
+tests\core\test_scaling.py ...                  [ 11%] 
+tests\service\test_snippet_service.py .......   [ 26%]
+tests\utils\test_config_utils.py ..........     [ 45%]
+tests\utils\test_file_utils.py ..........       [ 64%]
+tests\utils\test_logging_utils.py .....         [ 73%]
+tests\utils\test_reg_utils.py ......            [ 84%]
+tests\utils\test_snippet_db.py ........         [100%]
+
+===================== 53 passed in 4.99s ======================
+```
 
 ## License
 

@@ -1,7 +1,9 @@
+# Default Settings Configuration
 general:
-  start_at_boot: false
-  show_ui_at_start: false
+  start_at_boot: true
+  show_ui_at_start: true
   disable_notices: false
   dismissed_notices: []
+  easter_eggs_enabled: true
 appearance:
   theme: dark
