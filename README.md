@@ -13,10 +13,10 @@
     <a href="https://github.com/queball1999/QSnippet/releases">Releases</a>
   </p>
   
-  <img src="https://img.shields.io/github/license/queball1999/QSnippet" alt="License"/>
-  <img src="https://img.shields.io/badge/platform-Windows-blue" alt="Platform"/>
-  <img src="https://img.shields.io/badge/python-3.13-blue" alt="Python"/>
-  <img src="https://img.shields.io/badge/last%20updated-12/21/25-green" alt="Last Edited"/>
+  <img src="https://img.shields.io/github/v/release/queball1999/QSnippet?color=lime-green" alt="Latest Release">
+  <img src="https://img.shields.io/github/downloads/queball1999/qsnippet/total?color=blue" alt="Downloads">
+  <img src="https://img.shields.io/github/license/queball1999/QSnippet?color=orange" alt="License"/>
+  <img src="https://img.shields.io/github/last-commit/queball1999/QSnippet?color=red" alt="Last Commit"/>
 </div>
 
 </br>

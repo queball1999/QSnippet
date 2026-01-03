@@ -377,9 +377,16 @@ class QSnippet(QMainWindow):
     def build_about_info(self):
         """Return dict with 'html' and 'text' fields or False on failure."""
         try:
+            # Import build date info
+            try:
+                from config.build_info import BUILD_VERSION, BUILD_DATE, BUILD_COMMIT
+            except ImportError:
+                BUILD_VERSION = "unknown"
+                BUILD_DATE = "unknown"
+                BUILD_COMMIT = "unknown"
+
             parent = self.parent
             name = parent.program_name
-            version = getattr(parent, "version", "Unknown")
 
             support_email = parent.support_info.get("email", "N/A")
             support_site = parent.support_info.get("site", "N/A")
@@ -391,7 +398,7 @@ class QSnippet(QMainWindow):
 
             # Install date
             try:
-                install_ts = config_file.stat().st_ctime
+                install_ts = config_file.stat().st_birthtime
                 install_date = datetime.fromtimestamp(install_ts).strftime("%Y-%m-%d %H:%M")
             except:
                 install_date = "Unknown"
@@ -417,7 +424,9 @@ class QSnippet(QMainWindow):
             # ----- HTML VERSION -----
             html = f"""
             <h2>{name}</h2>
-            Version: {version}<br>
+            Version: {BUILD_VERSION}<br>
+            Build Date: {BUILD_DATE}<br>
+            Commit: {BUILD_COMMIT}<br>
             Estimated Install Date: {install_date}<br><br>
 
             <b>Support Information</b><br>
@@ -444,8 +453,10 @@ class QSnippet(QMainWindow):
             # ----- TEXT VERSION (for logs ZIP) -----
             text = (
                 f"{name}\n"
-                f"Version: {version}\n"
-                f"Install Date: {install_date}\n\n"
+                f"Version: {BUILD_VERSION}\n"
+                f"Build Date: {BUILD_DATE}\n"
+                f"Commit: {BUILD_COMMIT}\n"
+                f"Estimated Install Date: {install_date}\n\n"
                 f"Support Information\n"
                 f"Email: {support_email}\n"
                 f"Website: {support_site}\n\n"

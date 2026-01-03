@@ -5,7 +5,7 @@ log_level: DEBUG
 
 support_info:
   email: admin@quynnbell.com
-  site: https://github.com/queball1999/QSnippet
+  site: https://qsnippet.com
 
 colors:
   primary_background_active: "#FFFFFF"

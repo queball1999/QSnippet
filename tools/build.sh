@@ -29,6 +29,19 @@ rm -rf "$DIST_DIR" "$BUILD_DIR" "$APP_NAME.spec"
 OS=$(uname -s)
 echo "Detected OS: $OS"
 
+# Generate build metadata
+# This MUST be done before running PyInstaller
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+cat > config/build_info.py <<EOF
+BUILD_VERSION = "$VERSION"
+BUILD_DATE = "$BUILD_DATE"
+BUILD_COMMIT = "$GIT_COMMIT"
+EOF
+
+echo "Generated build_info.py ($BUILD_DATE, commit $GIT_COMMIT)"
+
 case "$OS" in
   Linux*)
     echo "Building for Linux..."

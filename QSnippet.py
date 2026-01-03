@@ -1,9 +1,6 @@
 import sys
 import os
 import logging
-import yaml
-from datetime import datetime
-import re
 from pathlib import Path
 import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -16,12 +13,24 @@ if sys.platform == "win32":
 else:
     RegUtils = None
 
+# Import utility and UI modules
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
 from ui import QSnippet
 from ui.widgets import AppMessageBox
 from ui.widgets.notice_carousel import NoticeCarouselDialog
 
+# Import build date info
+try:
+    from config.build_info import BUILD_VERSION, BUILD_DATE, BUILD_COMMIT
+except ImportError:
+    BUILD_VERSION = "unknown"
+    BUILD_DATE = "unknown"
+    BUILD_COMMIT = "unknown"
+
+# Setup logging
 logger = logging.getLogger(__name__)
+
+
 
 class main():
     def __init__(self):
@@ -388,7 +397,7 @@ class main():
             logger.debug("No unread notices found")
             return
 
-        logger.info(f"displaying {len(unread)} notices")
+        logger.info(f"Displaying {len(unread)} notices")
 
         dialog = NoticeCarouselDialog(
             unread,
@@ -403,18 +412,26 @@ class main():
 
         if dialog.disable_future:
             general_settings["disable_notices"] = True
-            logger.info("user disabled future notices")
+            logger.info("User disabled future notices")
 
         general_settings["dismissed_notices"] = list(dismissed)
         FileUtils.write_yaml(self.settings_file, self.settings)
 
-        logger.debug("finished")
+        logger.debug("Finished checking notices")
 
     def start_program(self):
         """
         Create and launch the main application window.
         """
-        logger.info("Starting QSnippet UI")
+        program_name = self.program_name if hasattr(self, "program_name") else "QSnippet"
+        logger.info(f"Starting {program_name} UI")
+        logger.info(
+            "%s %s built %s (commit %s)",
+            program_name,
+            BUILD_VERSION,
+            BUILD_DATE,
+            BUILD_COMMIT,
+        )
         self.qsnippet = QSnippet(parent=self)
         self.qsnippet.run()
 
