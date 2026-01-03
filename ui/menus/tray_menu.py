@@ -1,14 +1,18 @@
 from PySide6.QtWidgets import QMenu
-from PySide6.QtGui import QIcon, QFont
 from PySide6.QtCore import Signal
 
 class TrayMenu(QMenu):
-    start_signal = Signal()     # Signal to start the service
-    stop_signal = Signal()      # Signal to stop the service
+    """
+    TrayMenu is the context menu for the system tray icon, allowing users 
+    to edit quick settings, open UI, and exit the application.
+    """
+    # Primary Signals
     edit_signal = Signal()      # Signal to bring up UI
     exit_signal = Signal()      # Signal to exit app
-    startup_signal = Signal(bool)
-    showui_signal = Signal(bool)
+
+    # Quick Settings Signals
+    startup_signal = Signal(bool)   # Signal to toggle startup option
+    showui_signal = Signal(bool)    # Signal to toggle show UI at start option
 
     def __init__(self, main=None, parent=None):
         super().__init__(parent)

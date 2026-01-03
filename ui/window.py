@@ -70,7 +70,7 @@ class QSnippet(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
-        if self.parent.general_show_ui_at_start:
+        if hasattr(self.parent, "general_show_ui_at_start") and self.parent.general_show_ui_at_start:
             logger.debug("Showing UI at startup")
             self.show()
 

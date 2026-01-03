@@ -79,6 +79,18 @@ def test_import_snippets_yaml_invalid_format(tmp_path):
 # Default file creators
 def test_create_config_file(tmp_path):
     default_dir = tmp_path / "default_dir"
+    default_dir.mkdir()
+
+    default_config = default_dir / "config.yaml"
+    default_config.write_text(
+        """
+program_name: QSnippet
+colors: {}
+images: {}
+""",
+        encoding="utf-8"
+    )
+
     user_path = tmp_path / "config.yaml"
 
     FileUtils.create_config_file(default_dir, user_path)
@@ -92,6 +104,17 @@ def test_create_config_file(tmp_path):
 
 def test_create_settings_file(tmp_path):
     default_dir = tmp_path / "default_dir"
+    default_dir.mkdir()
+
+    default_settings = default_dir / "settings.yaml"
+    default_settings.write_text(
+        """
+general:
+  start_at_boot: false
+""",
+        encoding="utf-8"
+    )
+
     user_path = tmp_path / "settings.yaml"
 
     FileUtils.create_settings_file(default_dir, user_path)
@@ -101,7 +124,6 @@ def test_create_settings_file(tmp_path):
     data = FileUtils.read_yaml(user_path)
     assert "general" in data
     assert data["general"]["start_at_boot"] is False
-
 
 def test_create_snippets_db_file(tmp_path):
     path = tmp_path / "snippets.db"

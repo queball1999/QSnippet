@@ -1,11 +1,18 @@
 
 import logging
 from PySide6.QtWidgets import (
-    QTreeView, QMenu, QAbstractItemView, QHeaderView
+    QTreeView, QAbstractItemView, QHeaderView
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtCore import (
     Qt, Signal, QModelIndex, QSortFilterProxyModel
+)
+
+# Import context menus
+from ui.menus import (
+    SnippetContextMenu,
+    FolderContextMenu,
+    EmptyContextMenu
 )
 
 logger = logging.getLogger(__name__)
@@ -14,7 +21,6 @@ class SnippetTable(QTreeView):
     # Signals for context‐menu actions
     addFolder = Signal(QStandardItem)  # parent folder or None
     addSnippet = Signal(QStandardItem)  # parent folder
-    addSubFolder = Signal(QStandardItem)  # parent folder
     editSnippet = Signal(dict)           # entry data
     renameFolder = Signal(QStandardItem)  # folder item
     renameSnippet = Signal(dict)           # entry data
@@ -140,7 +146,10 @@ class SnippetTable(QTreeView):
 
             parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
 
-        self.expandAll()    # Expand all folders on load. (Make setting?)
+        if hasattr(self.main, "general_expand_folders_on_load") and self.main.general_expand_folders_on_load:
+            logger.info("Expanding all folders on load as per settings")
+            self.expandAll()    # Expand all folders on load.
+
         self._configure_columns()   # Resize
         logger.info("Snippet table populated")
 
@@ -184,44 +193,71 @@ class SnippetTable(QTreeView):
         self._on_click(proxy_idx)
 
     def contextMenuEvent(self, event):
+        """
+        contextMenuEvent handler to show appropriate context menu
+        depending on where the user right-clicked.
+        
+        event: QContextMenuEvent
+        """
         logger.debug("Context menu requested")
 
         proxy_idx = self.indexAt(event.pos())
-        menu = QMenu(self)
 
         if not proxy_idx.isValid():
-            # whitespace
-            logger.debug("Context menu on empty area")
+            # Clicked on empty space; show empty context menu
+            menu = EmptyContextMenu(self)
+            menu.addFolderRequested.connect(lambda: self.addFolder.emit(None))
+            menu.addSnippetRequested.connect(lambda: self.addSnippet.emit(None))
+            menu.expandAllRequested.connect(self.expandAll)
+            menu.collapseAllRequested.connect(self.collapseAll)
+            menu.refreshRequested.connect(self.refreshSignal.emit)
+            menu.exec(event.globalPos())
+            return
 
-            menu.addAction('Add Folder', lambda: self.addFolder.emit(None))
-            menu.addAction('Add Snippet', lambda: self.addSnippet.emit(None))
-            menu.addSeparator()
-            menu.addAction('Expand All', None)
-            menu.addAction('Collapse All', None)
-            menu.addSeparator()
-            menu.addAction('Refresh', self.refreshSignal.emit)
+        src_idx = self.proxy.mapToSource(proxy_idx)
+        item = self.model.itemFromIndex(src_idx)
+        data = item.data(Qt.UserRole)
 
+        if data is None:
+            # Clicked on a folder; show folder context menu
+            menu = FolderContextMenu(item, self)
+            menu.addItemRequested.connect(self.addSnippet.emit)
+            menu.renameRequested.connect(self.renameFolder.emit)
+            menu.deleteRequested.connect(self.deleteFolder.emit)
         else:
-            logger.debug("Context menu on item")
-            src_idx = self.proxy.mapToSource(proxy_idx)
-            item = self.model.itemFromIndex(src_idx)
-            data = item.data(Qt.UserRole)
-
-            if data is None:
-                # folder row
-                menu.addAction('Add Item', lambda item=item: self.addSnippet.emit(item))
-                menu.addAction('Add Sub-Folder', lambda item=item: self.addSubFolder.emit(item))
-                menu.addSeparator()
-                menu.addAction("Rename Folder", lambda item=item: self.renameFolder.emit(item))
-                menu.addAction('Delete Folder', lambda: self.deleteFolder.emit(item))
-            else:
-                # snippet row
-                menu.addAction('Edit Item', lambda data=data: self.editSnippet.emit(data))
-                menu.addAction('Rename Item', lambda data=data: self.renameSnippet.emit(data))
-                menu.addAction('Delete Item', lambda data=data: self.deleteSnippet.emit(data))
+            # Clicked on a snippet; show snippet context menu
+            menu = SnippetContextMenu(data, self)
+            menu.editRequested.connect(self.editSnippet.emit)
+            menu.renameRequested.connect(self.renameSnippet.emit)
+            menu.deleteRequested.connect(self.deleteSnippet.emit)
 
         menu.exec(event.globalPos())
 
+    # Handlers for expanding/collapsing folders
+    def expandAll(self):
+        """ Expand all folders in the table """
+        logger.debug("Expanding all folders in table")
+        super().expandAll()
+
+    def collapseAll(self):
+        """ Collapse all folders in the table """
+        logger.debug("Collapsing all folders in table")
+        super().collapseAll()
+
+    def isAnyFolderExpanded(self) -> bool:
+        """
+        Return True if any top-level folder row is currently expanded.
+        """
+        for row in range(self.model.rowCount()):
+            src_idx = self.model.index(row, 0)
+            proxy_idx = self.proxy.mapFromSource(src_idx)
+
+            if self.isExpanded(proxy_idx):
+                return True
+
+        return False
+
+    # Helpers to manipulate UI state
     def clear_selection(self):
         logger.debug("Clearing table selection")
         self.clearSelection()
@@ -299,6 +335,33 @@ class SnippetTable(QTreeView):
             )
             # remove the folder
             self.model.removeRow(parent.row())
+
+    def mousePressEvent(self, event):
+        """ Capture all mouse events to handle folder expansion/collapse. """
+        if event.button() == Qt.LeftButton:
+            proxy_idx = self.indexAt(event.pos())
+
+            if proxy_idx.isValid():
+                src_idx = self.proxy.mapToSource(proxy_idx)
+                item = self.model.itemFromIndex(src_idx)
+
+                # Folder rows have Qt.UserRole == None
+                if item and item.data(Qt.UserRole) is None:
+                    # Toggle expansion for the entire row
+                    if self.isExpanded(proxy_idx):
+                        self.collapse(proxy_idx)
+                    else:
+                        self.expand(proxy_idx)
+
+                    # Still allow selection to happen
+                    super().mousePressEvent(event)
+                    return
+
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        """ Capture and ignore double-clicks """
+        event.accept()
 
     def applyStyles(self):
         logger.debug("Applying SnippetTable styles")

@@ -243,12 +243,12 @@ class FileUtils:
         if not source.exists():
             logger.critical("Default config file missing: %s", source)
 
-            QMessageBox.critical(
+            """ QMessageBox.critical(
                 parent,
                 "Configuration Error",
                 "The default configuration file could not be found.\n\n"
                 "Please reinstall the application or report an issue."
-            )
+            ) """
             raise FileNotFoundError(f"Missing default config file: {source}")
 
         try:
@@ -257,12 +257,12 @@ class FileUtils:
             logger.info("Copied default config to user location: %s", user_path)
         except Exception as e:
             logger.critical("Failed to copy config file: %s", e)
-            QMessageBox.critical(
+            """ QMessageBox.critical(
                 parent,
                 "Configuration Error",
                 f"Failed to create configuration file.\n\n{e}"
-            )
-            raise
+            ) """
+            raise RuntimeError(f"Failed to create config file: {e}")
 
     @staticmethod
     def create_settings_file(default_dir: Path, user_path: Path, parent=None):
@@ -279,12 +279,12 @@ class FileUtils:
         if not source.exists():
             logger.critical("Default settings file missing: %s", source)
 
-            QMessageBox.critical(
+            """ QMessageBox.critical(
                 parent,
                 "Configuration Error",
                 "The default settings file could not be found.\n\n"
                 "Please reinstall the application or report an issue."
-            )
+            ) """
             raise FileNotFoundError(f"Missing default settings file: {source}")
 
         try:
@@ -293,12 +293,12 @@ class FileUtils:
             logger.info("Copied default settings to user location: %s", user_path)
         except Exception as e:
             logger.critical("Failed to copy settings file: %s", e)
-            QMessageBox.critical(
+            """ QMessageBox.critical(
                 parent,
                 "Configuration Error",
                 f"Failed to create settings file.\n\n{e}"
-            )
-            raise
+            ) """
+            raise RuntimeError(f"Failed to create settings file: {e}")
     
     @staticmethod
     def create_snippets_db_file(path):

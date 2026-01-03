@@ -3,6 +3,10 @@ from PySide6.QtGui import QIcon, QAction, QActionGroup
 from PySide6.QtCore import Signal, QSize
 
 class MenuBar(QMenuBar):
+    """
+    MenuBar is the main menu bar for the application, providing access to file, edit,
+    tools, and help menus with various actions and shortcuts.
+    """
     importAction = Signal()
     exportAction = Signal()
     collectLogsRequested = Signal()

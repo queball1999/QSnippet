@@ -3,7 +3,7 @@ import re
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
-    QLineEdit, QHBoxLayout, QComboBox
+    QLineEdit, QHBoxLayout, QComboBox, QPushButton
 )
 from PySide6.QtGui import QStandardItem, QPixmap
 from PySide6.QtCore import Qt, Signal, QTimer
@@ -41,9 +41,16 @@ class SnippetEditor(QWidget):
         self.filter_dropdown.addItem("Disabled Only")
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
+        arrow = "↓" if not self.main.general_expand_folders_on_load else "↑"
+        self.toggle_collapse_button = QPushButton(arrow)
+        self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
+        self.toggle_collapse_button.setFixedWidth(30)
+        self.toggle_collapse_button.clicked.connect(self.toggle_collapse_folders)
+
         search_layout = QHBoxLayout()
         search_layout.addWidget(self.search_bar)
         search_layout.addWidget(self.filter_dropdown)
+        search_layout.addWidget(self.toggle_collapse_button)
 
         # Left: snippet table
         self.table = SnippetTable(main=self.main, parent=self)
@@ -51,7 +58,6 @@ class SnippetEditor(QWidget):
         self.table.refreshSignal.connect(self.load_snippets)
         # folder signals
         self.table.addFolder.connect(self.on_add_folder)
-        self.table.addSubFolder.connect(self.on_add_subfolder)
         self.table.renameFolder.connect(self.on_rename_folder)
         self.table.deleteFolder.connect(self.on_delete_folder)
         # snippet signals
@@ -118,6 +124,15 @@ class SnippetEditor(QWidget):
         self.form.clear_form()
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
+
+    def toggle_collapse_folders(self):
+        """ Toggle between expanding and collapsing all folders in the table. """
+        if self.table.isAnyFolderExpanded():
+            self.table.collapseAll()
+            self.toggle_collapse_button.setText("↓")
+        else:
+            self.table.expandAll()
+            self.toggle_collapse_button.setText("↑")
 
     # ----- Handlers -----
     def on_save(self, *_):
@@ -198,16 +213,6 @@ class SnippetEditor(QWidget):
             return
         self.show_new_form()
         self.form.folder_input.setText(name.strip())
-
-    def on_add_subfolder(self, parent_item=None, *_):
-        parent_name = parent_item.text()
-        prompt = f'Sub-folder under "{parent_name}":'
-        name, ok = QInputDialog.getText(self, 'New Sub-Folder', prompt)
-        if not ok or not name.strip():
-            return
-        full = f"{parent_name}/{name.strip()}"
-        self.show_new_form()
-        self.form.folder_input.setText(full)
         
     def on_rename_folder(self, folder_item=None, *_):
         old = folder_item.text()
@@ -216,12 +221,14 @@ class SnippetEditor(QWidget):
             return
         self.main.snippet_db.rename_folder(old, new.strip())
         self.load_snippets()
-        self.main.message_box.info(f'"{old}" → "{new.strip()}"', title='Folder Renamed')
+        self.main.message_box.info(f'Renamed folder "{old}" to "{new.strip()}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item=None, *_):
         self.show_new_form()
         if isinstance(parent_item, QStandardItem):
-            self.form.folder_input.setText(parent_item.text())
+            itemText = str(parent_item.text())
+            print("Setting folder to:", itemText)
+            self.form.folder_input.setCurrentText(itemText)
 
     def on_delete_folder(self, folder_item=None, *_):
         name = folder_item.text()
@@ -253,7 +260,7 @@ class SnippetEditor(QWidget):
         # Need to rename based on ID
         self.main.snippet_db.rename_snippet(entry['id'], new_label.strip())
         self.load_snippets()
-        self.main.message_box.info(f'"{old_label}" → "{new_label.strip()}"', title='Snippet Renamed')
+        self.main.message_box.info(f'Renamed snippet "{old_label}" to "{new_label.strip()}"', title='Snippet Renamed')
     
     def on_delete_snippet(self, entry):
         confirm = self.main.message_box.question(

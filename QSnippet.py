@@ -381,16 +381,16 @@ class main():
         """
         logger.debug("Checking for unread notices")
 
-        general_settings = self.settings.setdefault("general", {})
+        notices_settings = self.settings.setdefault("notices", {})
 
-        if general_settings.get("disable_notices", False):
+        if notices_settings.get("disable_notices", False):
             logger.info("Notices disabled by user")
             return
 
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
-        dismissed = set(general_settings.get("dismissed_notices", []))
+        dismissed = set(notices_settings.get("dismissed_notices", []))
         unread = NoticeCarouselDialog.load_notices(notices_dir, dismissed)
 
         if not unread:
@@ -411,10 +411,10 @@ class main():
             dismissed.add(notice["id"])
 
         if dialog.disable_future:
-            general_settings["disable_notices"] = True
+            notices_settings["disable_notices"] = True
             logger.info("User disabled future notices")
 
-        general_settings["dismissed_notices"] = list(dismissed)
+        notices_settings["dismissed_notices"] = list(dismissed)
         FileUtils.write_yaml(self.settings_file, self.settings)
 
         logger.debug("Finished checking notices")

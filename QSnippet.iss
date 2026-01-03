@@ -5,7 +5,7 @@
 #define MyAppName "QSnippet"
 #define MyAppExeName "QSnippet.exe"
 #define MyAppPublisher "Quynn Bell"
-#define MyAppURL "https://github.com/queball1999/QSnippet"
+#define MyAppURL "https://qsnippet.com"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application. Do not use the same AppId value in installers for other applications.

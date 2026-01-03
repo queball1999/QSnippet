@@ -3,6 +3,10 @@ from PySide6.QtGui import QIcon, QAction
 
 
 class ToolbarMenu(QToolBar):
+    """
+    ToolbarMenu is the main toolbar for the application, providing quick access 
+    to common actions such as creating, saving, and deleting snippets.
+    """
     def __init__(self, parent=None):
         super().__init__("Main Toolbar", parent)
         self.parent = parent

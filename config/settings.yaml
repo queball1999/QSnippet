@@ -1,9 +1,15 @@
 # Default Settings Configuration
+appearance:
+  theme: dark
 general:
   start_at_boot: true
   show_ui_at_start: true
+  expand_folders_on_load: false
+  easter_eggs_enabled: true
+notices:
   disable_notices: false
   dismissed_notices: []
-  easter_eggs_enabled: true
-appearance:
-  theme: dark
+saving:
+  default_export_directory: ~/Downloads
+  # Options: home, new_form
+  navigate_after_save: home
