@@ -28,7 +28,7 @@ class TrayMenu(QMenu):
         self.launch_action.setData("Launch at boot")
         self.launch_action.setCheckable(True)
         self.launch_action.setChecked(
-            self.main.settings.get("general", {}).get("start_at_boot", False)
+            self.main.settings["general"]["startup_behavior"]["start_at_boot"].get("value", False)
         )
         self.launch_action.toggled.connect(lambda checked: self.startup_signal.emit(checked))
 
@@ -37,7 +37,7 @@ class TrayMenu(QMenu):
         self.showui_action.setData("Show UI at start")
         self.showui_action.setCheckable(True)
         self.showui_action.setChecked(
-            self.main.settings.get("general", {}).get("show_ui_at_start", False)
+            self.main.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", False)
         )
         self.showui_action.toggled.connect(lambda checked: self.showui_signal.emit(checked))
 

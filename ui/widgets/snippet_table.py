@@ -3,7 +3,7 @@ import logging
 from PySide6.QtWidgets import (
     QTreeView, QAbstractItemView, QHeaderView
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QFont
 from PySide6.QtCore import (
     Qt, Signal, QModelIndex, QSortFilterProxyModel
 )
@@ -36,7 +36,7 @@ class SnippetTable(QTreeView):
         self.main = main
         self.parent = parent
         self._entries = []
-        
+
         # Set Font Size
         self.setFont(self.main.small_font_size)
 
@@ -76,23 +76,29 @@ class SnippetTable(QTreeView):
         logger.info("SnippetTable initialized successfully")
 
     def _configure_columns(self):
-        """ Resize columns to set width. """
-        # should we capture this and save it in config?
-        # or should it be a configurable setting?
+        """Set default column widths while keeping them resizable."""
         logger.info("Configuring column widths")
 
         try:
             header = self.header()
-            header.setSectionResizeMode(QHeaderView.Fixed)
+            header.setFont(QFont("Arial", 12, QFont.Bold))
 
-            self.setColumnWidth(0, 180)
-            self.setColumnWidth(1, 100)
-            self.setColumnWidth(2, 80)
-            self.setColumnWidth(3, 100)
-            self.setColumnWidth(4, 200)
+            # Allow user resizing
+            header.setSectionResizeMode(QHeaderView.Interactive)
+
+            # Optional but recommended UX tweaks
+            header.setStretchLastSection(False)
+            header.setSectionsMovable(True)
+
+            # Set default widths (these do NOT lock the columns)
+            self.setColumnWidth(0, 180)  # Label
+            self.setColumnWidth(1, 100)  # Trigger
+            self.setColumnWidth(2, 80)   # Enabled
+            self.setColumnWidth(3, 100)  # Paste Style
+            self.setColumnWidth(4, 200)  # Tags
+
         except Exception as e:
-            logger.error(f"An error occured while configuring columns: {e}")
-            return None
+            logger.error(f"Error configuring columns: {e}")
 
     def load_entries(self, entries):
         """
@@ -146,7 +152,9 @@ class SnippetTable(QTreeView):
 
             parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
 
-        if hasattr(self.main, "general_expand_folders_on_load") and self.main.general_expand_folders_on_load:
+        # Check if we need to expand all folders on load
+        # Defailt to False if setting missing
+        if self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False):
             logger.info("Expanding all folders on load as per settings")
             self.expandAll()    # Expand all folders on load.
 
@@ -339,25 +347,31 @@ class SnippetTable(QTreeView):
     def mousePressEvent(self, event):
         """ Capture all mouse events to handle folder expansion/collapse. """
         if event.button() == Qt.LeftButton:
-            proxy_idx = self.indexAt(event.pos())
+            idx = self.indexAt(event.pos())
+            if idx.isValid():
+                # Always operate on column 0 for expand or collapse
+                idx0 = idx.sibling(idx.row(), 0)
 
-            if proxy_idx.isValid():
-                src_idx = self.proxy.mapToSource(proxy_idx)
-                item = self.model.itemFromIndex(src_idx)
+                src_idx0 = self.proxy.mapToSource(idx0)
+                item = self.model.itemFromIndex(src_idx0)
 
-                # Folder rows have Qt.UserRole == None
+                # Folder rows have UserRole None
                 if item and item.data(Qt.UserRole) is None:
-                    # Toggle expansion for the entire row
-                    if self.isExpanded(proxy_idx):
-                        self.collapse(proxy_idx)
-                    else:
-                        self.expand(proxy_idx)
+                    # Let Qt handle clicks in the "branch" area (arrow and indentation)
+                    rect = self.visualRect(idx0)
 
-                    # Still allow selection to happen
-                    super().mousePressEvent(event)
-                    return
+                    # The branch area is basically the left gutter before the text.
+                    # indentation() is the per level indent. Add a little extra for the arrow glyph.
+                    branch_area_right = rect.left() + self.indentation() + 24
 
-        super().mousePressEvent(event)
+                    if event.pos().x() <= branch_area_right:
+                        return super().mousePressEvent(event)
+
+                    # Click was on the row content area, toggle expansion ourselves
+                    self.setExpanded(idx0, not self.isExpanded(idx0))
+                    return super().mousePressEvent(event)
+
+        return super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         """ Capture and ignore double-clicks """
@@ -374,12 +388,13 @@ class SnippetTable(QTreeView):
         # Widget Styling
 
         # StyleSheet
-        self.update_stylesheet()
+        # self.update_stylesheet()
 
         self.layout().invalidate()
         self.update()
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
-        logger.debug("Updating SnippetTable stylesheet")
-        #self.setStyleSheet(f""" """)
+        self.setStyleSheet(""" 
+
+        """)

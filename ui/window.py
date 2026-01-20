@@ -3,7 +3,9 @@ from pathlib import Path
 from datetime import datetime
 import zipfile
 import platform, psutil
+import logging
 
+# Import PySide6 Modules
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget,
     QMessageBox
@@ -11,13 +13,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer
 
+# Import custom modules
 from utils import FileUtils, RegUtils, AppLogger
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
-import logging
 
+# Setup logging
 logger = logging.getLogger(__name__)
+
+
 
 class QSnippet(QMainWindow):
     """
@@ -70,7 +75,10 @@ class QSnippet(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
-        if hasattr(self.parent, "general_show_ui_at_start") and self.parent.general_show_ui_at_start:
+        # Check if we need to show UI at start
+        # Default to true if setting missing
+        # If skipped, we load later when opening UI.
+        if self.parent.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
             logger.debug("Showing UI at startup")
             self.show()
 
@@ -83,9 +91,11 @@ class QSnippet(QMainWindow):
         self.menubar = MenuBar(main=self.parent, parent=self)
         self.menubar.importAction.connect(self.handle_import_action)
         self.menubar.exportAction.connect(self.handle_export_action)
+        self.menubar.renameAction.connect(self.handle_rename_action)
         self.menubar.collectLogsRequested.connect(self.handle_collect_logs)
         self.menubar.logLevelChanged.connect(self.handle_log_level)
         self.menubar.showAppInfo.connect(self.handle_show_info)
+        self.menubar.show_settings.connect(self.show_settings_window)
         self.setMenuBar(self.menubar)
 
     def init_toolbar(self):
@@ -140,24 +150,28 @@ class QSnippet(QMainWindow):
     # Serivce Control
 
     def start_service(self):
+        """ Start snippet service. """
         logger.info("Starting snippet service")
         self.snippet_service.start()
         self.state = "running"
         self._update_status_bar("Running")
 
     def stop_service(self):
+        """ Stop snippet service. """
         logger.info("Stopping snippet service")
         self.snippet_service.stop()
         self.state = "stopped"
         self._update_status_bar("Stopped")
 
     def pause_service(self):
+        """ Pause snippet service. """
         logger.info("Pausing snippet service")
         self.snippet_service.pause()
         self.state = "paused"
         self._update_status_bar("Paused")
 
     def resume_service(self):
+        """ Resume snippet service. """
         logger.info("Resuming snippet service")
         self.snippet_service.resume()
         self.state = "running"
@@ -179,11 +193,14 @@ class QSnippet(QMainWindow):
             self._update_status_bar("Error")
 
     def _update_status_bar(self, status: str):
-        if self.editor.isVisible():
-            self.statusBar().showMessage(f"Service status: {status}")
+        """ Update the status bar message. """
+        try:
+            if self.editor.isVisible():
+                self.statusBar().showMessage(f"Service status: {status}")
+        except Exception as e:
+            logger.exception(f"Failed to update status bar: {e}")
 
     # Handlers
-
     def handle_startup_signal(self, enabled: bool):
         """
         Enable or disable startup at boot.
@@ -200,7 +217,7 @@ class QSnippet(QMainWindow):
                 RegUtils.remove_from_run_key(entry_name="QSnippet")
 
             self.parent.skip_reg = False
-            self.parent.settings["general"]["start_at_boot"] = enabled
+            self.parent.settings["general"]["startup_behavior"]["start_at_boot"]["value"] = enabled
             FileUtils.write_yaml(
                 self.parent.settings_file,
                 self.parent.settings,
@@ -217,7 +234,7 @@ class QSnippet(QMainWindow):
         """
         logger.info("Updating show UI at startup: %s", checked)
 
-        self.parent.settings["general"]["show_ui_at_start"] = checked
+        self.parent.settings["general"]["startup_behavior"]["show_ui_at_start"]["value"] = checked
         FileUtils.write_yaml(
             self.parent.settings_file,
             self.parent.settings,
@@ -248,6 +265,18 @@ class QSnippet(QMainWindow):
         )
         self.snippet_service.refresh()
         self.editor.load_snippets()
+
+    def handle_rename_action(self):
+        """
+        Docstring for handle_rename_action
+        
+        :param self: Description
+        """
+        logger.info("Rename action triggered")
+        try:
+            self.editor.handle_rename_action()
+        except Exception as e:
+            logger.exception(f"Failed to emit rename action signal: {e}")
 
     def handle_collect_logs(self):
         """
@@ -333,10 +362,10 @@ class QSnippet(QMainWindow):
             root = logging.getLogger()
             root.setLevel(new_level)
 
-            self.parent.settings["log_level"] = level
+            self.parent.cfg["log_level"] = level
             FileUtils.write_yaml(
-                self.parent.settings_file,
-                self.parent.settings,
+                self.parent.config_file,
+                self.parent.cfg,
             )
 
             self.parent.logger = AppLogger(
@@ -394,6 +423,7 @@ class QSnippet(QMainWindow):
             # File paths
             config_file = Path(parent.config_file)
             settings_file = Path(parent.settings_file)
+            license_file = Path(parent.license_file)
             log_dir = Path(parent.logs_dir)
 
             # Install date
@@ -447,7 +477,11 @@ class QSnippet(QMainWindow):
             Python: {platform.python_version()}<br>
             OS: {os_name} ({os_version})<br>
             CPU Cores: {cpu_count}<br>
-            RAM: {ram_gb} GB<br>
+            RAM: {ram_gb} GB<br><br>
+
+            <b>License</b><br>
+            GPLv3 © 2026 Queball1999<br>
+            License: <a href="file:///{license_file}">{license_file}</a><br><br>
             """
 
             # ----- TEXT VERSION (for logs ZIP) -----
@@ -480,6 +514,35 @@ class QSnippet(QMainWindow):
         except Exception:
             logging.exception("Failed to build about info")
             return False
+        
+    def show_settings_window(self):
+        """
+        Show settings window.
+        """
+        logger.info("Showing settings window")
+
+        from ui.widgets.settings import SettingsDialog
+
+        self._settings_dialog = SettingsDialog(
+            settings=self.parent.settings,
+            save_callback=self.save_settings,
+            parent=self,
+        )
+        self._settings_dialog.exec()
+
+    def save_settings(self, settings: dict):
+        """
+        Save current settings to file.
+        """
+        logger.info("Saving settings to file")
+
+        # Update parent reference in memory
+        self.parent.settings = settings
+
+        FileUtils.write_yaml(
+            self.parent.settings_file,
+            self.parent.settings,
+        )
 
     def unset_skip_reg(self):
         """

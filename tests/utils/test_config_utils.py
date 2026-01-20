@@ -88,9 +88,6 @@ def test_config_loader_stop(temp_config_file, mock_qt_app):
 
 # SettingsLoader tests
 def test_settings_loader_initial_load(temp_settings_file, mock_qt_app):
-    """
-    SettingsLoader should load YAML on init and emit settingsChanged.
-    """
     data = {
         "general": {
             "start_at_boot": True
@@ -100,7 +97,14 @@ def test_settings_loader_initial_load(temp_settings_file, mock_qt_app):
 
     loader = SettingsLoader(temp_settings_file)
 
-    assert loader.settings == data
+    assert loader.settings == {
+        "general": {
+            "start_at_boot": {
+                "type": "bool",
+                "value": True
+            }
+        }
+    }
 
 
 def test_settings_loader_empty_yaml(temp_settings_file, mock_qt_app):
@@ -115,10 +119,11 @@ def test_settings_loader_empty_yaml(temp_settings_file, mock_qt_app):
 
 
 def test_settings_loader_emits_signal_on_load(temp_settings_file, mock_qt_app):
-    """
-    settingsChanged should emit on reload.
-    """
-    data = {"foo": "bar"}
+    data = {
+        "general": {
+            "foo": "bar"
+        }
+    }
     write_yaml(temp_settings_file, data)
 
     loader = SettingsLoader(temp_settings_file)
@@ -128,20 +133,32 @@ def test_settings_loader_emits_signal_on_load(temp_settings_file, mock_qt_app):
 
     loader._load_settings()
 
-    spy.assert_called_once_with(data)
+    spy.assert_called_once_with({
+        "general": {
+            "foo": {
+                "type": "string",
+                "value": "bar"
+            }
+        }
+    })
 
 
 def test_settings_loader_reload_on_file_change(temp_settings_file, mock_qt_app):
-    """
-    File change should reload settings.
-    """
-    write_yaml(temp_settings_file, {"enabled": False})
+    write_yaml(temp_settings_file, {
+        "general": {
+            "enabled": False
+        }
+    })
     loader = SettingsLoader(temp_settings_file)
 
-    write_yaml(temp_settings_file, {"enabled": True})
+    write_yaml(temp_settings_file, {
+        "general": {
+            "enabled": True
+        }
+    })
     loader._on_file_changed(str(temp_settings_file))
 
-    assert loader.settings["enabled"] is True
+    assert loader.settings["general"]["enabled"]["value"] is True
 
 
 def test_settings_loader_stop(temp_settings_file, mock_qt_app):

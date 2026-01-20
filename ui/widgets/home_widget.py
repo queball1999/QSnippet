@@ -39,7 +39,7 @@ class HomeWidget(QWidget):
         self.program_logo = QLabel()
         self.program_logo.setPixmap(self.pixmap)
 
-        if self.main.general_easter_eggs_enabled:
+        if self.main.settings["general"]["extra_features"]["easter_eggs_enabled"].get("value", True):
             logger.debug("Easter Eggs are enabled in HomeWidget.")
             self.program_logo.mousePressEvent = self.on_icon_clicked
 

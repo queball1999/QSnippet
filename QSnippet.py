@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize, QTimer
 from PySide6.QtGui import QFont, QIcon
 
-# Load custom modules
+# Load RegUtils only if we detect Windows
 if sys.platform == "win32":
     from utils.reg_utils import RegUtils
 else:
@@ -19,7 +19,7 @@ from ui import QSnippet
 from ui.widgets import AppMessageBox
 from ui.widgets.notice_carousel import NoticeCarouselDialog
 
-# Import build date info
+# Import build info
 try:
     from config.build_info import BUILD_VERSION, BUILD_DATE, BUILD_COMMIT
 except ImportError:
@@ -29,7 +29,6 @@ except ImportError:
 
 # Setup logging
 logger = logging.getLogger(__name__)
-
 
 
 class main():
@@ -49,9 +48,10 @@ class main():
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
 
-        if self.settings["general"]["show_ui_at_start"]:
-            # Only show if the UI will show on boot.
-            # Otherwise, we load later when opening UI.
+        # Check if we need to show notices
+        # Default to True if setting missing
+        if self.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
+            # Use time to avoid interfering with main thread
             QTimer.singleShot(1000, self.check_notices)
 
         self.start_program()    # start program
@@ -102,6 +102,7 @@ class main():
         # These are the user config files
         self.config_file   = self.app_data_dir / "config.yaml"
         self.settings_file = self.app_data_dir / "settings.yaml"
+        self.license_file  = self.working_dir / "LICENSE"
 
         # Use this to ensure files exist
         # Define files in a list of dicts with "file" and "function" keys
@@ -189,7 +190,6 @@ class main():
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
             logging.info("Logger initialized!")
         except Exception as e:
-            #logging.critical("Could not initialize logger class!")
             raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
 
     def flatten_yaml(self, items: dict) -> bool:
@@ -216,7 +216,10 @@ class main():
             return False
 
     def load_config(self):
-        """ This function loads a yaml config file and flattens its entries into attributes. """
+        """ 
+        This function loads a yaml config file 
+        and flattens its entries into attributes. 
+        """
         # Check for config
         if not self.config_file.exists():
             QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
@@ -265,10 +268,16 @@ class main():
         """ Based on settings, set the correct registry key for startup """
         if self.skip_reg or RegUtils is None:
             return
-
-        if not RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"]:
+        
+        if (
+            not RegUtils.is_in_run_key("QSnippet") and 
+            self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+            ):
             RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        elif RegUtils.is_in_run_key("QSnippet") and not self.settings["general"]["start_at_boot"]:
+        elif (
+            RegUtils.is_in_run_key("QSnippet") and 
+            not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+            ):
             RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):
@@ -309,12 +318,12 @@ class main():
             self.images[image] = os.path.join(self.images_path, old_val)
 
     def scale_width(self, original_width, screen_geometry):
-        """Scale a width value from the 1920 reference to the current screen."""
+        """ Scale a width value from the 1920 reference to the current screen. """
         ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         return int(original_width * ratio)
 
     def scale_height(self, original_height, screen_geometry):
-        """Scale a height value from the 1080 reference to the current screen."""
+        """ Scale a height value from the 1080 reference to the current screen. """
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
         return int(original_height * ratio)
     
@@ -355,6 +364,12 @@ class main():
         }
 
     def check_if_already_running(self, app_name="QSnippet"):
+        """
+        Check for lock file to determine if app is already running.
+        
+        :param self: Main class instance
+        :param app_name: Name of the application.
+        """
         lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
         current_pid = os.getpid()
 
@@ -381,28 +396,39 @@ class main():
         """
         logger.debug("Checking for unread notices")
 
-        notices_settings = self.settings.setdefault("notices", {})
+        notices = self.settings.setdefault("notices", {})
 
-        if notices_settings.get("disable_notices", False):
+        # Read values safely
+        disable_notices = (
+            notices.get("disable_notices", {}).get("value", False)
+        )
+        dismissed = set(
+            notices.get("dismissed_notices", {}).get("value", [])
+        )
+
+        if disable_notices:
             logger.info("Notices disabled by user")
             return
 
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
-        dismissed = set(notices_settings.get("dismissed_notices", []))
-        unread = NoticeCarouselDialog.load_notices(notices_dir, dismissed)
+        unread = NoticeCarouselDialog.load_notices(
+            notices_dir,
+            dismissed
+        )
 
+        # Exit if no unread notices to display
         if not unread:
             logger.debug("No unread notices found")
             return
 
-        logger.info(f"Displaying {len(unread)} notices")
+        logger.info("Displaying %d notices", len(unread))
 
         dialog = NoticeCarouselDialog(
             unread,
             icon_path=QIcon(self.images["icon"]),
-            parent=self
+            parent=self,
         )
         dialog.exec()
 
@@ -410,13 +436,30 @@ class main():
         for notice in unread:
             dismissed.add(notice["id"])
 
+        # Update dismissed_notices.value
+        if "dismissed_notices" in notices:
+            notices["dismissed_notices"]["value"] = list(dismissed)
+        else:
+            notices["dismissed_notices"] = {
+                "type": "list",
+                "value": list(dismissed),
+                "description": "List of notices that have been dismissed by the user.",
+            }
+
+        # Update disable_notices.value if user opted out
         if dialog.disable_future:
-            notices_settings["disable_notices"] = True
+            if "disable_notices" in notices:
+                notices["disable_notices"]["value"] = True
+            else:
+                notices["disable_notices"] = {
+                    "type": "bool",
+                    "value": True,
+                    "description": "Disable all in-app notices and notifications.",
+                }
+
             logger.info("User disabled future notices")
 
-        notices_settings["dismissed_notices"] = list(dismissed)
         FileUtils.write_yaml(self.settings_file, self.settings)
-
         logger.debug("Finished checking notices")
 
     def start_program(self):
@@ -445,7 +488,7 @@ if __name__ == '__main__':
         # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon("images/QSnippet_16x16.png")) # fallback location
+        msg.setWindowIcon(QIcon("images/QSnippet.ico")) # fallback location
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()

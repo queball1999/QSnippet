@@ -1,15 +1,40 @@
 # Default Settings Configuration
-appearance:
-  theme: dark
 general:
-  start_at_boot: true
-  show_ui_at_start: true
-  expand_folders_on_load: false
-  easter_eggs_enabled: true
+  startup_behavior:
+    start_at_boot:
+      type: bool
+      value: true
+      description: Launch the application automatically when the system starts.
+
+    show_ui_at_start:
+      type: bool
+      value: true
+      description: Display the user interface when the application starts.
+
+    expand_folders_on_load:
+      type: bool
+      value: false
+      description: Expand all folder views when loading the application.
+
+  extra_features:
+    easter_eggs_enabled:
+      type: bool
+      value: true
+      description: Enable or disable easter eggs within the application.
+
 notices:
-  disable_notices: false
-  dismissed_notices: []
+  disable_notices:
+    type: bool
+    value: false
+    description: Disable all in-app notices and notifications.
+  dismissed_notices:
+    type: list
+    value: []
+    hidden: true
+    description: List of notices that have been dismissed by the user.
+
 saving:
-  default_export_directory: ~/Downloads
-  # Options: home, new_form
-  navigate_after_save: home
+  navigate_home_after_save:
+    type: bool
+    value: true
+    description: Return to the home view after saving. If unchecked, remain on the current page.

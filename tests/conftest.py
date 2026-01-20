@@ -4,6 +4,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
+from PySide6.QtCore import QCoreApplication
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -70,12 +71,12 @@ def temp_settings_file(tmp_path):
     return tmp_path / "settings.yaml"
 
 
-@pytest.fixture
+""" @pytest.fixture
 def mock_qt_app(monkeypatch):
-    """
-    Mock QApplication and related Qt objects.
-    Prevents real Qt initialization during tests.
-    """
+    
+    # Mock QApplication and related Qt objects.
+    # Prevents real Qt initialization during tests.
+    
     mock_app = MagicMock()
     mock_clipboard = MagicMock()
     mock_screen = MagicMock()
@@ -93,7 +94,18 @@ def mock_qt_app(monkeypatch):
         lambda: mock_app
     )
 
-    return mock_app
+    return mock_app """
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_qt_app():
+    """
+    Provide a single Qt application instance for the entire test session.
+    Uses QCoreApplication to avoid GUI initialization.
+    """
+    app = QCoreApplication.instance()
+    if app is None:
+        app = QCoreApplication(sys.argv)
+    yield app
 
 
 @pytest.fixture

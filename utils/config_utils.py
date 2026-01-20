@@ -87,11 +87,50 @@ class SettingsLoader(QObject):
             with open(self.settings_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
 
-            self.settings = data
+            self.settings = self.normalize_settings(data)
             logger.info(f"Loaded Settings: {self.settings_path}")
             self.settingsChanged.emit(self.settings)
         except Exception as e:
             logger.error(f"Failed to load Settings {self.settings_path}: {e}")
+
+    
+    def infer_type(self, value):
+        if isinstance(value, bool):
+            return "bool"
+        if isinstance(value, int):
+            return "int"
+        if isinstance(value, list):
+            return "list"
+        if isinstance(value, str):
+            return "string"
+        return "unknown"
+
+    def normalize_settings(self, data: dict) -> dict:
+        """
+        Normalize settings structure:
+        - Categories and subcategories remain dicts
+        - Only leaf nodes with values become {type, value, ...}
+        """
+
+        def normalize_node(node):
+            # Already a normalized setting
+            if isinstance(node, dict) and "value" in node:
+                return node
+
+            # Structural grouping
+            if isinstance(node, dict):
+                return {
+                    key: normalize_node(value)
+                    for key, value in node.items()
+                }
+
+            # Scalar leaf value (fallback support)
+            return {
+                "type": self.infer_type(node),
+                "value": node,
+            }
+
+        return normalize_node(data or {})
 
     def _on_file_changed(self, path):
         # QFileSystemWatcher may emit twice, so re-add path if needed

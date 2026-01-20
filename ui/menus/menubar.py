@@ -9,9 +9,11 @@ class MenuBar(QMenuBar):
     """
     importAction = Signal()
     exportAction = Signal()
+    renameAction = Signal()
     collectLogsRequested = Signal()
     logLevelChanged = Signal(str)
     showAppInfo = Signal()
+    show_settings = Signal()
 
     def __init__(self, main=None, parent=None):
         super().__init__(parent)
@@ -101,6 +103,19 @@ class MenuBar(QMenuBar):
         paste_act.triggered.connect(lambda: self._do_edit_action("paste"))
         edit_menu.addAction(paste_act)
 
+        edit_menu.addSeparator()
+        rename_act = QAction("Rename", self)
+        rename_act.setShortcut("F2")
+        rename_act.triggered.connect(lambda: self._do_edit_action("rename"))
+        edit_menu.addAction(rename_act)
+
+        edit_menu.addSeparator()
+        settings_icon = QIcon.fromTheme("preferences-system")
+        settings_act = QAction(settings_icon, "Settings", self)
+        settings_act.setShortcut("Ctrl+,")
+        settings_act.triggered.connect(self.show_settings.emit)
+        edit_menu.addAction(settings_act)
+
         # ----- Tools Menu -----
         tools_menu = self.addMenu("Tools")
 
@@ -178,7 +193,7 @@ class MenuBar(QMenuBar):
         # About App
         about_icon = QIcon.fromTheme("help-about")
         about_act = QAction(about_icon, "About", self)
-        about_act.setShortcut("F2")
+        about_act.setShortcut("F12")
         about_act.setStatusTip("View information about your installation")
         about_act.triggered.connect(self.showAppInfo.emit)
         help_menu.addAction(about_act)
@@ -205,7 +220,8 @@ class MenuBar(QMenuBar):
             widget.copy()
         elif action == "paste" and hasattr(widget, "paste"):
             widget.paste()
-
+        elif action == "rename":
+            self.renameAction.emit()
 
     def insert_token(self, token: str):
         """Insert a replacement token at the current cursor position."""

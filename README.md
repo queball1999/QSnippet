@@ -21,13 +21,23 @@
 
 </br>
 
-> QSnippet currently supports Windows only. Support for macOS and Linux is planned.
+> [!Warning]
+> Before installing V0.0.5 or later, please back up your snippets and completely uninstall any older versions while ensuring to select option to wipe all data.
+
 
 QSnippet is a local-first application for system-wide text snippet expansion. While there are several feature-rich snippet tools available, many felt very overwhelming to get started and didn’t fit how I work. 
 
 I built QSnippet to be fast, predictable, and fully under my control. The goal was to provide a simple, reliable tool that improves my daily life without adding unnecessary complexity.
 
-This project also serves to demonstrate my skills as a software developer and is purely a passion project.
+This project also serves to demonstrate my skills as a software developer and is purely a passion project. If you use QSnippet, consider supporting me.
+
+<a href="https://ko-fi.com/queball1999" target="_blank" rel="noopener">
+  <img
+    src="https://cdn.prod.website-files.com/5c14e387dab576fe667689cf/670f5a01c01ea9191809398c_support_me_on_kofi_blue.png"
+    alt="Support me on Ko-fi"
+    height="40"
+  />
+</a>
 
 ## What QSnippet Does
 
@@ -50,6 +60,8 @@ Snippet Form
 <img src="images/snippet_form.png" alt="Photo of QSnippet" style="align:center;"/>
 
 ## Installation
+
+> QSnippet currently supports Windows only. Support for macOS and Linux is planned.
 
 Prebuilt binaries are provided on the Releases page.
 
@@ -107,7 +119,7 @@ These steps assume you have downloaded the project’s public signing key [gpg-p
     ```
 
 
-> **Important:** Do not run any downloaded files unless they successfully verify.
+> **Important:** Do not run any downloaded files unless they are successfully verified.
 
 
 ### Unit Testing
@@ -141,16 +153,15 @@ tests\utils\test_snippet_db.py ........         [100%]
 
 ## License
 
-QSnippet is released under the MIT License.  
+**License Change Notice**
+
+As of **January 2026**, QSnippet is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+- All releases and commits published **on or after January 2026** are distributed under GPLv3.
+- All releases published **prior to this date** remain licensed under the MIT License and are unaffected.
+
+This project is licensed under the GNU General Public License v3.0 (GPLv3). 
 See the [LICENSE](./LICENSE) file for details.
 
 # Contributions
 All contributions are welcome! Feel free to contribute directly to the project as a developer, or support the project’s continued development.
-
-<a href="https://ko-fi.com/queball1999" target="_blank" rel="noopener">
-  <img
-    src="https://cdn.prod.website-files.com/5c14e387dab576fe667689cf/670f5a01c01ea9191809398c_support_me_on_kofi_blue.png"
-    alt="Support me on Ko-fi"
-    width="250"
-  />
-</a>

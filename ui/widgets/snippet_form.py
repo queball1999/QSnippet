@@ -467,13 +467,19 @@ Snippets come in handy for text you enter often or for standard messages you sen
     
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
-        self.setStyleSheet(f"""
-            QLineEdit, QComboBox {{
-                padding: 5px;
-            }}
-            QPushButton {{
-                padding: 5px
-            }}""")
+        self.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+            } 
+
+            QComboBox {
+                padding: 8px;
+            }
+
+            QLineEdit {
+                padding: 8px;
+            }
+        """)
     
     # ----- Event Handlers -----
     def eventFilter(self, obj, event):
