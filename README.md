@@ -22,7 +22,7 @@
 </br>
 
 > [!Warning]
-> Before installing V0.0.5 or later, please back up your snippets and completely uninstall any older versions while ensuring to select option to wipe all data.
+> Before installing V0.0.5 or later, please back up your snippets and completely uninstall the application.
 
 
 QSnippet is a local-first application for system-wide text snippet expansion. While there are several feature-rich snippet tools available, many felt very overwhelming to get started and didn’t fit how I work. 
