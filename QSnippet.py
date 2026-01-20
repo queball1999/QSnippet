@@ -1,44 +1,60 @@
 import sys
 import os
 import logging
-import yaml
 from pathlib import Path
 import psutil, tempfile
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize, QTimer
 from PySide6.QtGui import QFont, QIcon
 
-# Load custom modules
+# Load RegUtils only if we detect Windows
 if sys.platform == "win32":
     from utils.reg_utils import RegUtils
 else:
     RegUtils = None
 
+# Import utility and UI modules
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
 from ui import QSnippet
 from ui.widgets import AppMessageBox
+from ui.widgets.notice_carousel import NoticeCarouselDialog
 
+# Import build info
+try:
+    from config.build_info import BUILD_VERSION, BUILD_DATE, BUILD_COMMIT
+except ImportError:
+    BUILD_VERSION = "unknown"
+    BUILD_DATE = "unknown"
+    BUILD_COMMIT = "unknown"
+
+# Setup logging
 logger = logging.getLogger(__name__)
+
 
 class main():
     def __init__(self):
         # Main Program Execution
+        # NOTE: logging is NOT fully initialized until after init_logger
         self.create_global_variables()
         self.load_config()      # config.yaml
         self.load_settings()    # settings.yaml
         self.init_logger()
         self.fix_image_paths()
+
+        logger.info("Application bootstrap complete")
         
         self.message_box = AppMessageBox(icon_path=self.images["icon"])
+        
         self.check_if_already_running(self.program_name) # Check if application is already running
-
         self.scale_ui_cfg()
-        self.start_program()
 
-        if self.settings["general"]["show_ui_at_start"]:
-            # Only show if the UI will show on boot.
-            # Otherwise, we load later when opening UI.
-            QTimer.singleShot(500, self.check_notices)
+        # Check if we need to show notices
+        # Default to True if setting missing
+        if self.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
+            # Use time to avoid interfering with main thread
+            QTimer.singleShot(1000, self.check_notices)
+
+        self.start_program()    # start program
         
     def create_global_variables(self):
         # Global Configuration Variables
@@ -58,6 +74,7 @@ class main():
         self.resource_dir = FileUtils.get_default_paths()["resource_dir"]
         self.default_os_paths = FileUtils.get_default_paths()
 
+        self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
         self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
@@ -72,34 +89,65 @@ class main():
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.config_file = self.app_data_dir / "config.yaml"
-        self.settings_file = self.app_data_dir / "settings.yaml"
         self.snippet_db_file = self.app_data_dir / "snippets.db"
-        
-        # Ensure files exist
-        self.ensure_files_exist([
-            {"file": self.config_file, "function": FileUtils.create_config_file(self.config_file)},
-            {"file": self.settings_file, "function": FileUtils.create_settings_file(self.settings_file)},
-            {"file": self.snippet_db_file, "function": FileUtils.create_snippets_db_file(self.snippet_db_file)}
-        ])
-        
-        self.snippet_db = SnippetDB(self.snippet_db_file)
-
-        # Uncomment to run migration
-        # self.migrate_yaml_to_sqlite(self.snippets_file, self.snippet_db)
-
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
 
-    def migrate_yaml_to_sqlite(self, yaml_path, db: SnippetDB):
-        import yaml
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        for entry in data.get("snippets", []):
-            entry["tags"] = ""
-            entry["return_press"] = False
-            db.insert_snippet(entry)
+        # Config and Settings files
+
+        # These are the default config files
+        self.default_config_file   = self.config_dir / "config.yaml"
+        self.default_settings_file = self.config_dir / "settings.yaml"
+
+        # These are the user config files
+        self.config_file   = self.app_data_dir / "config.yaml"
+        self.settings_file = self.app_data_dir / "settings.yaml"
+        self.license_file  = self.working_dir / "LICENSE"
+
+        # Use this to ensure files exist
+        # Define files in a list of dicts with "file" and "function" keys
+        self.ensure_files_exist([
+            {
+                "file": self.snippet_db_file,
+                "function": lambda p=self.snippet_db_file:
+                    FileUtils.create_snippets_db_file(p)
+            },
+            {
+                "file": self.config_file,
+                "function": lambda p=self.config_file:
+                    FileUtils.create_config_file(
+                        default_dir=self.config_dir,
+                        user_path=p,
+                        parent=self
+                    )
+            },
+            {
+                "file": self.settings_file,
+                "function": lambda p=self.settings_file:
+                    FileUtils.create_settings_file(
+                        default_dir=self.config_dir,
+                        user_path=p,
+                        parent=self
+                    )
+            },
+        ])
+
+        # Load and Merge
+        self.config = FileUtils.load_and_merge_yaml(
+            default_path=self.default_config_file,
+            user_path=self.config_file,
+        )
+
+        self.settings = FileUtils.load_and_merge_yaml(
+            default_path=self.default_settings_file,
+            user_path=self.settings_file,
+        )
         
+        # Initialize Snippet DB instance
+        self.snippet_db = SnippetDB(self.snippet_db_file)
+
+        logger.info("Global variables created")
+
     def ensure_directories_exist(self, directories: list = []):
         """
         Ensures that all directories in the given list exist.
@@ -142,7 +190,6 @@ class main():
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
             logging.info("Logger initialized!")
         except Exception as e:
-            #logging.critical("Could not initialize logger class!")
             raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
 
     def flatten_yaml(self, items: dict) -> bool:
@@ -167,9 +214,12 @@ class main():
         except:
             logger.error("Failed to flatten config")
             return False
-        
+
     def load_config(self):
-        """ This function loads a yaml config file and flattens its entries into attributes. """
+        """ 
+        This function loads a yaml config file 
+        and flattens its entries into attributes. 
+        """
         # Check for config
         if not self.config_file.exists():
             QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
@@ -218,10 +268,16 @@ class main():
         """ Based on settings, set the correct registry key for startup """
         if self.skip_reg or RegUtils is None:
             return
-
-        if not RegUtils.is_in_run_key("QSnippet") and self.settings["general"]["start_at_boot"]:
+        
+        if (
+            not RegUtils.is_in_run_key("QSnippet") and 
+            self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+            ):
             RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        elif RegUtils.is_in_run_key("QSnippet") and not self.settings["general"]["start_at_boot"]:
+        elif (
+            RegUtils.is_in_run_key("QSnippet") and 
+            not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+            ):
             RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):
@@ -262,12 +318,12 @@ class main():
             self.images[image] = os.path.join(self.images_path, old_val)
 
     def scale_width(self, original_width, screen_geometry):
-        """Scale a width value from the 1920 reference to the current screen."""
+        """ Scale a width value from the 1920 reference to the current screen. """
         ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         return int(original_width * ratio)
 
     def scale_height(self, original_height, screen_geometry):
-        """Scale a height value from the 1080 reference to the current screen."""
+        """ Scale a height value from the 1080 reference to the current screen. """
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
         return int(original_height * ratio)
     
@@ -308,6 +364,12 @@ class main():
         }
 
     def check_if_already_running(self, app_name="QSnippet"):
+        """
+        Check for lock file to determine if app is already running.
+        
+        :param self: Main class instance
+        :param app_name: Name of the application.
+        """
         lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
         current_pid = os.getpid()
 
@@ -329,48 +391,90 @@ class main():
         return False
     
     def check_notices(self):
-        """Load notices and show any that aren't dismissed or globally disabled."""
+        """
+        Load and display unread notices.
+        """
+        logger.debug("Checking for unread notices")
+
+        notices = self.settings.setdefault("notices", {})
+
+        # Read values safely
+        disable_notices = (
+            notices.get("disable_notices", {}).get("value", False)
+        )
+        dismissed = set(
+            notices.get("dismissed_notices", {}).get("value", [])
+        )
+
+        if disable_notices:
+            logger.info("Notices disabled by user")
+            return
+
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
-        general_settings = self.settings.setdefault("general", {})
-        if general_settings.get("disable_notices", False):
-            logger.info("Notices disabled globally.")
+        unread = NoticeCarouselDialog.load_notices(
+            notices_dir,
+            dismissed
+        )
+
+        # Exit if no unread notices to display
+        if not unread:
+            logger.debug("No unread notices found")
             return
 
-        dismissed = set(general_settings.get("dismissed_notices", []))
-        settings_changed = False
+        logger.info("Displaying %d notices", len(unread))
 
-        for notice_file in sorted(notices_dir.glob("*.yaml")):
-            try:
-                notice = yaml.safe_load(notice_file.read_text())
-                nid = notice.get("id")
-                if not nid or nid in dismissed:
-                    continue
+        dialog = NoticeCarouselDialog(
+            unread,
+            icon_path=QIcon(self.images["icon"]),
+            parent=self,
+        )
+        dialog.exec()
 
-                title = notice.get("title", "Update Notice")
-                message = notice.get("message", "")
+        # Persist dismissals
+        for notice in unread:
+            dismissed.add(notice["id"])
 
-                never_show = self.message_box.notice(message, title, "Never show again")
+        # Update dismissed_notices.value
+        if "dismissed_notices" in notices:
+            notices["dismissed_notices"]["value"] = list(dismissed)
+        else:
+            notices["dismissed_notices"] = {
+                "type": "list",
+                "value": list(dismissed),
+                "description": "List of notices that have been dismissed by the user.",
+            }
 
-                if never_show:
-                    general_settings["disable_notices"] = True
-                    settings_changed = True
-                    break  # stop checking more notices if globally disabled
+        # Update disable_notices.value if user opted out
+        if dialog.disable_future:
+            if "disable_notices" in notices:
+                notices["disable_notices"]["value"] = True
+            else:
+                notices["disable_notices"] = {
+                    "type": "bool",
+                    "value": True,
+                    "description": "Disable all in-app notices and notifications.",
+                }
 
-                dismissed.add(nid)
-                settings_changed = True
+            logger.info("User disabled future notices")
 
-            except Exception as e:
-                logger.error(f"Failed to load notice {notice_file}: {e}")
-
-        if settings_changed:
-            general_settings["dismissed_notices"] = list(dismissed)
-            FileUtils.write_yaml(self.settings_file, self.settings)
-
+        FileUtils.write_yaml(self.settings_file, self.settings)
+        logger.debug("Finished checking notices")
 
     def start_program(self):
-        """ Create and show the main window/tray"""
+        """
+        Create and launch the main application window.
+        """
+        program_name = self.program_name if hasattr(self, "program_name") else "QSnippet"
+        logger.info(f"Starting {program_name} UI")
+        logger.info(
+            "%s %s built %s (commit %s)",
+            program_name,
+            BUILD_VERSION,
+            BUILD_DATE,
+            BUILD_COMMIT,
+        )
         self.qsnippet = QSnippet(parent=self)
         self.qsnippet.run()
 
@@ -384,7 +488,7 @@ if __name__ == '__main__':
         # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon("images/QSnippet_16x16.png")) # fallback location
+        msg.setWindowIcon(QIcon("images/QSnippet.ico")) # fallback location
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()

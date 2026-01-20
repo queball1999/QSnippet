@@ -230,6 +230,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
     def clear_form(self):
         """ Clear all entries in the form. """
         self.folder_input.setCurrentText("Default")
+        self.entry_id = None
         self.new_input.clear()
         self.trigger_input.clear()
         self.snippet_input.clear()
@@ -243,6 +244,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         Populate form fields from snippet entry dict
         {folder, label, trigger, snippet, enabled, paste_style}
         """
+        self.entry_id = entry.get("id")
         self.new_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
         self.snippet_input.setPlainText(entry.get('snippet', ''))
@@ -263,6 +265,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         Read form fields into snippet entry dict
         """
+        id = getattr(self, "entry_id", None)
         folder = self.folder_input.currentText().strip() or 'Default'
         label = self.new_input.text().strip()
         trigger = self.trigger_input.text().strip()
@@ -278,6 +281,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         return_press = self.return_switch.isChecked()
 
         return {
+            'id': id,
             'folder': folder,
             'label': label,
             'trigger': trigger,
@@ -316,16 +320,16 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # FIXME: Needs additional logic here
         entry = self.get_entry()
         if not entry['trigger']:
-            self.message_box.warning("Trigger is required!", title="Error")
+            self.main.message_box.warning("Trigger is required!", title="Error")
             return False
         elif not entry['snippet']:
-            self.message_box.warning("Snippet is required!", title="Error")
+            self.main.message_box.warning("Snippet is required!", title="Error")
             return False
         elif not entry['label']:
-            self.message_box.warning("Label is required!", title="Error")
+            self.main.message_box.warning("Label is required!", title="Error")
             return False
         elif not re.match(self.special_chars_regex, entry['trigger']):
-            self.message_box.warning(
+            self.main.message_box.warning(
                 f"Your trigger did not meet the requirements.\n\n{self.trigger_requirements}",
                 title="Error"
             )
@@ -463,13 +467,19 @@ Snippets come in handy for text you enter often or for standard messages you sen
     
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
-        self.setStyleSheet(f"""
-            QLineEdit, QComboBox {{
-                padding: 5px;
-            }}
-            QPushButton {{
-                padding: 5px
-            }}""")
+        self.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+            } 
+
+            QComboBox {
+                padding: 8px;
+            }
+
+            QLineEdit {
+                padding: 8px;
+            }
+        """)
     
     # ----- Event Handlers -----
     def eventFilter(self, obj, event):

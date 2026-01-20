@@ -55,12 +55,40 @@ jobs:
         with:
           path: dist
 
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 --decode > private.asc
+          gpg --batch --import private.asc
+          echo "trust-model always" >> ~/.gnupg/gpg.conf
+          gpg --list-secret-keys --keyid-format=long
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          find . -type f -name "*.exe" -print0 | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - name: Sign artifacts
+        run: |
+          cd dist
+          gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+              --detach-sign SHA256SUMS.txt
+
+          find . -type f -name "*.exe" -print0 | while IFS= read -r -d '' file; do
+            gpg --batch --yes --pinentry-mode loopback \
+                --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+                --detach-sign "$file"
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: QSnippet ${{ github.ref_name }}
           generate_release_notes: true
-          files: dist/**/*
+          files: |
+            dist/**/*.exe
+            dist/**/*.sig
+            dist/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

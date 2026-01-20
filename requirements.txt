@@ -5,6 +5,7 @@ pynput
 watchdog
 pyinstaller
 psutil
+pytest
 
 # Windows-only
 pywin32; sys_platform == "win32"

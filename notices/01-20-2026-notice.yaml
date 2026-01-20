@@ -1,0 +1,25 @@
+id: "notice-2026-01-20"
+title: "January 2026 Update"
+message: |
+  This update introduces new features and important changes to QSnippet, including a license update.
+
+  ## License Change
+  Starting with this release, QSnippet is now licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+  - All releases published prior to January 2026 remain licensed under the MIT License.
+  - All new releases and future updates are governed by GPLv3.
+
+  Please review the LICENSE file for full details.
+
+  ## What’s New
+  - Added a dynamic **Settings dialog** with search and highlighted matches.
+  - Added debounce handling to improve all search boxes responsiveness.
+  - Added rename support using **F2** and updated menu shortcut mappings.
+  - Added application styling improvements, primarily padding adjustments.
+
+  ## Improvements
+  - Updated `settings.yaml` schema.
+  - Update unit tests to accomidate new changes.
+
+  ## Fixes
+  - Fixed folder add issue ([issue #12](https://github.com/queball1999/QSnippet/issues/12)).

@@ -1,13 +1,12 @@
-import yaml
 from pathlib import Path
 import re
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
-    QLineEdit, QHBoxLayout, QComboBox
+    QLineEdit, QHBoxLayout, QComboBox, QPushButton, QSizePolicy
 )
-from PySide6.QtGui import QStandardItem
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QStandardItem, QPixmap
+from PySide6.QtCore import Qt, Signal, QTimer, QItemSelectionModel
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
@@ -23,6 +22,11 @@ class SnippetEditor(QWidget):
         self.main = main
         self.parent = parent
 
+        # Adding search debounce timer
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(100)  # 0.1 seconds
+
         self.initUI()
         self.load_snippets()
 
@@ -32,9 +36,11 @@ class SnippetEditor(QWidget):
         self.left_layout = QVBoxLayout()
 
         # Search bar and filters
-        self.search_bar = QLineEdit()
+        self.search_bar = QLineEdit(clearButtonEnabled=True)
         self.search_bar.setPlaceholderText("Search all the things...")
-        self.search_bar.textChanged.connect(self.run_search)
+        self.search_bar.textChanged.connect(self.on_search_text_changed)
+        # This line must go here to ensure we initalize search first
+        self.search_timer.timeout.connect(self.run_search)
 
         self.filter_dropdown = QComboBox()
         self.filter_dropdown.addItem("All Snippets")
@@ -42,9 +48,17 @@ class SnippetEditor(QWidget):
         self.filter_dropdown.addItem("Disabled Only")
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
+        arrow = "↓" if not self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
+        self.toggle_collapse_button = QPushButton(arrow)
+        self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
+        self.toggle_collapse_button.setFixedSize(30, 40)
+        self.toggle_collapse_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.toggle_collapse_button.clicked.connect(self.toggle_collapse_folders)
+
         search_layout = QHBoxLayout()
         search_layout.addWidget(self.search_bar)
         search_layout.addWidget(self.filter_dropdown)
+        search_layout.addWidget(self.toggle_collapse_button)
 
         # Left: snippet table
         self.table = SnippetTable(main=self.main, parent=self)
@@ -52,7 +66,6 @@ class SnippetEditor(QWidget):
         self.table.refreshSignal.connect(self.load_snippets)
         # folder signals
         self.table.addFolder.connect(self.on_add_folder)
-        self.table.addSubFolder.connect(self.on_add_subfolder)
         self.table.renameFolder.connect(self.on_rename_folder)
         self.table.deleteFolder.connect(self.on_delete_folder)
         # snippet signals
@@ -89,6 +102,9 @@ class SnippetEditor(QWidget):
         vlay = QVBoxLayout()
         vlay.addWidget(self.splitter)
         self.setLayout(vlay)
+
+        # apply theme
+        self.update_stylesheet()
     
     def load_snippets(self):
         old_text = self.parent.statusBar().currentMessage() or ""
@@ -106,6 +122,7 @@ class SnippetEditor(QWidget):
             self.stack.setCurrentWidget(self.home_widget)    
 
     def show_home_widget(self, *_):
+        """ Show the home widget. """
         self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
@@ -119,10 +136,17 @@ class SnippetEditor(QWidget):
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
 
+    def toggle_collapse_folders(self):
+        """ Toggle between expanding and collapsing all folders in the table. """
+        if self.table.isAnyFolderExpanded():
+            self.table.collapseAll()
+            self.toggle_collapse_button.setText("↓")
+        else:
+            self.table.expandAll()
+            self.toggle_collapse_button.setText("↑")
+
     # ----- Handlers -----
     def on_save(self, *_):
-        # FIXME: Need to edit in place for existing snippets.
-        #        As of now, we create a copy.
         try:
             if not self.form.validate():
                 return
@@ -159,15 +183,19 @@ class SnippetEditor(QWidget):
 
             # Here we could go home or stay on new form
             # Should make this a setting, for now go home
-            self.navigate_home()
+            if self.main.settings["saving"]["navigate_home_after_save"]["value"]:
+                # Navigate home
+                self.navigate_home()
+            else:
+                # Show new form
+                self.show_new_form()
 
         except Exception as e:
             self.main.message_box.error(f'Snippet Save Failed: {e}', title="Save Failed")
 
     def on_delete(self, *_):
-        print("Delete Entry")
         entry = self.table.current_entry()
-        print(entry)
+        
         if not entry:
             self.showStatus("Could not delete entry!")
             return
@@ -200,17 +228,7 @@ class SnippetEditor(QWidget):
         if not ok or not name.strip():
             return
         self.show_new_form()
-        self.form.folder_input.setText(name.strip())
-
-    def on_add_subfolder(self, parent_item=None, *_):
-        parent_name = parent_item.text()
-        prompt = f'Sub-folder under "{parent_name}":'
-        name, ok = QInputDialog.getText(self, 'New Sub-Folder', prompt)
-        if not ok or not name.strip():
-            return
-        full = f"{parent_name}/{name.strip()}"
-        self.show_new_form()
-        self.form.folder_input.setText(full)
+        self.form.folder_input.setCurrentText(name.strip())
         
     def on_rename_folder(self, folder_item=None, *_):
         old = folder_item.text()
@@ -219,12 +237,13 @@ class SnippetEditor(QWidget):
             return
         self.main.snippet_db.rename_folder(old, new.strip())
         self.load_snippets()
-        self.main.message_box.info(f'"{old}" → "{new.strip()}"', title='Folder Renamed')
+        self.main.message_box.info(f'Renamed folder "{old}" to "{new.strip()}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item=None, *_):
         self.show_new_form()
         if isinstance(parent_item, QStandardItem):
-            self.form.folder_input.setText(parent_item.text())
+            itemText = str(parent_item.text())
+            self.form.folder_input.setCurrentText(itemText)
 
     def on_delete_folder(self, folder_item=None, *_):
         name = folder_item.text()
@@ -253,9 +272,10 @@ class SnippetEditor(QWidget):
         if not ok or not new_label.strip() or new_label == old_label:
             return
         
-        self.main.snippet_db.rename_snippet(entry['trigger'], new_label.strip())
+        # Need to rename based on ID
+        self.main.snippet_db.rename_snippet(entry['id'], new_label.strip())
         self.load_snippets()
-        self.main.message_box.info(f'"{old_label}" → "{new_label.strip()}"', title='Snippet Renamed')
+        self.main.message_box.info(f'Renamed snippet "{old_label}" to "{new_label.strip()}"', title='Snippet Renamed')
     
     def on_delete_snippet(self, entry):
         confirm = self.main.message_box.question(
@@ -268,9 +288,59 @@ class SnippetEditor(QWidget):
         if confirm != QMessageBox.Yes:
             return
 
-        self.main.snippet_db.delete_snippet(entry['trigger'])
+        # Need to delete by ID
+        self.main.snippet_db.delete_snippet(entry['id'])
         self.load_snippets()
         self.navigate_home()
+
+    def handle_rename_action(self):
+        """
+        Check what is selected in the table and 
+        determine if we need to remane folder or snippet.
+        """
+        sm = self.table.selectionModel()
+        if not sm or not sm.hasSelection():
+            return
+
+        # Get a row selection in column 0 from the proxy model
+        rows = sm.selectedRows(0)
+        if not rows:
+            # Fallback: sometimes Qt gives only selectedIndexes, grab any and force col 0
+            idxs = sm.selectedIndexes()
+            if not idxs:
+                return
+            proxy_idx = idxs[0].sibling(idxs[0].row(), 0)
+        else:
+            proxy_idx = rows[0]
+
+        if not proxy_idx.isValid():
+            return
+
+        # Make sure the view has a current index so current_entry() works
+        # This fixes the F2 menu focus issue
+        self.table.setCurrentIndex(proxy_idx)
+
+        # First try snippet rename using your existing helper
+        entry = self.table.current_entry()
+        if entry:
+            self.on_rename_snippet(entry)
+            return
+
+        # Otherwise treat it as folder
+        # Map proxy index to source index using the table’s proxy instance
+        src_idx = self.table.proxy.mapToSource(proxy_idx)
+        if not src_idx.isValid():
+            return
+
+        folder_item = self.table.model.itemFromIndex(src_idx)
+        if folder_item is None:
+            return
+
+        self.on_rename_folder(folder_item)
+
+    # ----- Search -----
+    def on_search_text_changed(self):
+        self.search_timer.start()  # restart timer on every keystroke
 
     def run_search(self):
         keyword = self.search_bar.text().strip()
@@ -287,6 +357,29 @@ class SnippetEditor(QWidget):
 
         self.table.load_entries(results)
 
+        # Easter Egg
+        # If user types "cat" in search, show cat dialog
+        if (
+            keyword.lower() == "cat" and 
+            self.main.settings["general"]["extra_features"]["easter_eggs_enabled"].get("value", True)
+            ):
+            self.search_bar.clear()
+            self.show_cat_dialog()
+            return
+        
+    def show_cat_dialog(self):
+        box = QMessageBox(self)
+        box.setWindowTitle("Meow!")
+        box.setText(
+            "Enjoy this picutre of my cat :)\n\n" \
+            "You can turn off easter eggs in the settings.\n\n"
+        )
+
+        pixmap = QPixmap(self.main.images["cat"])
+        box.setIconPixmap(pixmap.scaledToWidth(256, Qt.SmoothTransformation))
+
+        box.exec()
+
     def applyStyles(self):
         """Fucntion to call when you need toupdate the UI. """
         self.home_widget.applyStyles()
@@ -296,7 +389,19 @@ class SnippetEditor(QWidget):
 
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
-        #self.setStyleSheet(f""" """)
+        self.setStyleSheet(""" 
+            QPushButton {
+                padding: 8px;
+            } 
+
+            QComboBox {
+                padding: 8px;
+            }
+
+            QLineEdit {
+                padding: 8px;
+            }
+        """)
 
     def showStatus(self, msg=""):
         original_msg = self.parent.statusBar().currentMessage() or ""
