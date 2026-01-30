@@ -21,7 +21,7 @@ LINUX_BUILD="output/linux/${APP_NAME}-${VERSION}"
 
 echo "Packaging $APP_NAME v$VERSION for Debian"
 
-# Sanity checks
+# Check for built binary
 if [ ! -f "$LINUX_BUILD" ]; then
   echo "ERROR: Linux binary not found at $LINUX_BUILD"
   echo "Run tools/build.sh first"
@@ -46,7 +46,7 @@ mkdir -p \
 cp "$LINUX_BUILD" "$PKG_ROOT/opt/QSnippet/QSnippet"
 chmod 755 "$PKG_ROOT/opt/QSnippet/QSnippet"
 
-# Copy Files
+# Copy Application Files
 cp config/config.yaml   "$PKG_ROOT/opt/QSnippet/config/config.yaml"
 cp config/settings.yaml "$PKG_ROOT/opt/QSnippet/config/settings.yaml"
 cp -r notices/* "$PKG_ROOT/opt/QSnippet/notices/"

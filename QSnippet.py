@@ -42,9 +42,10 @@ class main():
         self.fix_image_paths()
 
         logger.info("Application bootstrap complete")
-        
+
         self.message_box = AppMessageBox(icon_path=self.images["icon"])
-        
+
+        self.check_sys_requirements()  # Check system requirements
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
 
@@ -348,7 +349,7 @@ class main():
                 "radius": int(dims.get("radius", 0) * r_ratio)
             }
         return scaled_size_dict
-                
+    
     def scale_font_sizes(self, font_dict: dict, screen_geometry):
         """
         Given a dict of font sizes:
@@ -390,6 +391,53 @@ class main():
             f.write(str(current_pid))
         return False
     
+    def check_sys_requirements(self):
+        """
+        Check if system meets minimum requirements.
+        So far the only requirement is libxcb-cursor0 on Linux.
+        Similarly, we check and exit if on unsupported OS (macOS).
+        Exits the application with an error message if requirements are not met.
+        """
+        logger.info("Checking system requirements")
+        if sys.platform == "linux":
+            sys_details = f"Linux OS detected: {sys.platform}, Python {sys.version}"
+            logger.info(sys_details)
+
+            # Check if libxcb-cursor0 is installed
+            try:
+                import ctypes
+                ctypes.CDLL("libxcb-cursor.so.0")
+                logger.debug("libxcb-cursor0 is installed.")
+                logger.info("System requirements check complete")
+            except OSError:
+                self.message_box.error(
+                    "Missing required library 'libxcb-cursor0'. Please install it using your package manager.",
+                    title="System Requirement Error"
+                )
+                sys.exit(1)
+
+        elif sys.platform == "win32":
+            sys_details = f"Windows OS detected: {sys.platform}, Python {sys.version}"
+            logger.info(sys_details)
+
+        elif sys.platform == "darwin":
+            sys_details = f"macOS detected: {sys.platform}, Python {sys.version}"
+            logger.warning(sys_details)
+            self.message_box.error(
+                "macOS is not currently supported. This application supports Windows and Linux only.",
+                title="System Requirement Error"
+            )
+            sys.exit(1)
+
+        else:
+            sys_details = f"Unsupported OS detected: {sys.platform}, Python {sys.version}"
+            logger.warning(sys_details)
+            self.message_box.critical(
+                f"Unsupported operating system: {sys.platform}. This application supports Windows and Linux only.",
+                title="System Requirement Error"
+            )
+            sys.exit(1)
+
     def check_notices(self):
         """
         Load and display unread notices.
