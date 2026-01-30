@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=QSnippet
+Comment=Snippet manager tool
+Exec=qsnippet
+Icon=qsnippet
+Terminal=false
+Categories=Utility;Development;

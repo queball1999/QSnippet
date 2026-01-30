@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+LOG_DIR="/var/log/QSnippet"
+
+case "$1" in
+    remove)
+        # keep logs on remove
+        ;;
+    purge)
+        rm -rf "$LOG_DIR"
+        ;;
+esac

@@ -14,7 +14,14 @@ from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer
 
 # Import custom modules
-from utils import FileUtils, RegUtils, AppLogger
+from utils import FileUtils, AppLogger
+
+# Load RegUtils only if we detect Windows
+if sys.platform == "win32":
+    from utils.reg_utils import RegUtils
+else:
+    RegUtils = None
+
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
@@ -207,6 +214,10 @@ class QSnippet(QMainWindow):
         """
         logger.info("Updating startup setting: %s", enabled)
 
+        if RegUtils is None:
+            logger.warning("RegUtils not available on this platform; skipping startup setting")
+            return
+        
         try:
             if enabled:
                 RegUtils.add_to_run_key(

@@ -1,0 +1,8 @@
+Package: QSnippet
+Version: VERSION_REPLACED_DURING_BUILD
+Section: base
+Priority: optional
+Architecture: amd64
+Depends: libxcb-cursor0
+Maintainer: Quynn Bell <admin@quynnbell.com>
+Description: Snippet manager tool.
