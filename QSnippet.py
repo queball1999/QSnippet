@@ -14,7 +14,7 @@ else:
     RegUtils = None
 
 # Import utility and UI modules
-from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
+from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
 from ui import QSnippet
 from ui.widgets import AppMessageBox
 from ui.widgets.notice_carousel import NoticeCarouselDialog
@@ -81,7 +81,7 @@ class main():
         self.app_data_dir = self.default_os_paths["app_data"]
         self.images_path = os.path.join(self.resource_dir, "images")    # set images to resource_dir so we can access within binary
         # Ensure directories exist
-        self.ensure_directories_exist([
+        sys_utils.ensure_directories_exist([
             self.logs_dir,
             self.documents_dir,
             self.app_data_dir,
@@ -107,7 +107,7 @@ class main():
 
         # Use this to ensure files exist
         # Define files in a list of dicts with "file" and "function" keys
-        self.ensure_files_exist([
+        sys_utils.ensure_files_exist([
             {
                 "file": self.snippet_db_file,
                 "function": lambda p=self.snippet_db_file:
@@ -148,41 +148,6 @@ class main():
         self.snippet_db = SnippetDB(self.snippet_db_file)
 
         logger.info("Global variables created")
-
-    def ensure_directories_exist(self, directories: list = []):
-        """
-        Ensures that all directories in the given list exist.
-        If a directory does not exist, it is created.
-
-        :param directories: List of directory paths to check/create
-        """
-        for directory in directories:
-            try:
-                os.makedirs(directory, exist_ok=True)
-            except Exception as e:
-                logging.critical(f"Failed to make directory {directory}! Error: {e}")
-                raise ValueError("Failed to make directory {directory}! "
-                                 f"Please contact application vendor. Error: {e}")
-            
-    def ensure_files_exist(self, files: list = []):
-        """
-        Ensures all specified files exist. If a file is missing,
-        its corresponding creation function is called.
-        
-        :param files: List of dicts like { "file": Path, "function": callable }
-        """
-        for entry in files:
-            path = entry.get("file")
-            create_fn = entry.get("function")
-
-            if not path.exists():
-                logger.warning(f"Missing file: {path}. Creating default...")
-                try:
-                    create_fn(path)
-                    logger.info(f"Created default file: {path}")
-                except Exception as e:
-                    logger.critical(f"Failed to create {path}: {e}")
-                    raise ValueError(f"Failed to create required file: {path}\n\n{e}")
     
     def init_logger(self):
         """ Initialize the logger class """
@@ -268,6 +233,10 @@ class main():
     def handle_start_up_reg(self):
         """ Based on settings, set the correct registry key for startup """
         if self.skip_reg or RegUtils is None:
+            return
+        
+        if sys.platform != "win32":
+            # return if not Windows
             return
         
         if (
@@ -398,27 +367,57 @@ class main():
         Similarly, we check and exit if on unsupported OS (macOS).
         Exits the application with an error message if requirements are not met.
         """
+        package_manager = sys_utils.detect_package_manager()
+        requirements = {
+            "libxcb-cursor": {
+                "library": "libxcb-cursor",
+                "install_hint": f"sudo {package_manager} install libxcb-cursor0"
+            },
+            "xclip": {
+                "library": "xclip",
+                "install_hint": f"sudo {package_manager} install xclip"
+            }
+        }
+        
         logger.info("Checking system requirements")
         if sys.platform == "linux":
             sys_details = f"Linux OS detected: {sys.platform}, Python {sys.version}"
             logger.info(sys_details)
 
-            # Check if libxcb-cursor0 is installed
             try:
-                import ctypes
-                ctypes.CDLL("libxcb-cursor.so.0")
-                logger.debug("libxcb-cursor0 is installed.")
-                logger.info("System requirements check complete")
+                missing_packages = sys_utils.check_required_packages(requirements)
+                logger.debug(f"Missing packages: {missing_packages}")
+
+                # If anything missing, show user friendly error
+                if missing_packages:
+                    install_lines = "\n".join(
+                        f"• {pkg}: {hint}" for pkg, hint in missing_packages
+                    )
+
+                    message = (
+                        "The following required dependencies are missing:\n\n"
+                        f"{install_lines}\n\n"
+                        "Please install them using your package manager and restart the application."
+                    )
+
+                    self.message_box.error(
+                        message,
+                        title="System Requirement Error"
+                    )
+
+                    sys.exit(1)
             except OSError:
                 self.message_box.error(
-                    "Missing required library 'libxcb-cursor0'. Please install it using your package manager.",
-                    title="System Requirement Error"
+                    "An error occured while performing system check. If the issue persists, please contact the application vendor.",
+                    title="Application Error"
                 )
                 sys.exit(1)
 
         elif sys.platform == "win32":
             sys_details = f"Windows OS detected: {sys.platform}, Python {sys.version}"
             logger.info(sys_details)
+            logger.debug("No additional system requirements for Windows.")
+            
 
         elif sys.platform == "darwin":
             sys_details = f"macOS detected: {sys.platform}, Python {sys.version}"
@@ -437,6 +436,8 @@ class main():
                 title="System Requirement Error"
             )
             sys.exit(1)
+
+        logger.info("System requirements check complete")
 
     def check_notices(self):
         """

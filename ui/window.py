@@ -5,6 +5,11 @@ import zipfile
 import platform, psutil
 import logging
 
+# Only import subprocess on non-Windows platforms
+# Windows uses os.startfile instead
+if sys.platform != "win32":
+    import subprocess
+
 # Import PySide6 Modules
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget,

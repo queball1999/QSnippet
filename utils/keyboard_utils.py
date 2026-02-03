@@ -203,6 +203,7 @@ class SnippetExpander():
         Expand snippet using clipboard paste.
         """
         logger.debug("Expanding snippet via clipboard")
+        # NOTE: xclip or xsel must be installed on Linux for clipboard support
 
         pyperclip.copy(snippet)
         with self.controller.pressed(self._paste_mod):
