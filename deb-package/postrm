@@ -5,9 +5,12 @@ LOG_DIR="/var/log/QSnippet"
 
 case "$1" in
     remove)
-        # keep logs on remove
+        # Only remove user data on remove
+        rm -rf ~/.local/share/QSnippet
         ;;
     purge)
+        # Remove logs and user data on purge
         rm -rf "$LOG_DIR"
+        rm -rf ~/.local/share/QSnippet
         ;;
 esac

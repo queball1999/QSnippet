@@ -36,6 +36,7 @@ mkdir -p "$PKG_ROOT"
 mkdir -p \
   "$PKG_ROOT/DEBIAN" \
   "$PKG_ROOT/opt/QSnippet" \
+  "$PKG_ROOT/opt/QSnippet/images" \
   "$PKG_ROOT/opt/QSnippet/config" \
   "$PKG_ROOT/opt/QSnippet/notices" \
   "$PKG_ROOT/usr/bin" \
@@ -47,6 +48,7 @@ cp "$LINUX_BUILD" "$PKG_ROOT/opt/QSnippet/QSnippet"
 chmod 755 "$PKG_ROOT/opt/QSnippet/QSnippet"
 
 # Copy Application Files
+cp -r images/* "$PKG_ROOT/opt/QSnippet/images/"
 cp config/config.yaml   "$PKG_ROOT/opt/QSnippet/config/config.yaml"
 cp config/settings.yaml "$PKG_ROOT/opt/QSnippet/config/settings.yaml"
 cp -r notices/* "$PKG_ROOT/opt/QSnippet/notices/"

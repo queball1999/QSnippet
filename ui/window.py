@@ -21,12 +21,6 @@ from PySide6.QtCore import Qt, QTimer
 # Import custom modules
 from utils import FileUtils, AppLogger
 
-# Load RegUtils only if we detect Windows
-if sys.platform == "win32":
-    from utils.reg_utils import RegUtils
-else:
-    RegUtils = None
-
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
@@ -54,6 +48,12 @@ class QSnippet(QMainWindow):
 
         self.setWindowTitle(self.parent.program_name)
         self.setWindowIcon(QIcon(self.parent.images["icon"]))
+
+        # Set application-level metadata
+        # This fixes app icon missing on linux taskbar
+        self.app.setWindowIcon(QIcon(self.parent.images["icon"]))
+        self.app.setApplicationName(self.parent.program_name)
+        self.app.setDesktopFileName(self.parent.program_name)
 
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
@@ -218,20 +218,31 @@ class QSnippet(QMainWindow):
         Enable or disable startup at boot.
         """
         logger.info("Updating startup setting: %s", enabled)
-
-        if RegUtils is None:
-            logger.warning("RegUtils not available on this platform; skipping startup setting")
-            return
         
         try:
-            if enabled:
-                RegUtils.add_to_run_key(
-                    app_exe_path=self.parent.app_exe,
-                    entry_name="QSnippet",
-                )
-            else:
-                RegUtils.remove_from_run_key(entry_name="QSnippet")
+            if sys.platform == "win32":
+                from utils.reg_utils import RegUtils
 
+                if enabled:
+                    RegUtils.add_to_run_key(
+                        app_exe_path=self.parent.app_exe,
+                        entry_name="QSnippet",
+                    )
+                else:
+                    RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+            elif sys.platform.startswith("linux") is not None:
+                from utils.linux_utils import LinuxUtils
+
+                if enabled:
+                    LinuxUtils.enable_autostart()
+                else:
+                    LinuxUtils.disable_autostart()
+                    
+            else:
+                logger.info("Cannot process auto-start change. This operating system is currently unsupported.")
+                return
+            
             self.parent.skip_reg = False
             self.parent.settings["general"]["startup_behavior"]["start_at_boot"]["value"] = enabled
             FileUtils.write_yaml(

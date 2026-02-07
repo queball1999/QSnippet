@@ -7,12 +7,6 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QSize, QTimer
 from PySide6.QtGui import QFont, QIcon
 
-# Load RegUtils only if we detect Windows
-if sys.platform == "win32":
-    from utils.reg_utils import RegUtils
-else:
-    RegUtils = None
-
 # Import utility and UI modules
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
 from ui import QSnippet
@@ -232,23 +226,33 @@ class main():
 
     def handle_start_up_reg(self):
         """ Based on settings, set the correct registry key for startup """
-        if self.skip_reg or RegUtils is None:
-            return
-        
-        if sys.platform != "win32":
-            # return if not Windows
-            return
-        
-        if (
-            not RegUtils.is_in_run_key("QSnippet") and 
-            self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-            ):
-            RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        elif (
-            RegUtils.is_in_run_key("QSnippet") and 
-            not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-            ):
-            RegUtils.remove_from_run_key(entry_name="QSnippet")
+        if sys.platform == "win32":
+            from utils.reg_utils import RegUtils
+
+            if (
+                not RegUtils.is_in_run_key("QSnippet") and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
+            elif (
+                RegUtils.is_in_run_key("QSnippet") and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+        elif sys.platform.startswith("linux"):
+            from utils.linux_utils import LinuxUtils
+
+            if (
+                not LinuxUtils.is_autostart_enabled() and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                LinuxUtils.enable_autostart()
+            elif (
+                LinuxUtils.is_autostart_enabled() and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                LinuxUtils.disable_autostart()
 
     def scale_ui_cfg(self):
         """ 
@@ -380,7 +384,13 @@ class main():
         }
         
         logger.info("Checking system requirements")
-        if sys.platform == "linux":
+
+        if sys.platform == "win32":
+            sys_details = f"Windows OS detected: {sys.platform}, Python {sys.version}"
+            logger.info(sys_details)
+            logger.debug("No additional system requirements for Windows.")
+
+        elif sys.platform.startswith("linux"):
             sys_details = f"Linux OS detected: {sys.platform}, Python {sys.version}"
             logger.info(sys_details)
 
@@ -412,13 +422,7 @@ class main():
                     title="Application Error"
                 )
                 sys.exit(1)
-
-        elif sys.platform == "win32":
-            sys_details = f"Windows OS detected: {sys.platform}, Python {sys.version}"
-            logger.info(sys_details)
-            logger.debug("No additional system requirements for Windows.")
             
-
         elif sys.platform == "darwin":
             sys_details = f"macOS detected: {sys.platform}, Python {sys.version}"
             logger.warning(sys_details)
