@@ -12,8 +12,8 @@ if sys.platform != "win32":
 
 # Import PySide6 Modules
 from PySide6.QtWidgets import (
-    QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget,
-    QMessageBox
+    QSystemTrayIcon, QMainWindow, QVBoxLayout, QWidget,
+    QMessageBox, QLabel
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer
@@ -77,12 +77,27 @@ class QSnippet(QMainWindow):
         logger.info("Initializing main UI")
 
         container = QWidget()
-        layout = QHBoxLayout(container)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Linux only notice
+        self.linux_notice = QLabel("Please note that Linux compatibility is currently limited. Please report any bugs or broken features.")
+        self.linux_notice.setAlignment(Qt.AlignCenter)
+        self.linux_notice.setStyleSheet(f"""
+            QLabel {{
+                padding: 5px;
+                background: #ffcc00;
+            }}""")
+        
+        self.linux_notice.hide()
+        if sys.platform.startswith("linux"):
+            self.linux_notice.show()
 
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)
         self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
         
+        layout.addWidget(self.linux_notice)
         layout.addWidget(self.editor)
         container.setLayout(layout)
         self.setCentralWidget(container)
