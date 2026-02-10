@@ -78,8 +78,7 @@ class main():
         self.logs_dir = self.default_os_paths["log_dir"]
         self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
-        # self.images_path = os.path.join(self.resource_dir, "images")    # set images to resource_dir so we can access within binary
-        self.images_path = FileUtils.resolve_images_path(self)
+        self.images_path = FileUtils.resolve_images_path(self)  # dynamically fetch images directory
 
         # Ensure directories exist
         sys_utils.ensure_directories_exist([

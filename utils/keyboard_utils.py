@@ -354,7 +354,10 @@ class SnippetExpander():
                 seen.remove(trigger)
 
             else:   # do nothing
-                replacement = f"{{/{trigger}}}"
+                # replacement = f"{{/{trigger}}}"
+
+                # Catch missing embed snippet. Fixing Issue #23
+                replacement = f"[Error - Could not locate snippet: {trigger}]"
 
             result.append(replacement)
             last_idx = match.end()

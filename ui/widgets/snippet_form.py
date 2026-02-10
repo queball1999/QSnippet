@@ -163,16 +163,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.intellisense_popup.setFocusPolicy(Qt.NoFocus)
         self.intellisense_popup.itemActivated.connect(self.insert_completion)
         self.intellisense_popup.itemClicked.connect(self.insert_completion)
-
-        # Fill with placeholders + sub-snippets
-        self.completions = [
-            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
-            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
-        ]
-        # Add snippet triggers too
-        self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])
-        for c in self.completions:
-            QListWidgetItem(c, self.intellisense_popup)
+        # Fill list
+        self.fill_intellisense_popup_list()
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -337,6 +329,20 @@ Snippets come in handy for text you enter often or for standard messages you sen
         return True
     
     # ----- Pop-Up Menu -----
+    def fill_intellisense_popup_list(self):
+        """ Function to populate intellisense popup list from snippets. """
+        
+        # Fill with placeholders + sub-snippets
+        self.completions = [
+            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
+            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
+        ]
+
+        # Add snippet triggers too
+        self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])
+        for c in self.completions:
+            QListWidgetItem(c, self.intellisense_popup)
+
     def show_intellisense(self):
         """ Function to setup and show intellisense pop-up """
         if not self.isVisible():    # Exit if not visible
@@ -535,4 +541,6 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # force focus when the form is shown
         self.new_input.setFocus(Qt.TabFocusReason)
         self.populate_tags_input()
+        # Reload popup list. Fixing Issue #24
+        self.fill_intellisense_popup_list()
 
