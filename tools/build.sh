@@ -14,7 +14,7 @@ APP_NAME="QSnippet"
 ENTRY="QSnippet.py"
 DIST_DIR="output"
 BUILD_DIR="build"
-ICON_LINUX="./images/QSnippet.ico"
+ICON_LINUX="./images/QSnippet.icns"
 ICON_WINDOWS="./images/QSnippet.ico"
 ICON_MAC="./images/QSnippet.icns"
 

@@ -11,6 +11,48 @@ logger = logging.getLogger(__name__)
 
 
 class FileUtils:
+    def resolve_images_path(self) -> Path:
+        """
+        Resolve images directory.
+
+        Resolution order:
+        1. resource_dir/images
+        2. working_dir/images
+
+        Validates required image files exist.
+        """
+        candidates = [
+            Path(self.resource_dir) / "images",
+            Path(self.working_dir) / "images",
+        ]
+
+        for path in candidates:
+            if not path.exists() or not path.is_dir():
+                continue
+
+            missing = [
+                img for img in self.REQUIRED_IMAGE_FILES
+                if not (path / img).exists()
+            ]
+
+            if not missing:
+                logger.info(f"Using images directory: {path}")
+                return path
+
+            logger.warning(
+                "Images directory found but missing files in %s: %s",
+                path,
+                ", ".join(missing),
+            )
+
+        raise FileNotFoundError(
+            "No valid images directory found. "
+            "Checked resource_dir and working_dir."
+            "\n\n"
+            f"Location: {path}"
+            ""
+        )
+
     """
     Utility class for common file and directory operations.
     """
@@ -199,12 +241,26 @@ class FileUtils:
                 "app_data": app_data,
                 "documents": documents,
                 "log_dir": log_dir,
-                "working_dir": Path.cwd(),
+                "working_dir": FileUtils.get_executable_dir(),
                 "resource_dir": resource_dir
             }
         except Exception as e:
             logging.critical("Could not retrieve OS specific directories!")
             raise ValueError("Could not retrieve OS specific directories! Please contact application vendor.")
+    
+    @staticmethod
+    def get_executable_dir() -> Path:
+        """
+        Return the application root directory.
+        Safe to call from utility modules.
+        """
+        if getattr(sys, "frozen", False):
+            # PyInstaller executable
+            return Path(sys.executable).resolve().parent
+
+        # Running from source: anchor to the main entrypoint
+        main_file = sys.modules.get("__main__").__file__
+        return Path(main_file).resolve().parent
 
     @staticmethod
     def merge_dict(default: dict, user: dict) -> dict:

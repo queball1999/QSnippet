@@ -127,6 +127,11 @@ class QSnippet(QMainWindow):
 
         try:
             icon_path = self.parent.images.get("icon")
+            
+            # Fix icon for windows os
+            if sys.platform == "win32":
+                icon_path = self.parent.images.get("win_icon")
+
             logger.debug("Tray icon path: %s", icon_path)
 
             icon = QIcon(icon_path)

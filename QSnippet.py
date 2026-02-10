@@ -52,6 +52,11 @@ class main():
         self.start_program()    # start program
         
     def create_global_variables(self):
+        self.REQUIRED_IMAGE_FILES = [
+            "QSnippet.ico",
+            "QSnippet.icns",
+        ]
+
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
         self.app = QApplication.instance()  # Use the existing QApplication instance
@@ -73,11 +78,13 @@ class main():
         self.logs_dir = self.default_os_paths["log_dir"]
         self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
-        self.images_path = os.path.join(self.resource_dir, "images")    # set images to resource_dir so we can access within binary
+        # self.images_path = os.path.join(self.resource_dir, "images")    # set images to resource_dir so we can access within binary
+        self.images_path = FileUtils.resolve_images_path(self)
+
         # Ensure directories exist
         sys_utils.ensure_directories_exist([
             self.logs_dir,
-            self.documents_dir,
+            # self.documents_dir,
             self.app_data_dir,
             self.images_path
         ])
@@ -290,6 +297,8 @@ class main():
         for image in self.images:
             old_val = self.images[image]
             self.images[image] = os.path.join(self.images_path, old_val)
+            
+        logger.debug(f"Images Path: {self.images_path}")
 
     def scale_width(self, original_width, screen_geometry):
         """ Scale a width value from the 1920 reference to the current screen. """
