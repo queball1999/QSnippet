@@ -10,8 +10,10 @@ from ui import SnippetService
 
 @pytest.fixture
 def mock_expander(monkeypatch):
-    """
-    Mock SnippetExpander to avoid real keyboard hooks.
+    """Mock SnippetExpander to avoid real keyboard hooks.
+
+    Returns:
+        MagicMock: A mock SnippetExpander instance.
     """
     mock = MagicMock()
     monkeypatch.setattr(
@@ -23,8 +25,10 @@ def mock_expander(monkeypatch):
 
 @pytest.fixture
 def mock_db(monkeypatch):
-    """
-    Mock SnippetDB to avoid real database work.
+    """Mock SnippetDB to avoid real database work.
+
+    Returns:
+        MagicMock: A mock SnippetDB instance.
     """
     mock = MagicMock()
     monkeypatch.setattr(
@@ -36,8 +40,10 @@ def mock_db(monkeypatch):
 
 @pytest.fixture
 def service(mock_expander, mock_db, tmp_path):
-    """
-    Create SnippetService with mocked dependencies.
+    """Create SnippetService with mocked dependencies.
+
+    Returns:
+        SnippetService: A service instance backed by mocks.
     """
     db_path = tmp_path / "snippets.db"
     return SnippetService(str(db_path))
@@ -46,9 +52,7 @@ def service(mock_expander, mock_db, tmp_path):
 # Tests
 
 def test_service_initializes(service, mock_expander, mock_db):
-    """
-    Service should initialize with expander and db.
-    """
+    """Service should initialize with expander and db."""
     assert service.snippet_db is mock_db
     assert service.expander is mock_expander
     assert service._thread is None
@@ -56,9 +60,7 @@ def test_service_initializes(service, mock_expander, mock_db):
 
 
 def test_start_starts_expander_and_thread(service, mock_expander):
-    """
-    start() should start expander and background thread.
-    """
+    """start() should start expander and background thread."""
     service.start()
 
     mock_expander.start.assert_called_once()
@@ -72,9 +74,7 @@ def test_start_starts_expander_and_thread(service, mock_expander):
 
 
 def test_start_is_idempotent(service, mock_expander):
-    """
-    Calling start() twice should not restart expander.
-    """
+    """Calling start() twice should not restart expander."""
     service.start()
     service.start()
 
@@ -82,9 +82,7 @@ def test_start_is_idempotent(service, mock_expander):
 
 
 def test_stop_stops_service(service, mock_expander):
-    """
-    stop() should signal shutdown and stop expander.
-    """
+    """stop() should signal shutdown and stop expander."""
     service.start()
     time.sleep(0.05)
 
@@ -95,25 +93,19 @@ def test_stop_stops_service(service, mock_expander):
 
 
 def test_stop_without_start_is_safe(service):
-    """
-    stop() without start should not crash.
-    """
+    """stop() without start should not crash."""
     service.stop()
     assert service.active() is False
 
 
 def test_refresh_calls_expander(service, mock_expander):
-    """
-    refresh() should reload snippets via expander.
-    """
+    """refresh() should reload snippets via expander."""
     service.refresh()
     mock_expander.refresh_snippets.assert_called_once()
 
 
 def test_pause_and_resume_delegate(service, mock_expander):
-    """
-    pause() and resume() should delegate to expander.
-    """
+    """pause() and resume() should delegate to expander."""
     service.pause()
     service.resume()
 
@@ -122,9 +114,7 @@ def test_pause_and_resume_delegate(service, mock_expander):
 
 
 def test_active_reflects_state(service):
-    """
-    active() should reflect running thread state.
-    """
+    """active() should reflect running thread state."""
     assert service.active() is False
 
     service.start()

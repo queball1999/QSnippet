@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from PySide6.QtCore import QCoreApplication
 
+from tests.db.benchmark_test import _results
+
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,23 +16,32 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @pytest.fixture(scope="session")
 def project_root():
-    """Return the project root path."""
+    """Return the project root path.
+
+    Returns:
+        Path: The absolute path to the project root directory.
+    """
     return PROJECT_ROOT
 
 
 @pytest.fixture
 def temp_dir(tmp_path):
-    """
-    Generic temporary directory fixture.
+    """Provide a generic temporary directory for testing.
+
+    Returns:
+        Path: A fresh temporary directory.
     """
     return tmp_path
 
 
 @pytest.fixture
 def temp_app_dirs(tmp_path):
-    """
-    Create a fake application directory structure.
+    """Create a fake application directory structure.
+
     Mimics FileUtils.get_default_paths output.
+
+    Returns:
+        dict: Mapping of path keys to temporary Path objects.
     """
     base = tmp_path / "app"
     paths = {
@@ -49,24 +60,30 @@ def temp_app_dirs(tmp_path):
 
 @pytest.fixture
 def temp_snippet_db_path(tmp_path):
-    """
-    Provide a temporary SQLite database path.
+    """Provide a temporary SQLite database path.
+
+    Returns:
+        Path: A path to a non-existent database file in a temp directory.
     """
     return tmp_path / "snippets.db"
 
 
 @pytest.fixture
 def temp_config_file(tmp_path):
-    """
-    Provide a temporary config.yaml path.
+    """Provide a temporary config.yaml path.
+
+    Returns:
+        Path: A path to a non-existent config file in a temp directory.
     """
     return tmp_path / "config.yaml"
 
 
 @pytest.fixture
 def temp_settings_file(tmp_path):
-    """
-    Provide a temporary settings.yaml path.
+    """Provide a temporary settings.yaml path.
+
+    Returns:
+        Path: A path to a non-existent settings file in a temp directory.
     """
     return tmp_path / "settings.yaml"
 
@@ -98,9 +115,12 @@ def mock_qt_app(monkeypatch):
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_qt_app():
-    """
-    Provide a single Qt application instance for the entire test session.
+    """Provide a single Qt application instance for the entire test session.
+
     Uses QCoreApplication to avoid GUI initialization.
+
+    Yields:
+        QCoreApplication: The shared application instance.
     """
     app = QCoreApplication.instance()
     if app is None:
@@ -110,8 +130,10 @@ def mock_qt_app():
 
 @pytest.fixture
 def mock_reg_utils(monkeypatch):
-    """
-    Mock RegUtils to avoid touching the Windows registry.
+    """Mock RegUtils to avoid touching the Windows registry.
+
+    Returns:
+        MagicMock: A mock RegUtils with is_in_run_key returning False.
     """
     mock = MagicMock()
     mock.is_in_run_key.return_value = False
@@ -127,7 +149,33 @@ def mock_reg_utils(monkeypatch):
 
 @pytest.fixture
 def disable_sys_exit(monkeypatch):
-    """
-    Prevent sys.exit from killing pytest.
-    """
+    """Prevent sys.exit from killing pytest."""
     monkeypatch.setattr(sys, "exit", lambda *args, **kwargs: None)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not _results:
+        return
+
+    _results.sort(key=lambda r: (r["qty"], r["type"]))
+
+    header = f"{'Qty':>12}  {'Type':<12}  {'Per Item':>15}  {'Total':>12}"
+    divider = "-" * len(header)
+
+    terminalreporter.write_sep("=", "Benchmark Results")
+    terminalreporter.write_line(header)
+    terminalreporter.write_line(divider)
+
+    prev_qty = None
+    for r in _results:
+        if prev_qty is not None and r["qty"] != prev_qty:
+            terminalreporter.write_line("")
+        prev_qty = r["qty"]
+        terminalreporter.write_line(
+            f"{r['qty']:>12,}  "
+            f"{r['type']:<12}  "
+            f"{r['per_item_ms']:>12.4f} ms  "
+            f"{r['total_ms']:>9.2f} ms"
+        )
+
+    terminalreporter.write_line(divider)

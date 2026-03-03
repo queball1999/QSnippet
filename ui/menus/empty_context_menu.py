@@ -14,10 +14,28 @@ class EmptyContextMenu(QMenu):
     refreshRequested    = Signal()
 
     def __init__(self, parent=None):
+        """
+        Initialize the EmptyContextMenu.
+
+        Args:
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self._build()
 
     def _build(self):
+        """
+        Build the empty context menu with all available actions.
+
+        Adds menu items for creating folders/snippets, expanding/collapsing folders,
+        and refreshing the view.
+
+        Returns:
+            None
+        """
         self.addAction("Add Folder", self.addFolderRequested.emit)
         self.addAction("Add Snippet", self.addSnippetRequested.emit)
         self.addSeparator()

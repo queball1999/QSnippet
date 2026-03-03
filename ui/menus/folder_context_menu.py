@@ -13,11 +13,29 @@ class FolderContextMenu(QMenu):
     deleteRequested     = Signal(object)
 
     def __init__(self, folder_item, parent=None):
+        """
+        Initialize the FolderContextMenu.
+
+        Args:
+            folder_item (QStandardItem): The folder item being acted upon.
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.folder_item = folder_item
         self._build()
 
     def _build(self):
+        """
+        Build the folder context menu with all available folder actions.
+
+        Adds menu items for adding items, renaming, and deleting the folder.
+
+        Returns:
+            None
+        """
         self.addAction(
             "Add Item",
             lambda: self.addItemRequested.emit(self.folder_item)

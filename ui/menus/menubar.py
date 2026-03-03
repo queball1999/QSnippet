@@ -16,6 +16,16 @@ class MenuBar(QMenuBar):
     show_settings = Signal()
 
     def __init__(self, main=None, parent=None):
+        """
+        Initialize the MenuBar with all application menus.
+
+        Args:
+            main (Any): Reference to the main application object.
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.main = main
         self.parent = parent
@@ -23,6 +33,15 @@ class MenuBar(QMenuBar):
         self._build_menus()
 
     def _build_menus(self):
+        """
+        Build all menu structures (File, Edit, Tools, Help).
+
+        Creates and configures all menus including file operations, edit actions,
+        tool shortcuts, and help resources with associated signals and shortcuts.
+
+        Returns:
+            None
+        """
         self.editor = self.parent.editor
         # ----- File Menu -----
         file_menu = self.addMenu("&File")
@@ -200,11 +219,30 @@ class MenuBar(QMenuBar):
 
     # ----- HELPER FUNCTIONS -----
     def _set_log_level(self, level: str):
-        """Emit signal with new log level."""
+        """
+        Emit a signal to change the application log level.
+
+        Args:
+            level (str): The log level to set (e.g., "ERROR", "WARNING", "INFO", "DEBUG").
+
+        Returns:
+            None
+        """
         self.logLevelChanged.emit(level)
 
     def _do_edit_action(self, action: str):
-        """Perform an edit action on the currently focused widget."""
+        """
+        Perform edit actions on the currently focused widget.
+
+        Handles standard edit operations including undo, redo, cut, copy, paste,
+        and rename, delegating to the focused widget's methods where available.
+
+        Args:
+            action (str): The edit action to perform (undo, redo, cut, copy, paste, rename).
+
+        Returns:
+            None
+        """
         widget = self.main.app.focusWidget()
         if not widget:
             return
@@ -224,7 +262,18 @@ class MenuBar(QMenuBar):
             self.renameAction.emit()
 
     def insert_token(self, token: str):
-        """Insert a replacement token at the current cursor position."""
+        """
+        Insert a replacement token at the current cursor position in the focused widget.
+
+        Supports insertion into QTextEdit, QPlainTextEdit, and QLineEdit widgets.
+        Falls back to the insert() method if specialized cursor methods aren't available.
+
+        Args:
+            token (str): The token string to insert (e.g., "{date}", "{time}").
+
+        Returns:
+            None
+        """
         widget = self.main.app.focusWidget()
         if not widget:
             return

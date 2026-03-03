@@ -24,11 +24,29 @@ except ImportError:
 # Setup logging
 logger = logging.getLogger(__name__)
 
+"""
+Name: QSnippet
+
+Description: Snippet manager tool.
+
+Author: Written by Quynn Bell
+"""
 
 class main():
-    def __init__(self):
-        # Main Program Execution
-        # NOTE: logging is NOT fully initialized until after init_logger
+    def __init__(self) -> None:
+        """
+        Initialize the main application.
+
+        Performs startup initialization including creating global variables,
+        loading configuration and settings, initializing logging, verifying
+        system requirements, checking for existing instances, scaling UI
+        configuration, optionally displaying notices, and launching the program.
+
+        NOTE: logging is NOT fully initialized until after init_logger
+
+        Returns:
+            None
+        """
         self.create_global_variables()
         self.load_config()      # config.yaml
         self.load_settings()    # settings.yaml
@@ -51,7 +69,16 @@ class main():
 
         self.start_program()    # start program
         
-    def create_global_variables(self):
+    def create_global_variables(self) -> None:
+        """
+        Initialize global variables and application paths.
+
+        Sets up process metadata, screen geometry references, directory paths,
+        file paths, and loads the merged configuration from default and user YAML files.
+
+        Returns:
+            None
+        """
         self.REQUIRED_IMAGE_FILES = [
             "QSnippet.ico",
             "QSnippet.icns",
@@ -83,7 +110,6 @@ class main():
         # Ensure directories exist
         sys_utils.ensure_directories_exist([
             self.logs_dir,
-            # self.documents_dir,
             self.app_data_dir,
             self.images_path
         ])
@@ -149,8 +175,19 @@ class main():
 
         logger.info("Global variables created")
     
-    def init_logger(self):
-        """ Initialize the logger class """
+    def init_logger(self) -> None:
+        """
+        Initialize the application logger.
+
+        Creates an AppLogger instance using the configured log file path and
+        log level.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If the logger cannot be initialized.
+        """
         try:
             logging.info("Setting up Logger")
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
@@ -159,7 +196,19 @@ class main():
             raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
 
     def flatten_yaml(self, items: dict) -> bool:
-        """ Flatten yaml to dict and assign to attributes. """
+        """
+        Flatten a nested YAML dictionary into instance attributes.
+
+        Assigns each top-level key in the provided dictionary as an attribute
+        on the instance. For nested dictionaries, creates flattened attributes
+        by prefixing keys with their parent section name.
+
+        Args:
+            items (dict): The dictionary to flatten and assign to attributes.
+
+        Returns:
+            bool: True if flattening succeeds, False otherwise.
+        """
         try:
             # Assign every top-level config key as an attribute on self
             # e.g. config['program_name'] → self.program_name
@@ -181,10 +230,19 @@ class main():
             logger.error("Failed to flatten config")
             return False
 
-    def load_config(self):
-        """ 
-        This function loads a yaml config file 
-        and flattens its entries into attributes. 
+    def load_config(self) -> None:
+        """
+        Load and monitor the configuration YAML file.
+
+        Ensures the configuration file exists, initializes a ConfigLoader to
+        watch for changes, and flattens the loaded configuration into instance
+        attributes.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If the configuration file is missing.
         """
         # Check for config
         if not self.config_file.exists():
@@ -193,13 +251,25 @@ class main():
 
         # Setup Config file watcher
         self.loader = ConfigLoader(self.config_file, parent=self)
-        self.loader.configChanged.connect(self._on_config_updated)
+        self.loader.configChanged.connect(self.on_config_updated)
         self.cfg = self.loader.config
         self.flatten_yaml(items=self.cfg)
 
-    def _on_config_updated(self, config):
-        """ When config update is detected, refresh config variable and UI elements. """
+    def on_config_updated(self, config) -> None:
+        """
+        Handle updates to the configuration file.
+
+        Refreshes the stored configuration, re-flattens attributes, rescales
+        UI configuration, and reapplies styles to the editor when changes are detected.
+
+        Args:
+            config (dict): The updated configuration dictionary.
+
+        Returns:
+            None
+        """
         logger.info("Config reloaded.")
+
         if config:
             self.cfg = config
             self.flatten_yaml()  # Flatten config again to refresh attributes.
@@ -208,8 +278,20 @@ class main():
             self.app.processEvents()
         # Should also fire off UI refresh, etc to ensure the UI matches the config
 
-    def load_settings(self):
-        """ This function loads a yaml settings file and flattens its entries into attributes. """
+    def load_settings(self) -> None:
+        """
+        Load and monitor the settings YAML file.
+
+        Ensures the settings file exists, initializes a SettingsLoader to
+        watch for changes, flattens the loaded settings into instance
+        attributes, and applies startup registration behavior.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If the settings file is missing.
+        """
         # Check for config
         if not self.settings_file.exists():
             QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
@@ -217,21 +299,41 @@ class main():
 
         # Setup Config file watcher
         self.loader = SettingsLoader(self.settings_file, parent=self)
-        self.loader.settingsChanged.connect(self._on_settings_updated)
+        self.loader.settingsChanged.connect(self.on_settings_updated)
         self.settings = self.loader.settings
         self.flatten_yaml(items=self.settings)
         self.handle_start_up_reg()
 
-    def _on_settings_updated(self, config):
-        """ When config update is detected, refresh config variable and UI elements. """
+    def on_settings_updated(self, config) -> None:
+        """
+        Handle updates to the settings file.
+
+        Refreshes the stored settings, re-flattens attributes, and updates
+        startup registration behavior when changes are detected.
+
+        Args:
+            config (dict): The updated settings dictionary.
+
+        Returns:
+            None
+        """
         logger.info("Settings reloaded.")
+
         if config:
             self.settings = config
             self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
             self.handle_start_up_reg()
 
-    def handle_start_up_reg(self):
-        """ Based on settings, set the correct registry key for startup """
+    def handle_start_up_reg(self) -> None:
+        """
+        Configure application startup behavior based on settings.
+
+        Enables or disables automatic startup registration depending on the
+        current platform and user configuration.
+
+        Returns:
+            None
+        """
         if sys.platform == "win32":
             from utils.reg_utils import RegUtils
 
@@ -260,10 +362,15 @@ class main():
                 ):  # If auto-start exists and setting is false, disable auto-start
                 LinuxUtils.disable_autostart()
 
-    def scale_ui_cfg(self):
-        """ 
-        Reassigns the size attributes with scaled versions. 
-        Needs more work but this will do for now 05/07/25
+    def scale_ui_cfg(self) -> None:
+        """
+        Scale UI configuration values based on screen resolution.
+
+        Adjusts font sizes, widget dimensions, and related UI attributes
+        proportionally to the current screen geometry.
+
+        Returns:
+            None
         """
         # Scale Accordingly
         self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
@@ -291,32 +398,62 @@ class main():
         # Widget Sizes
         self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
 
-    def fix_image_paths(self):
-        """ This loops through images and appends the right path. """
+    def fix_image_paths(self) -> None:
+        """
+        Update image paths to use the resolved images directory.
+
+        Prefixes configured image filenames with the absolute images path.
+
+        Returns:
+            None
+        """
         for image in self.images:
             old_val = self.images[image]
             self.images[image] = os.path.join(self.images_path, old_val)
             
         logger.debug(f"Images Path: {self.images_path}")
 
-    def scale_width(self, original_width, screen_geometry):
-        """ Scale a width value from the 1920 reference to the current screen. """
+    def scale_width(self, original_width, screen_geometry) -> int:
+        """
+        Scale a width value relative to the reference screen width.
+
+        Args:
+            original_width (int): The original width based on the reference resolution.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            int: The scaled width value.
+        """
         ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         return int(original_width * ratio)
 
     def scale_height(self, original_height, screen_geometry):
-        """ Scale a height value from the 1080 reference to the current screen. """
+        """
+        Scale a height value relative to the reference screen height.
+
+        Args:
+            original_height (int): The original height based on the reference resolution.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            int: The scaled height value.
+        """
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
         return int(original_height * ratio)
     
     def scale_dict_sizes(self, size_dict: dict, screen_geometry):
         """
-        Given a dict of widget specs:
-        {
-            "name": {"width": W, "height": H, "radius": R},
-            ...
-        }
-        returns a new dict with each dimension scaled to the current screen.
+        Scale a dictionary of size specifications to the current screen.
+
+        Each entry containing width, height, and optional radius values
+        is proportionally scaled according to the screen geometry.
+
+        Args:
+            size_dict (dict): Dictionary of size specifications.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            dict: A new dictionary with scaled size values.
         """
         w_ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         h_ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
@@ -333,9 +470,14 @@ class main():
     
     def scale_font_sizes(self, font_dict: dict, screen_geometry):
         """
-        Given a dict of font sizes:
-          { "small": 14, "medium": 18, … }
-        returns a new dict with each size scaled to the screen height.
+        Scale font sizes relative to the current screen height.
+
+        Args:
+            font_dict (dict): Dictionary mapping font size labels to integer values.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            dict: A new dictionary with scaled font sizes.
         """
         # scale fonts by the ratio of current screen height to reference height
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
@@ -347,10 +489,20 @@ class main():
 
     def check_if_already_running(self, app_name="QSnippet"):
         """
-        Check for lock file to determine if app is already running.
-        
-        :param self: Main class instance
-        :param app_name: Name of the application.
+        Check whether another instance of the application is running.
+
+        Uses a lock file in the system temporary directory to determine
+        if an existing process with the stored PID is active. If another
+        instance is detected, displays a message and exits.
+
+        Args:
+            app_name (str): Name of the application.
+
+        Returns:
+            bool: False if no other instance is running.
+
+        Raises:
+            SystemExit: If another instance is already running.
         """
         lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
         current_pid = os.getpid()
@@ -374,10 +526,17 @@ class main():
     
     def check_sys_requirements(self):
         """
-        Check if system meets minimum requirements.
-        So far the only requirement is libxcb-cursor0 on Linux.
-        Similarly, we check and exit if on unsupported OS (macOS).
-        Exits the application with an error message if requirements are not met.
+        Validate system compatibility and required dependencies.
+
+        Checks the operating system and verifies required packages on
+        supported platforms. Displays an error message and exits if
+        requirements are not satisfied or the OS is unsupported.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If system requirements are not met or the OS is unsupported.
         """
         package_manager = sys_utils.detect_package_manager()
         requirements = {
@@ -453,7 +612,13 @@ class main():
 
     def check_notices(self):
         """
-        Load and display unread notices.
+        Load and display unread application notices.
+
+        Reads notice settings, determines unread notices, displays them
+        in a dialog, and persists any dismissals or user preferences.
+
+        Returns:
+            None
         """
         logger.debug("Checking for unread notices")
 
@@ -526,6 +691,12 @@ class main():
     def start_program(self):
         """
         Create and launch the main application window.
+
+        Initializes the QSnippet UI, logs build information, and starts
+        the main application interface.
+
+        Returns:
+            None
         """
         program_name = self.program_name if hasattr(self, "program_name") else "QSnippet"
         logger.info(f"Starting {program_name} UI")

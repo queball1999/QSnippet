@@ -8,10 +8,23 @@ from utils.snippet_db import SnippetDB
 
 logger = logging.getLogger(__name__)
 
+
+
 class SnippetExpander():
-    def __init__(self, snippets_db: SnippetDB, parent):
+    def __init__(self, snippets_db: SnippetDB, parent) -> None:
         """
-        Initialize the SnippetExpander and prepare trigger handling.
+        Initialize the SnippetExpander.
+
+        Loads snippets from the database, prepares trigger handling,
+        initializes keyboard listener and controller, and configures
+        internal state for buffer and trigger tracking.
+
+        Args:
+            snippets_db (SnippetDB): The snippet database instance.
+            parent (Any): The parent object.
+
+        Returns:
+            None
         """
         logger.info("Initializing SnippetExpander")
 
@@ -35,9 +48,16 @@ class SnippetExpander():
 
         logger.info("SnippetExpander initialized successfully")
 
-    def build_trigger_map(self):
+    def build_trigger_map(self) -> None:
         """
-        Build a lookup map and regex for enabled snippet triggers.
+        Build the trigger lookup map and compiled regex.
+
+        Creates a dictionary of enabled snippet triggers mapped to their
+        data and compiles a regex pattern to detect trigger matches
+        at the end of the buffer.
+
+        Returns:
+            None
         """
         logger.info("Building trigger map")
     
@@ -56,9 +76,15 @@ class SnippetExpander():
         logger.debug(f"Trigger map size: {len(self.trigger_map)}")
         logger.debug(f"Trigger regex: {self.trigger_regex}")
 
-    def refresh_snippets(self):
+    def refresh_snippets(self) -> None:
         """
         Reload snippets from the database and rebuild trigger handling.
+
+        Refreshes the internal snippet list, trigger map, and trigger
+        prefix characters to reflect database updates.
+
+        Returns:
+            None
         """
         logger.info("Refreshing snippets from database")
 
@@ -69,9 +95,15 @@ class SnippetExpander():
         self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)   # Reload prefixes
         logging.info("SnippetExpander reloaded snippets from DB.")
 
-    def retrieve_trigger_chars(self, snippets):
+    def retrieve_trigger_chars(self, snippets) -> list:
         """
-        This function loops through the triggers and grabs the first characters.
+        Retrieve unique first characters from enabled snippet triggers.
+
+        Args:
+            snippets (list[dict]): List of snippet dictionaries.
+
+        Returns:
+            list: A list of unique trigger prefix characters.
         """
         logger.debug("Retrieving trigger prefix characters")
 
@@ -84,9 +116,15 @@ class SnippetExpander():
         logger.debug(f"Trigger prefixes: {trigger_prefixs}")
         return trigger_prefixs
 
-    def clear_buffer(self):
+    def clear_buffer(self) -> None:
         """
-        Reset internal typing buffer and cursor state.
+        Reset the internal typing buffer and cursor state.
+
+        Clears the buffer, resets the cursor position, and disables
+        trigger mode.
+
+        Returns:
+            None
         """
         logger.debug("Clearing trigger buffer")
 
@@ -94,19 +132,30 @@ class SnippetExpander():
         self.cursor_pos = 0
         self.trigger_flag = False
 
-    def _on_key_press(self, key):
-        """ This function is called on every key press. """
+    def _on_key_press(self, key) -> None:
+        """
+        Handle key press events from the keyboard listener.
+
+        Processes navigation, deletion, termination keys, and character
+        input to detect and expand snippet triggers.
+
+        Args:
+            key (Any): The key event received from the listener.
+
+        Returns:
+            None
+        """
         try:
             # Detect if paused and skip if true
             if self.disabled:
                 return
             
             # Handle navigation and deletion keys
-            if self._handle_navigation_and_deletion(key):
+            if self.handle_navigation_and_deletion(key):
                 return
             
             # Clear buffer on certain keys
-            if self._should_clear_on(key):
+            if self.should_clear_on(key):
                 logger.debug("Clearing buffer due to terminating key")
                 self.clear_buffer()
                 return   
@@ -119,7 +168,7 @@ class SnippetExpander():
                     return
                 
                 # Handle character input
-                self._handle_char(char=key.char)
+                self.handle_char(char=key.char)
             else:
                 # any other special key resets buffer
                 self.clear_buffer()
@@ -127,9 +176,18 @@ class SnippetExpander():
             logger.exception("Error in key handler, resetting buffer")
             self.clear_buffer()
 
-    def _handle_navigation_and_deletion(self, key) -> bool:
+    def handle_navigation_and_deletion(self, key) -> bool:
         """
-        Handle cursor movement and deletion keys.
+        Handle cursor navigation and deletion keys.
+
+        Updates the buffer and cursor position when left, right,
+        backspace, or delete keys are pressed.
+
+        Args:
+            key (Any): The key event.
+
+        Returns:
+            bool: True if the key was handled, otherwise False.
         """
         if key == keyboard.Key.left:
             if self.cursor_pos > 0:
@@ -150,9 +208,15 @@ class SnippetExpander():
             return True
         return False
 
-    def _should_clear_on(self, key) -> bool:
+    def should_clear_on(self, key) -> bool:
         """
-        Determine whether the buffer should be cleared on this key.
+        Determine whether the buffer should be cleared for a given key.
+
+        Args:
+            key (Any): The key event.
+
+        Returns:
+            bool: True if the buffer should be cleared, otherwise False.
         """
         if key in (keyboard.Key.space,
                    keyboard.Key.enter,
@@ -163,9 +227,18 @@ class SnippetExpander():
             return True
         return False
 
-    def _handle_char(self, char: str):
+    def handle_char(self, char: str) -> None:
         """
         Append a character to the buffer and attempt trigger matching.
+
+        Updates the internal buffer, enforces maximum length, and
+        expands the snippet if a trigger match is detected.
+
+        Args:
+            char (str): The character to append.
+
+        Returns:
+            None
         """
         # Trigger mode detection
         self.trigger_flag = True
@@ -195,12 +268,21 @@ class SnippetExpander():
             return_press = snippet.get("return_press", False)
 
             logger.info(f"Trigger matched: {trigger}")
-            self._expand(trigger, snippet["snippet"], style, return_press)
+            self.expand(trigger, snippet["snippet"], style, return_press)
             self.clear_buffer()
 
-    def _expand_clipboard(self, snippet):
+    def expand_clipboard(self, snippet) -> None:
         """
-        Expand snippet using clipboard paste.
+        Expand a snippet using clipboard paste.
+
+        Copies the snippet text to the clipboard and simulates a
+        paste keyboard shortcut.
+
+        Args:
+            snippet (str): The snippet text to insert.
+
+        Returns:
+            None
         """
         logger.debug("Expanding snippet via clipboard")
         # NOTE: xclip or xsel must be installed on Linux for clipboard support
@@ -210,9 +292,18 @@ class SnippetExpander():
             self.controller.press("v")
             self.controller.release("v")
 
-    def _expand_keystrokes(self, snippet):
+    def expand_keystrokes(self, snippet) -> None:
         """
-        Expand snippet by simulating keystrokes.
+        Expand a snippet by simulating keystrokes.
+
+        Types the snippet text character by character, handling
+        newline characters appropriately.
+
+        Args:
+            snippet (str): The snippet text to insert.
+
+        Returns:
+            None
         """
         logger.debug("Expanding snippet via keystrokes")
 
@@ -233,9 +324,23 @@ class SnippetExpander():
             # Always re-enable to avoid errors
             self.disabled = False
 
-    def _expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool):
+    def expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool) -> None:
         """
         Remove the trigger text and insert the expanded snippet.
+
+        Deletes the matched trigger from the input field, processes
+        placeholders and nested snippets, and inserts the expanded
+        content using the configured paste style.
+
+        Args:
+            trigger (str): The matched trigger text.
+            snippet (str): The snippet content to insert.
+            paste_style (str): The expansion method ("Clipboard" or other).
+            return_press (bool): Whether to simulate an additional
+                return key press after expansion.
+
+        Returns:
+            None
         """
         logger.info(f"Expanding snippet for trigger: {trigger}")
 
@@ -270,9 +375,9 @@ class SnippetExpander():
         # Expand the snippet
         try:
             if paste_style == "Clipboard":
-                self._expand_clipboard(snippet)
+                self.expand_clipboard(snippet)
             else:
-                self._expand_keystrokes(snippet)
+                self.expand_keystrokes(snippet)
 
             if return_press:
                 self.controller.press(keyboard.Key.enter)
@@ -282,7 +387,21 @@ class SnippetExpander():
             self.disabled = False
 
     def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
-        """Replace placeholders and nested snippet references with loop protection."""
+        """
+        Process snippet text by replacing placeholders and nested references.
+
+        Replaces dynamic placeholders such as date, time, and greeting,
+        and resolves nested snippet references with recursion depth
+        protection.
+
+        Args:
+            text (str): The snippet text to process.
+            depth (int): Current recursion depth.
+            seen (set | None): Set of triggers already processed to prevent loops.
+
+        Returns:
+            str: The processed snippet text.
+        """
         if seen is None:
             seen = set()
 
@@ -367,31 +486,45 @@ class SnippetExpander():
 
     # ---- Start/Stop Functions -----
 
-    def start(self):
+    def start(self) -> None:
         """
         Start the keyboard listener.
+
+        Returns:
+            None
         """
         logger.info("Starting SnippetExpander listener")
         self.listener.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Stop the keyboard listener.
+
+        Returns:
+            None
         """
         logger.info("Stopping SnippetExpander listener")
         self.listener.stop()
 
-    def pause(self):
+    def pause(self) -> None:
         """
         Temporarily disable snippet expansion.
+
+        Clears the buffer and prevents trigger handling until resumed.
+
+        Returns:
+            None
         """
         logger.info("Pausing SnippetExpander")
         self.disabled = True
         self.clear_buffer()
 
-    def resume(self):
+    def resume(self) -> None:
         """
-        Resume snippet expansion after pause.
+        Resume snippet expansion after being paused.
+
+        Returns:
+            None
         """
         logger.info("Resuming SnippetExpander")
         self.disabled = False

@@ -48,6 +48,17 @@ QSnippet helps you:
 - Improve consistency in emails, notes, and documentation
 - Work faster without relying on cloud services or browser extensions
 
+## Installation
+
+> QSnippet currently supports Windows only. Support for macOS and Linux is planned.
+
+Prebuilt binaries are provided on the Releases page.
+
+- Windows installer
+- Portable version
+
+If you prefer to build and run QSnippet from source, see the [Development Notes](#development-notes) below.
+
 ## Screenshots
 
 Demo
@@ -58,17 +69,6 @@ Homepage
 
 Snippet Form
 <img src="images/snippet_form.png" alt="Photo of QSnippet" style="align:center;"/>
-
-## Installation
-
-> QSnippet currently supports Windows only. Support for macOS and Linux is planned.
-
-Prebuilt binaries are provided on the Releases page.
-
-- Windows installer
-- Portable version
-
-If you prefer to build and run QSnippet from source, see the Development Notes below.
 
 ## Development Notes
 

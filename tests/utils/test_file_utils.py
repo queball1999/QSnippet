@@ -8,6 +8,11 @@ from utils.file_utils import FileUtils
 
 # Basic filesystem helpers
 def test_ensure_dir_creates_directory(tmp_path):
+    """
+    Test that ensure_dir creates nested directory structure.
+
+    Verifies that parent directories are created as needed.
+    """
     new_dir = tmp_path / "nested" / "dir"
     assert not new_dir.exists()
 
@@ -18,6 +23,11 @@ def test_ensure_dir_creates_directory(tmp_path):
 
 
 def test_file_exists(tmp_path):
+    """
+    Test file existence checking.
+
+    Verifies that file_exists returns False for missing files and True for existing ones.
+    """
     file = tmp_path / "test.txt"
     assert FileUtils.file_exists(file) is False
 
@@ -27,6 +37,11 @@ def test_file_exists(tmp_path):
 
 # YAML helpers
 def test_write_and_read_yaml_roundtrip(tmp_path):
+    """
+    Test YAML write and read operations are symmetric.
+
+    Verifies that data survives a write-read cycle without corruption.
+    """
     path = tmp_path / "data.yaml"
     data = {"a": 1, "b": {"c": True}}
 
@@ -37,6 +52,11 @@ def test_write_and_read_yaml_roundtrip(tmp_path):
 
 
 def test_read_yaml_missing_file_returns_empty(tmp_path):
+    """
+    Test that reading a missing YAML file returns empty dict.
+
+    Verifies graceful handling of missing files.
+    """
     path = tmp_path / "missing.yaml"
 
     result = FileUtils.read_yaml(path)
@@ -45,6 +65,11 @@ def test_read_yaml_missing_file_returns_empty(tmp_path):
 
 # Snippet import / export (no dialogs)
 def test_export_and_import_snippets_yaml(tmp_path):
+    """
+    Test snippet export to YAML and import back are symmetric.
+
+    Verifies that snippet data survives export-import cycle.
+    """
     yaml_path = tmp_path / "snippets.yaml"
 
     snippets = [
@@ -68,6 +93,11 @@ def test_export_and_import_snippets_yaml(tmp_path):
 
 
 def test_import_snippets_yaml_invalid_format(tmp_path):
+    """
+    Test that importing malformed YAML raises ValueError.
+
+    Verifies error handling for invalid snippet data.
+    """
     yaml_path = tmp_path / "bad.yaml"
 
     FileUtils.write_yaml(yaml_path, {"snippets": "not-a-list"})
@@ -78,6 +108,11 @@ def test_import_snippets_yaml_invalid_format(tmp_path):
 
 # Default file creators
 def test_create_config_file(tmp_path):
+    """
+    Test that config file is created from default template.
+
+    Verifies that default config values are copied to user config.
+    """
     default_dir = tmp_path / "default_dir"
     default_dir.mkdir()
 
@@ -103,6 +138,11 @@ images: {}
     assert "images" in data
 
 def test_create_settings_file(tmp_path):
+    """
+    Test that settings file is created from default template.
+
+    Verifies that default settings values are copied to user settings.
+    """
     default_dir = tmp_path / "default_dir"
     default_dir.mkdir()
 
@@ -126,6 +166,11 @@ general:
     assert data["general"]["start_at_boot"] is False
 
 def test_create_snippets_db_file(tmp_path):
+    """
+    Test that SQLite database file is created.
+
+    Verifies that a valid database file is generated.
+    """
     path = tmp_path / "snippets.db"
 
     FileUtils.create_snippets_db_file(path)
@@ -136,7 +181,9 @@ def test_create_snippets_db_file(tmp_path):
 # get_default_paths
 def test_get_default_paths_structure(monkeypatch, tmp_path):
     """
-    Validate keys and path types without touching real OS locations.
+    Validate default path structure and types without touching real OS locations.
+
+    Verifies that all required path keys are present and contain Path objects.
     """
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))

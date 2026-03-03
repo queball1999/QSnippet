@@ -7,12 +7,21 @@ logger = logging.getLogger(__name__)
 
 
 # ----- System Utilities -----
-def ensure_directories_exist(self, directories: list = []):
+def ensure_directories_exist(self, directories: list = []) -> None:
     """
-    Ensures that all directories in the given list exist.
-    If a directory does not exist, it is created.
+    Ensure that all specified directories exist.
 
-    :param directories: List of directory paths to check/create
+    Creates each directory in the provided list if it does not already
+    exist.
+
+    Args:
+        directories (list): A list of directory paths to verify or create.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If a directory cannot be created.
     """
     for directory in directories:
         try:
@@ -22,12 +31,23 @@ def ensure_directories_exist(self, directories: list = []):
             raise ValueError("Failed to make directory {directory}! "
                                 f"Please contact application vendor. Error: {e}")
 
-def ensure_files_exist(self, files: list = []):
+def ensure_files_exist(self, files: list = []) -> None:
     """
-    Ensures all specified files exist. If a file is missing,
-    its corresponding creation function is called.
-    
-    :param files: List of dicts like { "file": Path, "function": callable }
+    Ensure that all specified files exist.
+
+    For each entry in the provided list, checks whether the file exists.
+    If missing, calls the associated creation function.
+
+    Args:
+        files (list): A list of dictionaries containing:
+            - "file" (Path): The file path to verify.
+            - "function" (callable): The function to call to create the file.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If a required file cannot be created.
     """
     for entry in files:
         path = entry.get("file")
@@ -42,8 +62,17 @@ def ensure_files_exist(self, files: list = []):
                 logger.critical(f"Failed to create {path}: {e}")
                 raise ValueError(f"Failed to create required file: {path}\n\n{e}")
                 
-def detect_package_manager():
-    """Detect the package manager on a Linux system."""
+def detect_package_manager() -> str:
+    """
+    Detect the Linux package manager.
+
+    Checks for common package manager binaries on Linux systems.
+
+    Returns:
+        str | None: The name of the detected package manager, or None
+            if not running on Linux or no known manager is found.
+    """
+
     if sys.platform != "linux":
         return None
     
@@ -56,12 +85,33 @@ def detect_package_manager():
     return None
 
 def check_binary(binary_name):
-    """Check if a binary is available in the system PATH."""
+    """
+    Check whether a binary is available in the system PATH.
+
+    Args:
+        binary_name (str): The name of the binary to check.
+
+    Returns:
+        bool: True if the binary is found in PATH, otherwise False.
+    """
     import shutil
     return shutil.which(binary_name) is not None
 
 def check_required_packages(requirements):
-    """Check for required packages and return a list of missing ones."""
+    """
+    Check for required system packages.
+
+    Verifies the presence of required binaries and collects any
+    missing packages along with their installation hints.
+
+    Args:
+        requirements (dict): A dictionary mapping package names to
+            metadata containing "library" and "install_hint" keys.
+
+    Returns:
+        list: A list of tuples containing the missing package name
+            and its installation hint.
+    """
     missing_packages = []
 
     # Check for required packages
