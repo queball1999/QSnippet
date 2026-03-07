@@ -5,12 +5,42 @@ from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
     QLineEdit, QHBoxLayout, QComboBox, QPushButton, QSizePolicy
 )
-from PySide6.QtGui import QStandardItem, QPixmap
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QStandardItem, QPixmap, QShortcut
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
 from .home_widget   import HomeWidget
+
+
+class TextEditFocusFilter(QObject):
+    """
+    Event filter to handle focus loss on text edit widgets.
+    
+    Clears selection and deselects text when focus is lost.
+    """
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.FocusOut:
+            if isinstance(obj, QLineEdit):
+                obj.deselect()
+        return super().eventFilter(obj, event)
+
+
+class WidgetMouseFilter(QObject):
+    """
+    Event filter to handle mouse clicks on the widget.
+    
+    Removes focus from the search bar when clicking on empty space or labels.
+    """
+    def __init__(self, search_bar):
+        super().__init__()
+        self.search_bar = search_bar
+    
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            # Defocus search bar by clearing focus
+            self.search_bar.clearFocus()
+        return super().eventFilter(obj, event)
 
 
 class SnippetEditor(QWidget):
@@ -128,7 +158,22 @@ class SnippetEditor(QWidget):
 
         # apply theme
         self.update_stylesheet()
+
+        # Set up Ctrl+F keyboard shortcut to focus search bar
+        QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
     
+    def focus_search_bar(self):
+        """
+        Focus the search bar and select all text.
+
+        Called when Ctrl+F keyboard shortcut is activated.
+
+        Returns:
+            None
+        """
+        self.search_bar.setFocus()
+        self.search_bar.selectAll()
+
     def load_snippets(self):
         """
         Load all snippets from the database into the table.

@@ -50,12 +50,13 @@ QSnippet helps you:
 
 ## Installation
 
-> QSnippet currently supports Windows only. Support for macOS and Linux is planned.
+> QSnippet currently supports Windows and Linux only. Support for macOS is planned.
 
 Prebuilt binaries are provided on the Releases page.
 
-- Windows installer
-- Portable version
+- Windows: Installer or Portable version
+
+- Linux: Debian (.deb) package
 
 If you prefer to build and run QSnippet from source, see the [Development Notes](#development-notes) below.
 

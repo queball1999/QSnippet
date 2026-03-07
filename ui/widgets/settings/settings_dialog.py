@@ -4,10 +4,24 @@ from PySide6.QtWidgets import (
     QDialog, QListWidget, QStackedWidget, QHBoxLayout,
     QListWidgetItem, QVBoxLayout, QLineEdit, QWidget
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QObject, QEvent
+from PySide6.QtGui import QShortcut
 
 from .settings_category_page import SettingsCategoryPage
 from .settings_toast import SettingsToast
+
+
+class TextEditFocusFilter(QObject):
+    """
+    Event filter to handle focus loss on text edit widgets.
+    
+    Clears selection and deselects text when focus is lost.
+    """
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.FocusOut:
+            if isinstance(obj, QLineEdit):
+                obj.deselect()
+        return super().eventFilter(obj, event)
 
 # Object to hold search result data
 @dataclass
@@ -84,6 +98,9 @@ class SettingsDialog(QDialog):
         self.list.setCurrentRow(0)
 
         self.update_stylesheet()
+        
+        # Set up Ctrl+F keyboard shortcut to focus search bar
+        QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
 
     # ----- BUILD -----
 
@@ -130,6 +147,18 @@ class SettingsDialog(QDialog):
             walk(category, values, [category])
 
     # ----- SEARCH -----
+
+    def focus_search_bar(self):
+        """
+        Focus the search bar and select all text.
+
+        Called when Ctrl+F keyboard shortcut is activated.
+
+        Returns:
+            None
+        """
+        self.search.setFocus()
+        self.search.selectAll()
 
     def on_search_text_changed(self, text: str):
         """ Handle when the search text changes. """
