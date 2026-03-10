@@ -3,7 +3,7 @@ Version: VERSION_REPLACED_DURING_BUILD
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libxcb-cursor0, xclip | xsel
+Depends: libxcb-cursor0, libxkbcommon-x11-0, libxcb-util1, libxcb-xkb1, libxcb-shape0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-render-util0, xclip | xsel
 Maintainer: Quynn Bell <admin@quynnbell.com>
 License: GPL-3.0+
 Homepage: https://qsnippet.com

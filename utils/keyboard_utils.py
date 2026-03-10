@@ -25,13 +25,8 @@ class SnippetExpander():
         Returns:
             None
         """
-        try:
-            from pynput import keyboard
-            self.keyboard = keyboard
-        except (ImportError, Exception) as e:
-            # Graceful degradation for environments without X server or pynput support
-            logger.warning(f"Failed to import pynput keyboard: {e}. Using stub implementations.")
-            self._setup_keyboard_stubs()
+        from pynput import keyboard
+        self.keyboard = keyboard
 
         logger.info("Initializing SnippetExpander")
 
@@ -535,65 +530,3 @@ class SnippetExpander():
         """
         logger.info("Resuming SnippetExpander")
         self.disabled = False
-
-    def _setup_keyboard_stubs(self) -> None:
-        """
-        Set up stub implementations of pynput keyboard for environments without X server.
-
-        Creates namespace-like stub objects that prevent AttributeError when
-        keyboard listener/controller are unavailable.
-
-        Returns:
-            None
-        """
-        class KeyStub:
-            """Stub for pynput.keyboard.Key with common key constants."""
-            space = "space"
-            shift = "shift"
-            enter = "enter"
-            tab = "tab"
-            backspace = "backspace"
-            delete = "delete"
-            left = "left"
-            right = "right"
-            ctrl = "ctrl"
-            ctrl_l = "ctrl_l"
-            ctrl_r = "ctrl_r"
-            cmd = "cmd"
-
-        class ListenerStub:
-            """Stub for pynput.keyboard.Listener."""
-            def __init__(self, on_press=None):
-                self.on_press = on_press
-
-            def start(self):
-                logger.warning("Keyboard listener not available (no X server)")
-
-            def stop(self):
-                pass
-
-        class ControllerStub:
-            """Stub for pynput.keyboard.Controller."""
-            def pressed(self, key):
-                return self._ContextManager()
-
-            def press(self, key):
-                pass
-
-            def release(self, key):
-                pass
-
-            class _ContextManager:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *args):
-                    pass
-
-        class KeyboardNamespace:
-            """Stub namespace for pynput.keyboard module."""
-            Key = KeyStub()
-            Listener = ListenerStub
-            Controller = ControllerStub
-
-        self.keyboard = KeyboardNamespace()
