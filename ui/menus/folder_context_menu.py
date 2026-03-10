@@ -40,11 +40,10 @@ class FolderContextMenu(QMenu):
             "Add Item",
             lambda: self.addItemRequested.emit(self.folder_item)
         )
-        # To Remove: sub folder functionality
-        """ self.addAction(
+        self.addAction(
             "Add Sub-Folder",
             lambda: self.addFolderRequested.emit(self.folder_item)
-        ) """
+        )
         self.addAction(
             "Rename Folder",
             lambda: self.renameRequested.emit(self.folder_item)

@@ -321,11 +321,14 @@ class SnippetDB:
     
     def rename_folder(self, old_folder: str, new_folder: str) -> None:
         """
-        Rename a folder for all associated snippets.
+        Rename a folder and all nested sub-folders for associated snippets.
+
+        For example, renaming "work" to "office" will also rename
+        "work/drafts" to "office/drafts".
 
         Args:
-            old_folder (str): The current folder name.
-            new_folder (str): The new folder name.
+            old_folder (str): The current folder path (may be nested, e.g. "a/b").
+            new_folder (str): The new folder path.
 
         Returns:
             None
@@ -335,18 +338,29 @@ class SnippetDB:
 
         try:
             with self.conn:
-                self.conn.execute("UPDATE snippets SET folder = ? WHERE folder = ?", (new_folder, old_folder))
-                logger.info("Successfully renamed folder.")
+                # Rename exact match
+                self.conn.execute(
+                    "UPDATE snippets SET folder = ? WHERE folder = ?",
+                    (new_folder, old_folder)
+                )
+                # Rename any sub-paths: old_folder/... -> new_folder/...
+                self.conn.execute(
+                    "UPDATE snippets SET folder = ? || substr(folder, ? + 1) WHERE folder LIKE ?",
+                    (new_folder, len(old_folder), old_folder + "/%")
+                )
+                logger.info("Successfully renamed folder and its sub-folders.")
         except Exception as e:
             logger.error(f"An error occured while renaming a folder within the database: {e}")
             return None
         
     def delete_folder(self, folder: str) -> None:
         """
-        Delete all snippets within a specified folder.
+        Delete all snippets within a specified folder and any nested sub-folders.
+
+        For example, deleting "work" will also delete snippets in "work/drafts".
 
         Args:
-            folder (str): The folder name to delete.
+            folder (str): The folder path to delete (may be nested, e.g. "a/b").
 
         Returns:
             None
@@ -356,8 +370,11 @@ class SnippetDB:
 
         try:
             with self.conn:
-                self.conn.execute("DELETE FROM snippets WHERE folder = ?", (folder,))
-                logger.info("Successfully deleted folder.")
+                self.conn.execute(
+                    "DELETE FROM snippets WHERE folder = ? OR folder LIKE ?",
+                    (folder, folder + "/%")
+                )
+                logger.info("Successfully deleted folder and its sub-folders.")
         except Exception as e:
             logger.error(f"An error occured while deleting a folder from the database: {e}")
             return None

@@ -28,6 +28,9 @@ class SnippetTable(QTreeView):
     deleteSnippet = Signal(dict)           # entry data
     entrySelected = Signal(dict)           # when a snippet is clicked
     refreshSignal = Signal()    # trigger refresh
+    # Emitted when drag-and-drop moves a folder or snippet to a new location
+    folderMoved = Signal(str, str)   # old_path, new_path
+    snippetMoved = Signal(dict, str) # entry dict, new_folder_path
 
     def __init__(self, main, parent=None):
         """
@@ -85,6 +88,9 @@ class SnippetTable(QTreeView):
 
         # Remove empty folders automatically
         self.model.rowsRemoved.connect(self._on_rows_removed)
+
+        # Guard flag to suppress _on_rows_removed during drag-and-drop moves
+        self._is_dragging = False
 
         logger.info("SnippetTable initialized successfully")
 
@@ -155,24 +161,8 @@ class SnippetTable(QTreeView):
         self.folders = {}  # folder_name > QStandardItem
 
         for entry in entries:
-            folder = entry.get('folder','Default')
-            
-            if folder not in self.folders:
-                folder_item = QStandardItem(folder)
-                # mark it as a folder
-                folder_item.setData(None, Qt.UserRole)
-
-                # Just one call to appendRow, supplying one item per column:
-                self.model.appendRow([
-                    folder_item,
-                    QStandardItem(),
-                    QStandardItem(),
-                    QStandardItem(),
-                    QStandardItem()
-                ])
-                self.folders[folder] = folder_item
-
-            parent = self.folders[folder]
+            folder = entry.get('folder', 'Default')
+            parent = self._get_or_create_folder(folder)
 
             # Create child snippet row
             label = entry.get('label', '')
@@ -190,13 +180,48 @@ class SnippetTable(QTreeView):
             parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
 
         # Check if we need to expand all folders on load
-        # Defailt to False if setting missing
+        # Default to False if setting missing
         if self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False):
             logger.info("Expanding all folders on load as per settings")
             self.expandAll()    # Expand all folders on load.
 
         self._configure_columns()   # Resize
         logger.info("Snippet table populated")
+
+    def _get_or_create_folder(self, folder_path: str) -> QStandardItem:
+        """
+        Return the QStandardItem for the given slash-delimited folder path,
+        creating intermediate parent folder nodes as needed.
+
+        Args:
+            folder_path (str): Full folder path, e.g. "default/sub/leaf".
+
+        Returns:
+            QStandardItem: The leaf folder item for the path.
+        """
+        if folder_path in self.folders:
+            return self.folders[folder_path]
+
+        parts = folder_path.split("/")
+        for i, part in enumerate(parts):
+            current_path = "/".join(parts[: i + 1])
+            if current_path in self.folders:
+                continue
+
+            folder_item = QStandardItem(part)
+            folder_item.setData({"_type": "folder", "path": current_path}, Qt.UserRole)
+
+            empty_cols = [QStandardItem() for _ in range(4)]
+            if i == 0:
+                self.model.appendRow([folder_item] + empty_cols)
+            else:
+                parent_path = "/".join(parts[:i])
+                self.folders[parent_path].appendRow([folder_item] + empty_cols)
+
+            self.folders[current_path] = folder_item
+            logger.debug("Created folder node '%s'", current_path)
+
+        return self.folders[folder_path]
 
     def refresh(self):
         """
@@ -313,10 +338,11 @@ class SnippetTable(QTreeView):
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)
 
-        if data is None:
+        if isinstance(data, dict) and data.get("_type") == "folder":
             # Clicked on a folder; show folder context menu
             menu = FolderContextMenu(item, self)
             menu.addItemRequested.connect(self.addSnippet.emit)
+            menu.addFolderRequested.connect(self.addFolder.emit)
             menu.renameRequested.connect(self.renameFolder.emit)
             menu.deleteRequested.connect(self.deleteFolder.emit)
         else:
@@ -455,7 +481,7 @@ class SnippetTable(QTreeView):
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)
 
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or data.get("_type") == "folder":
             logger.debug("Current selection is not a snippet")
             return None
 
@@ -465,8 +491,9 @@ class SnippetTable(QTreeView):
         """
         Automatically remove empty folders when all their children are deleted.
 
-        When a folder loses all its child items, this method removes the empty
-        folder from the model to keep the table clean.
+        Handles nested folders: if a sub-folder becomes empty it is removed,
+        and if that causes the parent folder to become empty it is removed too.
+        Skipped while a drag-and-drop is in progress to avoid premature removal.
 
         Args:
             parent_idx (QModelIndex): The parent folder index in model coordinates.
@@ -476,16 +503,19 @@ class SnippetTable(QTreeView):
         Returns:
             None
         """
+        # Never remove folders in the middle of an InternalMove drag-drop
+        if self._is_dragging:
+            return
         if not parent_idx.isValid():
             return
         parent = self.model.itemFromIndex(parent_idx)
-        if parent and parent.rowCount()==0:
-            logger.info(
-                "Removing empty folder: %s",
-                parent.text()
-            )
-            # remove the folder
-            self.model.removeRow(parent.row())
+        if parent and parent.rowCount() == 0:
+            logger.info("Removing empty folder: %s", parent.text())
+            grandparent = parent.parent()
+            if grandparent:
+                grandparent.removeRow(parent.row())
+            else:
+                self.model.removeRow(parent.row())
 
     def mousePressEvent(self, event):
         """
@@ -509,8 +539,9 @@ class SnippetTable(QTreeView):
                 src_idx0 = self.proxy.mapToSource(idx0)
                 item = self.model.itemFromIndex(src_idx0)
 
-                # Folder rows have UserRole None
-                if item and item.data(Qt.UserRole) is None:
+                # Folder rows are identified by _type == "folder" in UserRole
+                idata = item.data(Qt.UserRole) if item else None
+                if item and isinstance(idata, dict) and idata.get("_type") == "folder":
                     # Let Qt handle clicks in the "branch" area (arrow and indentation)
                     rect = self.visualRect(idx0)
 
@@ -540,6 +571,180 @@ class SnippetTable(QTreeView):
             None
         """
         event.accept()
+
+    def dropEvent(self, event):
+        """
+        Handle drag-and-drop drops and persist path changes to the database.
+
+        Qt's InternalMove serialises the dragged item via MIME and recreates it
+        at the destination, which can wipe custom UserRole data on the moved item.
+        We therefore:
+
+          1. Capture identity keys from the *pre-drop* item while UserRole is intact.
+          2. Let Qt perform the in-model move (``super().dropEvent``).
+          3. Use ``currentIndex()`` - Qt keeps selection on the moved item -
+             to locate it at its new position.
+          4. Walk up the *stationary* parent's intact UserRole to derive the new path.
+          5. Emit the appropriate signal so the editor persists the change to the DB.
+
+        Args:
+            event (QDropEvent): The drop event.
+
+        Returns:
+            None
+        """
+        # Identify dragged item BEFORE the move
+        sel = self.selectedIndexes()
+        if not sel:
+            super().dropEvent(event)
+            return
+
+        proxy_col0 = sel[0].sibling(sel[0].row(), 0)
+        src_col0 = self.proxy.mapToSource(proxy_col0)
+        pre_item = self.model.itemFromIndex(src_col0)
+        if pre_item is None:
+            super().dropEvent(event)
+            return
+
+        pre_data   = pre_item.data(Qt.UserRole)
+        is_folder  = isinstance(pre_data, dict) and pre_data.get("_type") == "folder"
+        is_snippet = isinstance(pre_data, dict) and "trigger" in pre_data
+
+        if not is_folder and not is_snippet:
+            super().dropEvent(event)
+            return
+
+        # Stable keys captured before Qt destroys + recreates the item
+        old_path     = pre_data.get("path", "")   if is_folder  else ""
+        old_folder   = pre_data.get("folder", "") if is_snippet else ""
+        item_segment = old_path.split("/")[-1]     if is_folder  else ""
+
+        # Capture drop target info BEFORE the drop
+        # currentIndex() after super().dropEvent() is unreliable for root-level
+        # drops: Qt clears the selection when a folder becomes a top-level row
+        # via InternalMove, so the post-drop lookup silently fails and the
+        # folderMoved signal is never emitted.  Resolving from the pre-drop
+        # event target avoids that race entirely.
+        target_proxy_idx = self.indexAt(event.pos())
+        drop_indicator   = self.dropIndicatorPosition()
+
+        # Perform the drop
+        self._is_dragging = True
+        super().dropEvent(event)
+        self._is_dragging = False
+
+        if is_folder:
+            new_path = self._resolve_drop_parent_path(
+                target_proxy_idx, drop_indicator, item_segment
+            )
+            if new_path and new_path != old_path:
+                logger.info("Folder drag-moved: '%s'; '%s'", old_path, new_path)
+                self.folderMoved.emit(old_path, new_path)
+
+        elif is_snippet:
+            new_folder = self._resolve_drop_parent_path(
+                target_proxy_idx, drop_indicator, None
+            )
+            if new_folder is None:
+                logger.warning(
+                    "Snippet '%s' dropped at root - ignoring",
+                    pre_data.get("trigger"),
+                )
+                return
+            if new_folder != old_folder:
+                logger.info(
+                    "Snippet '%s' drag-moved: '%s'; '%s'",
+                    pre_data.get("trigger"), old_folder, new_folder,
+                )
+                self.snippetMoved.emit(pre_data, new_folder)
+
+    # Path helpers
+    def _resolve_drop_parent_path(
+        self,
+        target_proxy_idx: QModelIndex,
+        drop_indicator,
+        item_segment: str | None,
+    ) -> str | None:
+        """
+        Determine the new parent path for a drag-and-drop move using the
+        pre-drop target index and Qt drop indicator.
+
+        Using the drop target captured *before* ``super().dropEvent()`` is more
+        reliable than inspecting ``currentIndex()`` afterward, because Qt clears
+        the selection when an item is placed at root level via InternalMove.
+
+        Args:
+            target_proxy_idx: Proxy index of the item under the cursor before
+                the drop.
+            drop_indicator: ``QAbstractItemView.DropIndicatorPosition`` value.
+            item_segment: The dragged folder's own name segment (for folders),
+                or ``None`` for snippets.
+
+        Returns:
+            - Folders (``item_segment`` provided): the full new path string,
+              e.g. ``"parent/sub"`` or just ``"sub"`` for a root-level drop.
+            - Snippets (``item_segment`` is ``None``): the destination folder
+              path string, or ``None`` if the destination is root (snippets
+              cannot live at root level).
+        """
+        is_folder_drag = item_segment is not None
+
+        # Dropped on the empty viewport; root level
+        if not target_proxy_idx.isValid() or drop_indicator == QAbstractItemView.OnViewport:
+            return item_segment if is_folder_drag else None
+
+        target_col0 = target_proxy_idx.sibling(target_proxy_idx.row(), 0)
+        target_src  = self.proxy.mapToSource(target_col0)
+        target_item = self.model.itemFromIndex(target_src)
+        if target_item is None:
+            return item_segment if is_folder_drag else None
+
+        target_data = target_item.data(Qt.UserRole)
+
+        if drop_indicator == QAbstractItemView.OnItem:
+            # Dropped directly onto a folder; becomes a child of that folder
+            if isinstance(target_data, dict) and target_data.get("_type") == "folder":
+                parent_path = target_data.get("path", target_item.text())
+            else:
+                # Dropped onto a snippet; use its parent folder
+                p = target_item.parent()
+                if p is None:
+                    return item_segment if is_folder_drag else None
+                pd = p.data(Qt.UserRole)
+                parent_path = pd.get("path", p.text()) if isinstance(pd, dict) else p.text()
+        else:
+            # AboveItem / BelowItem; same level as the target (target's parent)
+            p = target_item.parent()
+            if p is None:
+                # Target is a root item; new item goes to root too
+                return item_segment if is_folder_drag else None
+            pd = p.data(Qt.UserRole)
+            parent_path = pd.get("path", p.text()) if isinstance(pd, dict) else p.text()
+
+        if is_folder_drag:
+            return parent_path + "/" + item_segment
+        return parent_path
+
+    def _compute_item_path(self, item: QStandardItem) -> str:
+        """
+        Walk up the parent chain to build the full slash-delimited folder path.
+
+        Each folder item stores only its local segment as ``text()``, so
+        ascending via ``parent()`` reconstructs the full nested path.
+
+        Args:
+            item (QStandardItem): A folder item in the source model.
+
+        Returns:
+            str: Full path, e.g. ``"personal/drafts/work"``.
+        """
+        parts: list[str] = []
+        current = item
+        while current is not None:
+            parts.append(current.text())
+            current = current.parent()
+        parts.reverse()
+        return "/".join(parts)
 
     def applyStyles(self):
         """

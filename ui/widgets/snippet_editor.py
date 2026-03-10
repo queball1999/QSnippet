@@ -121,6 +121,8 @@ class SnippetEditor(QWidget):
         self.table.addFolder.connect(self.on_add_folder)
         self.table.renameFolder.connect(self.on_rename_folder)
         self.table.deleteFolder.connect(self.on_delete_folder)
+        self.table.folderMoved.connect(self.on_folder_moved)
+        self.table.snippetMoved.connect(self.on_snippet_moved)
         # snippet signals
         self.table.addSnippet.connect(self.on_add_snippet)
         self.table.editSnippet.connect(self.on_edit_snippet)
@@ -387,8 +389,16 @@ class SnippetEditor(QWidget):
         name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
         if not ok or not name.strip():
             return
+
+        new_folder = name.strip()
+        # If triggered from a folder context menu, make the new folder a sub-folder
+        if parent_item is not None:
+            folder_data = parent_item.data(Qt.UserRole)
+            if isinstance(folder_data, dict) and folder_data.get("_type") == "folder":
+                new_folder = folder_data["path"] + "/" + new_folder
+
         self.show_new_form()
-        self.form.folder_input.setCurrentText(name.strip())
+        self.form.folder_input.setCurrentText(new_folder)
         
     def on_rename_folder(self, folder_item=None, *_):
         """
@@ -403,13 +413,27 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        old = folder_item.text()
-        new, ok = QInputDialog.getText(self, 'Rename Folder', f'New name for "{old}":', text=old)
-        if not ok or not new.strip() or new.strip() == old:
+        folder_data = folder_item.data(Qt.UserRole) if folder_item is not None else None
+        old = (
+            folder_data["path"]
+            if isinstance(folder_data, dict) and "path" in folder_data
+            else folder_item.text()
+        )
+        # Display only the last segment in the prompt; keep the rest of the path
+        last_segment = old.split("/")[-1]
+        new_last, ok = QInputDialog.getText(
+            self, 'Rename Folder', f'New name for "{old}":', text=last_segment
+        )
+        if not ok or not new_last.strip():
             return
-        self.main.snippet_db.rename_folder(old, new.strip())
+        parts = old.split("/")
+        parts[-1] = new_last.strip()
+        new = "/".join(parts)
+        if new == old:
+            return
+        self.main.snippet_db.rename_folder(old, new)
         self.load_snippets()
-        self.main.message_box.info(f'Renamed folder "{old}" to "{new.strip()}"', title='Folder Renamed')
+        self.main.message_box.info(f'Renamed folder "{old}" to "{new}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item=None, *_):
         """
@@ -426,8 +450,11 @@ class SnippetEditor(QWidget):
         """
         self.show_new_form()
         if isinstance(parent_item, QStandardItem):
-            itemText = str(parent_item.text())
-            self.form.folder_input.setCurrentText(itemText)
+            folder_data = parent_item.data(Qt.UserRole)
+            if isinstance(folder_data, dict) and folder_data.get("_type") == "folder":
+                self.form.folder_input.setCurrentText(folder_data["path"])
+            else:
+                self.form.folder_input.setCurrentText(parent_item.text())
 
     def on_delete_folder(self, folder_item=None, *_):
         """
@@ -442,9 +469,14 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        name = folder_item.text()
+        folder_data = folder_item.data(Qt.UserRole) if folder_item is not None else None
+        name = (
+            folder_data["path"]
+            if isinstance(folder_data, dict) and "path" in folder_data
+            else folder_item.text()
+        )
         confirm = self.main.message_box.question(
-            f'Delete folder "{name}" and all its snippets?',
+            f'Delete folder "{name}" and all its snippets (including sub-folders)?',
             title="Delete Folder",
             buttons=QMessageBox.Yes | QMessageBox.No,
             default_button=QMessageBox.No
@@ -455,6 +487,41 @@ class SnippetEditor(QWidget):
         
         self.main.snippet_db.delete_folder(name)
         self.load_snippets()
+
+    def on_folder_moved(self, old_path: str, new_path: str):
+        """
+        Persist a folder that was drag-and-drop moved to a new nested path.
+
+        Delegates to ``rename_folder`` which also cascades to sub-paths.
+
+        Args:
+            old_path (str): Previous full path, e.g. ``"work"``.
+            new_path (str): New full path, e.g. ``"personal/work"``.
+
+        Returns:
+            None
+        """
+        self.main.snippet_db.rename_folder(old_path, new_path)
+        self.load_snippets()
+        self.trigger_reload.emit()
+
+    def on_snippet_moved(self, entry: dict, new_folder: str):
+        """
+        Persist a snippet that was drag-and-drop moved to a different folder.
+
+        Updates the snippet's folder field in the database.
+
+        Args:
+            entry (dict): Original snippet entry dict.
+            new_folder (str): The destination folder path.
+
+        Returns:
+            None
+        """
+        updated = {**entry, "folder": new_folder}
+        self.main.snippet_db.insert_snippet(updated)
+        self.load_snippets()
+        self.trigger_reload.emit()
 
     def on_edit_snippet(self, entry=None, *_):
         """

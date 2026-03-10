@@ -159,9 +159,19 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.folder_input.setEditable(True)
         self.folder_input.setToolTip("Folder which your snippet is organized in.")
         self.folder_input.setInsertPolicy(QComboBox.NoInsert)
+        self.folder_input.setCompleter(None)  # Disable auto-fill; we manage filtering ourselves
         self.folder_input.setPlaceholderText("Default")
         self.folder_input.setMinimumWidth(250)
         self.folder_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        # Debounce timer for folder search filtering
+        self._folder_all_paths = []
+        self._folder_search_timer = QTimer(self)
+        self._folder_search_timer.setSingleShot(True)
+        self._folder_search_timer.setInterval(500)  # 500 ms debounce
+        self._folder_search_timer.timeout.connect(self._filter_folder_input)
+        self.folder_input.lineEdit().textEdited.connect(self._on_folder_text_edited)
+
         self.populate_folder_input()
 
         self.tags_label = QLabel("Tags")
@@ -173,6 +183,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.tags_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.tags_input.tagDeleteRequested.connect(self.on_delete_tag)
         self.populate_tags_input()
+
+        # Debounce timer for tags search filtering
+        self._tags_search_timer = QTimer(self)
+        self._tags_search_timer.setSingleShot(True)
+        self._tags_search_timer.setInterval(500)  # 500 ms debounce
+        self._tags_search_timer.timeout.connect(self._filter_tags_input)
+        self.tags_input.lineEdit().textEdited.connect(self._on_tags_text_edited)
 
         # Snippet Input
         self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
@@ -251,11 +268,23 @@ Snippets come in handy for text you enter often or for standard messages you sen
         layout.addWidget(self.style_switch, 7, 1, 1, 1, Qt.AlignLeft)
         layout.addLayout(btn_layout, 8, 0, 1, 3)
 
+        # Set explicit tab order!
+        # This solves the skipping snippet entry issue
+        self.setTabOrder(self.new_input, self.trigger_input)
+        self.setTabOrder(self.trigger_input, self.folder_input)
+        self.setTabOrder(self.folder_input, self.tags_input)
+        self.setTabOrder(self.tags_input, self.snippet_input)
+        self.setTabOrder(self.snippet_input, self.new_btn)
+        self.setTabOrder(self.new_btn, self.save_btn)
+        self.setTabOrder(self.save_btn, self.delete_btn)
+        self.setTabOrder(self.delete_btn, self.cancel_btn)
+
     def clear_form(self):
         """
         Clear all input fields and reset form state.
 
-        Resets text inputs, switches, tags, and stored entry identifier.
+        Resets text inputs, switches, unchecks all tags (keeping them
+        available in dropdown), and clears stored entry identifier.
 
         Returns:
             None
@@ -266,7 +295,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.trigger_input.clear()
         self.snippet_input.clear()
         self.enabled_switch.setChecked(False)
-        self.tags_input.clear()
+        self.tags_input.filterItems("")   # reset any active filter
+        self.tags_input.uncheckAll()  # Uncheck all but keep items available
         self.style_switch.setChecked(False)
         self.return_switch.setChecked(False)
 
@@ -295,6 +325,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         # Tags
         self.populate_tags_input()  # load all tags
+        self.tags_input.filterItems("")   # reset any active filter
 
         # Set all snippet tags as checked
         raw_tags = entry.get('tags', '')
@@ -342,21 +373,32 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         Populate the folder selection input from the database.
 
-        Retrieves all folders and updates the combo box, ensuring
-        a default folder is present.
+        Retrieves all folder paths (including nested), generates all intermediate
+        parent paths so users can select any level, deduplicates, sorts, and loads
+        them into the combo box. Caches the full list for debounce-filtered searching.
 
         Returns:
             None
         """
-        # Populate from DB if available
-        folders = self.main.snippet_db.get_all_folders()
+        folders = self.main.snippet_db.get_all_folders() or []
 
-        if folders:
-            self.folder_input.addItems(folders)
-        # Optionally add "Default" if not present
-        if "Default" not in folders:
-            self.folder_input.insertItem(0, "Default")
-            self.folder_input.setCurrentText("Default")
+        # Build the complete set: every stored path + every intermediate parent
+        path_set: set[str] = set()
+        for path in folders:
+            parts = path.split("/")
+            for i in range(1, len(parts) + 1):
+                path_set.add("/".join(parts[:i]))
+
+        if "Default" not in path_set:
+            path_set.add("Default")
+
+        self._folder_all_paths = sorted(path_set, key=str.lower)
+
+        self.folder_input.blockSignals(True)
+        self.folder_input.clear()
+        self.folder_input.addItems(self._folder_all_paths)
+        self.folder_input.setCurrentText("Default")
+        self.folder_input.blockSignals(False)
 
     def populate_tags_input(self):
         """
@@ -371,6 +413,92 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.tags_input.clear() # clear and repopulate
         if tags:
             self.tags_input.addItems(tags)
+
+    def _on_tags_text_edited(self, text: str):
+        """
+        Restart the debounce timer whenever the user edits the tags line edit.
+
+        Args:
+            text (str): Current text in the line edit (unused; the timer reads
+                the live widget value when it fires).
+
+        Returns:
+            None
+        """
+        self._tags_search_timer.stop()
+        self._tags_search_timer.start()
+
+    def _filter_tags_input(self):
+        """
+        Filter tag dropdown items based on the last typed segment.
+
+        Called by the debounce timer after 200 ms of inactivity. The full line
+        edit text may contain previously committed tags separated by commas
+        (e.g. "code, email, gp"); only the segment after the last comma is used
+        as the filter query. Hides non-matching rows and opens the popup so the
+        user can navigate and select with Enter or Tab.
+
+        Returns:
+            None
+        """
+        full_text = self.tags_input.lineEdit().text()
+        # Extract last segment after the last comma as the active search term
+        if "," in full_text:
+            query = full_text.rsplit(",", 1)[-1].strip()
+        else:
+            query = full_text.strip()
+
+        self.tags_input.filterItems(query)
+        if query:
+            self.tags_input.forceShowPopup()
+        else:
+            self.tags_input.hidePopup()
+
+    def _on_folder_text_edited(self, text: str):
+        """
+        Restart the debounce timer whenever the user edits the folder line edit.
+
+        Args:
+            text (str): Current text in the line edit (unused; the timer reads
+                the live widget value when it fires).
+
+        Returns:
+            None
+        """
+        self._folder_search_timer.stop()
+        self._folder_search_timer.start()
+
+    def _filter_folder_input(self):
+        """
+        Filter folder dropdown items based on the current search text.
+
+        Called by the debounce timer after 200 ms of inactivity. Rebuilds the
+        combo item list to show only paths that contain the typed query
+        (case-insensitive), preserving the typed text in the line edit so the
+        user can still save a brand-new nested path.
+
+        Returns:
+            None
+        """
+        query = self.folder_input.lineEdit().text()
+        lower_query = query.lower()
+
+        if lower_query:
+            matching = [p for p in self._folder_all_paths if lower_query in p.lower()]
+        else:
+            matching = list(self._folder_all_paths)
+
+        self.folder_input.blockSignals(True)
+        self.folder_input.clear()
+        self.folder_input.addItems(matching)
+        self.folder_input.lineEdit().setText(query)
+        self.folder_input.blockSignals(False)
+
+        # Show dropdown so the user can navigate the filtered list
+        if matching and query:
+            self.folder_input.showPopup()
+        else:
+            self.folder_input.hidePopup()
 
     def on_delete_tag(self, tag):
         """
@@ -718,7 +846,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         super().showEvent(event)
         # force focus when the form is shown
         self.new_input.setFocus(Qt.TabFocusReason)
+        self.populate_folder_input()
         self.populate_tags_input()
         # Reload popup list. Fixing Issue #24
         self.fill_intellisense_popup_list()
-
