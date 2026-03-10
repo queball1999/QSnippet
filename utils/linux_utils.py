@@ -65,7 +65,7 @@ class LinuxUtils:
         Returns:
             None
         """
-        if not LinuxUtils._ensure_autostart_file():
+        if not LinuxUtils.ensure_autostart_file():
             return
 
         lines = LinuxUtils.AUTOSTART_FILE.read_text(
