@@ -1,8 +1,14 @@
-Package: QSnippet
+Package: qsnippet
 Version: VERSION_REPLACED_DURING_BUILD
-Section: base
+Section: utils
 Priority: optional
 Architecture: amd64
 Depends: libxcb-cursor0, xclip | xsel
 Maintainer: Quynn Bell <admin@quynnbell.com>
-Description: Snippet manager tool.
+License: GPL-3.0+
+Homepage: https://qsnippet.com
+Bugs: https://github.com/queball1999/QSnippet/issues
+Vcs-Browser: https://github.com/queball1999/QSnippet
+Vcs-Git: https://github.com/queball1999/QSnippet.git
+X-Content-Rating: general
+Description: QSnippet is a lightweight snippet manager that allows you to save and quickly insert text snippets across your applications.

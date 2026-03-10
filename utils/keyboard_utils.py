@@ -556,6 +556,7 @@ class SnippetExpander():
             delete = "delete"
             left = "left"
             right = "right"
+            ctrl = "ctrl"
             ctrl_l = "ctrl_l"
             ctrl_r = "ctrl_r"
             cmd = "cmd"

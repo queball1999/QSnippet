@@ -41,6 +41,7 @@ mkdir -p \
   "$PKG_ROOT/opt/QSnippet/notices" \
   "$PKG_ROOT/usr/bin" \
   "$PKG_ROOT/usr/share/applications" \
+  "$PKG_ROOT/usr/share/metainfo" \
   "$PKG_ROOT/usr/share/icons/hicolor/256x256/apps"
 
 # Copy application binary
@@ -65,6 +66,10 @@ chmod 755 "$PKG_ROOT/usr/bin/qsnippet"
 # Desktop entry
 cp deb-package/qsnippet.desktop \
    "$PKG_ROOT/usr/share/applications/qsnippet.desktop"
+
+# AppData metadata (for software centers)
+cp deb-package/qsnippet.metainfo.xml \
+   "$PKG_ROOT/usr/share/metainfo/qsnippet.metainfo.xml"
 
 # Icon
 cp images/icon_128x128.png \

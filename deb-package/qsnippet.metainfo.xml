@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.qsnippet.QSnippet</id>
+  <name>QSnippet</name>
+  <summary>Lightweight snippet manager for quick text insertion</summary>
+  <description>
+    <p>
+      QSnippet is a lightweight snippet manager that allows you to save and
+      quickly insert text snippets across your applications. Perfect for developers,
+      writers, and anyone who frequently uses the same text blocks.
+    </p>
+    <p>
+      Features include:
+    </p>
+    <ul>
+      <li>Create and organize code snippets</li>
+      <li>Quick snippet insertion via hotkeys</li>
+      <li>Support for placeholders and dynamic content</li>
+      <li>Cross-platform compatibility (Windows, macOS, Linux)</li>
+      <li>System tray integration</li>
+    </ul>
+  </description>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0+</project_license>
+
+  <url type="homepage">https://qsnippet.com</url>
+  <url type="bugtracker">https://github.com/queball1999/QSnippet/issues</url>
+  <url type="vcs-browser">https://github.com/queball1999/QSnippet</url>
+  <url type="contribute">https://github.com/queball1999/QSnippet</url>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-cartoon">none</content_attribute>
+    <content_attribute id="violence-fantasy">none</content_attribute>
+    <content_attribute id="violence-realistic">none</content_attribute>
+    <content_attribute id="violence-bloodshed">none</content_attribute>
+    <content_attribute id="violence-sexual">none</content_attribute>
+    <content_attribute id="violence-desecration">none</content_attribute>
+    <content_attribute id="violence-slavery">none</content_attribute>
+    <content_attribute id="violence-worship">none</content_attribute>
+    <content_attribute id="profanity">none</content_attribute>
+    <content_attribute id="profanity-humor">none</content_attribute>
+    <content_attribute id="alcohol-abuse">none</content_attribute>
+    <content_attribute id="alcohol-advertising">none</content_attribute>
+    <content_attribute id="drugs-abuse">none</content_attribute>
+    <content_attribute id="drugs-advertising">none</content_attribute>
+    <content_attribute id="sex-themes">none</content_attribute>
+    <content_attribute id="sex-humor">none</content_attribute>
+    <content_attribute id="sex-education">none</content_attribute>
+    <content_attribute id="sex-prostitution">none</content_attribute>
+    <content_attribute id="sex-homosexuality">none</content_attribute>
+    <content_attribute id="sex-prostitution">none</content_attribute>
+    <content_attribute id="gambling">none</content_attribute>
+    <content_attribute id="spiritual-occult">none</content_attribute>
+    <content_attribute id="spiritual-religion">none</content_attribute>
+  </content_rating>
+
+  <developer_name>Quynn Bell</developer_name>
+  <update_contact>admin@quynnbell.com</update_contact>
+
+  <releases>
+    <release version="0.0.6" date="2026-03-09">
+      <description>
+        <p>Beta release with Linux compatibility improvements and enhanced UI.</p>
+      </description>
+    </release>
+  </releases>
+
+  <launchable type="desktop-id">qsnippet.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main QSnippet window with snippet editor</caption>
+    </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>Utility</category>
+    <category>Development</category>
+  </categories>
+
+  <keywords>
+    <keyword>snippet</keyword>
+    <keyword>text</keyword>
+    <keyword>clipboard</keyword>
+    <keyword>automation</keyword>
+  </keywords>
+</component>
