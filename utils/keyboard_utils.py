@@ -3,7 +3,6 @@ import platform
 import pyperclip
 import re
 import datetime
-from pynput import keyboard
 from utils.snippet_db import SnippetDB
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,10 @@ class SnippetExpander():
         Returns:
             None
         """
+        from pynput import keyboard
+
+        self.keyboard = keyboard
+
         logger.info("Initializing SnippetExpander")
 
         self.snippets_db = snippets_db
@@ -34,7 +37,7 @@ class SnippetExpander():
 
         self.disabled = False
         self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)
-        self.keys_to_ignore = [keyboard.Key.space, keyboard.Key.shift, keyboard.Key.enter, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r]
+        self.keys_to_ignore = [self.keyboard.Key.space, self.keyboard.Key.shift, self.keyboard.Key.enter, self.keyboard.Key.ctrl_l, self.keyboard.Key.ctrl_r]
         self.buffer = ""
         self.cursor_pos = 0  # Cursor position in the buffer
         self.max_trigger_len = 255
@@ -42,9 +45,9 @@ class SnippetExpander():
 
         self.build_trigger_map()
 
-        self.listener = keyboard.Listener(on_press=self._on_key_press)
-        self.controller = keyboard.Controller()
-        self._paste_mod = keyboard.Key.cmd if platform.system() == "Darwin" else keyboard.Key.ctrl
+        self.listener = self.keyboard.Listener(on_press=self._on_key_press)
+        self.controller = self.keyboard.Controller()
+        self._paste_mod = self.keyboard.Key.cmd if platform.system() == "Darwin" else self.keyboard.Key.ctrl
 
         logger.info("SnippetExpander initialized successfully")
 
@@ -189,20 +192,20 @@ class SnippetExpander():
         Returns:
             bool: True if the key was handled, otherwise False.
         """
-        if key == keyboard.Key.left:
+        if key == self.keyboard.Key.left:
             if self.cursor_pos > 0:
                 self.cursor_pos -= 1
             return True
-        elif key == keyboard.Key.right:
+        elif key == self.keyboard.Key.right:
             if self.cursor_pos < len(self.buffer):
                 self.cursor_pos += 1
             return True
-        elif key == keyboard.Key.backspace:
+        elif key == self.keyboard.Key.backspace:
             if self.cursor_pos > 0:
                 self.buffer = self.buffer[:self.cursor_pos - 1] + self.buffer[self.cursor_pos:]
                 self.cursor_pos -= 1
             return True
-        elif key == keyboard.Key.delete:
+        elif key == self.keyboard.Key.delete:
             if self.cursor_pos < len(self.buffer):
                 self.buffer = self.buffer[:self.cursor_pos] + self.buffer[self.cursor_pos + 1:]
             return True
@@ -218,12 +221,12 @@ class SnippetExpander():
         Returns:
             bool: True if the buffer should be cleared, otherwise False.
         """
-        if key in (keyboard.Key.space,
-                   keyboard.Key.enter,
-                   keyboard.Key.tab,
-                   keyboard.Key.shift,
-                   keyboard.Key.ctrl_l,
-                   keyboard.Key.ctrl_r):
+        if key in (self.keyboard.Key.space,
+                   self.keyboard.Key.enter,
+                   self.keyboard.Key.tab,
+                   self.keyboard.Key.shift,
+                   self.keyboard.Key.ctrl_l,
+                   self.keyboard.Key.ctrl_r):
             return True
         return False
 
@@ -312,8 +315,8 @@ class SnippetExpander():
             # Simulate keystrokes for each character in the snippet
             for ch in snippet:
                 if ch == "\n":
-                    self.controller.press(keyboard.Key.enter)
-                    self.controller.release(keyboard.Key.enter)
+                    self.controller.press(self.keyboard.Key.enter)
+                    self.controller.release(self.keyboard.Key.enter)
                 else:
                     self.controller.press(ch)
                     self.controller.release(ch)
@@ -360,13 +363,13 @@ class SnippetExpander():
 
         # Delete the trigger from the input
         for _ in range(chars_before_cursor):
-            self.controller.press(keyboard.Key.backspace)
-            self.controller.release(keyboard.Key.backspace)
+            self.controller.press(self.keyboard.Key.backspace)
+            self.controller.release(self.keyboard.Key.backspace)
 
         # Delete any characters after the cursor that are part of the trigger
         for _ in range(chars_after_cursor):
-            self.controller.press(keyboard.Key.delete)
-            self.controller.release(keyboard.Key.delete)
+            self.controller.press(self.keyboard.Key.delete)
+            self.controller.release(self.keyboard.Key.delete)
         
         logger.debug("Stopping listener to prevent feedback")
         # Temporarily disable event processing, but do NOT stop listener
@@ -380,8 +383,8 @@ class SnippetExpander():
                 self.expand_keystrokes(snippet)
 
             if return_press:
-                self.controller.press(keyboard.Key.enter)
-                self.controller.release(keyboard.Key.enter) 
+                self.controller.press(self.keyboard.Key.enter)
+                self.controller.release(self.keyboard.Key.enter) 
         finally:
             logger.debug("Restarting listener")
             self.disabled = False

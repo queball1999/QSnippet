@@ -5,12 +5,26 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from tests.db.benchmark_test import _results
-
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def pytest_addoption(parser):
+    """Add custom command-line options."""
+    parser.addoption(
+        "--benchmark",
+        action="store_true",
+        default=False,
+        help="run benchmark tests"
+    )
+
+
+def pytest_configure(config):
+    """Skip benchmark tests by default unless --benchmark flag is passed."""
+    if not config.getoption("--benchmark"):
+        config.option.markexpr = "not benchmark"
 
 
 @pytest.fixture(scope="session")
@@ -155,6 +169,8 @@ def disable_sys_exit(monkeypatch):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    from tests.db.benchmark_test import _results
+
     if not _results:
         return
 

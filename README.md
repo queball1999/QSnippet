@@ -124,33 +124,49 @@ These steps assume you have downloaded the project’s public signing key [gpg-p
 
 
 ### Unit Testing
-To help mitigate breaking changes, I have added some unit tests to verify the core functionality working. I still need to add additional testing to include the UI elements, but this should do for now.
 
-In order to run these tests, run the following command:
+To help mitigate breaking changes, unit tests verify core functionality. The test suite includes regular tests and optional benchmark tests.
 
-```
+#### Running Tests
+
+**Run standard tests (recommended for CI/CD):**
+```bash
 pytest
 ```
 
-You should see something like the following output:
+**Run only benchmark tests:**
+```bash
+pytest --benchmark -m benchmark
+```
+
+**Run all tests including benchmarks:**
+```bash
+pytest --benchmark
+```
+
+#### Expected Output
+
+Standard test run should produce output similar to:
 ```
 ===================== test session starts =====================
-platform win32 -- Python 3.13.11, pytest-8.4.1, pluggy-1.6.0
-rootdir: ...\QSnippet
+platform linux -- Python 3.13.12, pytest-9.0.2, pluggy-1.6.0
+rootdir: .../QSnippet
 plugins: Faker-37.4.0
-collected 53 items                                  
+collected 53 items (45 deselected by "-m not benchmark")
 
-tests\core\test_flatten_yaml.py ...             [  5%]
-tests\core\test_scaling.py ...                  [ 11%] 
-tests\service\test_snippet_service.py .......   [ 26%]
-tests\utils\test_config_utils.py ..........     [ 45%]
-tests\utils\test_file_utils.py ..........       [ 64%]
-tests\utils\test_logging_utils.py .....         [ 73%]
-tests\utils\test_reg_utils.py ......            [ 84%]
-tests\utils\test_snippet_db.py ........         [100%]
+tests/core/test_flatten_yaml.py ...             [  5%]
+tests/core/test_scaling.py ...                  [ 11%]
+tests/service/test_snippet_service.py .......   [ 26%]
+tests/utils/test_config_utils.py ..........     [ 45%]
+tests/utils/test_file_utils.py ..........       [ 64%]
+tests/utils/test_logging_utils.py .....         [ 73%]
+tests/utils/test_reg_utils.py ......            [ 84%]
+tests/utils/test_snippet_db.py ........         [100%]
 
-===================== 53 passed in 4.99s ======================
+===================== 45 passed in 2.34s ======================
 ```
+
+**Note:** Benchmark tests are skipped by default to allow tests to run in environments without X11 display (like CI/CD runners). Use `--benchmark` flag to include them.
 
 ## License
 
