@@ -5,7 +5,6 @@ import yaml
 import sys
 from datetime import datetime
 from pathlib import Path
-from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +206,8 @@ class FileUtils:
         Raises:
             Exception: If importing snippets fails.
         """
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
         logger.debug("Opening import snippets dialog")
 
         path, _ = QFileDialog.getOpenFileName(
@@ -262,11 +263,13 @@ class FileUtils:
         Raises:
             Exception: If exporting snippets fails.
         """
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
         date = datetime.now().date()
         default_name = f"qsnippets-export-{date}.yaml"
 
         logger.debug("Opening export snippets dialog")
-    
+
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Export Snippets to YAML",

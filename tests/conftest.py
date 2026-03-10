@@ -4,7 +4,6 @@ import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
-from PySide6.QtCore import QCoreApplication
 
 from tests.db.benchmark_test import _results
 
@@ -122,6 +121,8 @@ def mock_qt_app():
     Yields:
         QCoreApplication: The shared application instance.
     """
+    from PySide6.QtCore import QCoreApplication
+
     app = QCoreApplication.instance()
     if app is None:
         app = QCoreApplication(sys.argv)
