@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ui import SnippetService
+from ui.service import SnippetService
 
 
 # Fixtures
