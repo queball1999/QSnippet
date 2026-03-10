@@ -37,7 +37,8 @@ jobs:
             libxcb-image0 \
             libxcb-keysyms1 \
             libxcb-render-util0 \
-            xclip
+            xclip \
+            xvfb
 
       - name: Read version
         id: version
@@ -46,7 +47,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build Linux binary (PyInstaller)
-        run: bash ./tools/build.sh
+        run: xvfb-run -a bash ./tools/build.sh
 
       - name: Package .deb
         run: bash ./tools/package-deb.sh
