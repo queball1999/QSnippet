@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from PySide6.QtWidgets import (
     QDialog, QListWidget, QStackedWidget, QHBoxLayout,
-    QListWidgetItem, QVBoxLayout, QLineEdit, QWidget
+    QListWidgetItem, QVBoxLayout, QLineEdit, QWidget,
+    QPushButton, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, QObject, QEvent
 from PySide6.QtGui import QShortcut
@@ -77,6 +78,14 @@ class SettingsDialog(QDialog):
 
         left.addWidget(self.search)
         left.addWidget(self.list)
+        left.addStretch()
+
+        self.restore_defaults_btn = QPushButton("Restore Defaults")
+        self.restore_defaults_btn.setObjectName("RestoreDefaultsBtn")
+        self.restore_defaults_btn.setFixedWidth(220)
+        self.restore_defaults_btn.setCursor(Qt.PointingHandCursor)
+        self.restore_defaults_btn.clicked.connect(self.reset_all_settings)
+        left.addWidget(self.restore_defaults_btn)
 
         # Search dropdown
         self.search_results = QListWidget(self)
@@ -286,6 +295,13 @@ class SettingsDialog(QDialog):
         self.stack.removeWidget(current)
         current.deleteLater()
 
+    def pop_pages(self, count: int):
+        """ Pop multiple pages from the navigation stack. """
+        for _ in range(count):
+            if not self._nav_stack:
+                break
+            self.pop_page()
+
     def reset_navigation(self, select_row=0):
         """ Reset navigation to a specific root page. """
         self._nav_stack.clear()
@@ -339,6 +355,61 @@ class SettingsDialog(QDialog):
         if callable(self.save_callback):
             self.save_callback(self.settings)
             self.toast.show_toast()
+
+    def reset_all_settings(self):
+        """ Reset all settings to their default values after user confirmation. """
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Restore Defaults")
+        msg.setText("Are you sure you want to restore all settings to their default values?")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+
+        if msg.exec() != QMessageBox.Yes:
+            return
+
+        # Walk the settings tree and reset all values to defaults
+        self._reset_defaults_recursive(self.settings)
+
+        # Save the reset settings
+        if callable(self.save_callback):
+            self.save_callback(self.settings)
+
+        # Rebuild all root pages to reflect the new values
+        self._rebuild_pages()
+        self.toast.show_toast()
+
+    def _reset_defaults_recursive(self, node: dict):
+        """ Recursively reset all leaf settings that have a 'default' key. """
+        for key, value in node.items():
+            if not isinstance(value, dict):
+                continue
+
+            if "value" in value and "default" in value:
+                value["value"] = value["default"]
+            else:
+                self._reset_defaults_recursive(value)
+
+    def _rebuild_pages(self):
+        """ Tear down and rebuild all root category pages. """
+        # Clear navigation stack
+        self._nav_stack.clear()
+
+        # Remove all pages from the stack
+        while self.stack.count() > 0:
+            widget = self.stack.widget(0)
+            self.stack.removeWidget(widget)
+            widget.deleteLater()
+
+        # Rebuild
+        self.build()
+        self.build_search_index()
+
+        # Restore sidebar selection
+        row = max(0, self._last_sidebar_row)
+        if row < self.list.count():
+            self.list.setCurrentRow(row)
+            self.stack.setCurrentIndex(row)
 
 
     def update_stylesheet(self):
@@ -417,5 +488,35 @@ class SettingsDialog(QDialog):
         QLabel#SettingsChevron {
             font-size: 20px;
             color: rgba(255, 255, 255, 0.4);
+        }
+
+        QPushButton#SettingsResetBtn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+            padding: 0px;
+        }
+
+        QPushButton#SettingsResetBtn:hover {
+            background-color: rgba(79, 163, 255, 0.2);
+            border-color: rgba(79, 163, 255, 0.5);
+            color: rgba(79, 163, 255, 1.0);
+        }
+
+        QPushButton#RestoreDefaultsBtn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        QPushButton#RestoreDefaultsBtn:hover {
+            background-color: rgba(228, 75, 75, 0.15);
+            border-color: rgba(228, 75, 75, 0.5);
+            color: rgba(228, 75, 75, 1.0);
         }
         """)

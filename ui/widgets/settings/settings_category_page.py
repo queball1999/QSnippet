@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QLabel, QLineEdit, QComboBox, QSlider,
     QScrollArea, QVBoxLayout, QSpacerItem, QSizePolicy,
-    QHBoxLayout
+    QHBoxLayout, QPushButton, QFrame
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -23,6 +23,9 @@ class SettingsCategoryPage(QWidget):
         self.on_change = on_change
         self.search_targets = {}
 
+        # Track controls for reset: {key: (control_widget, reset_btn, meta)}
+        self._controls: dict[str, tuple[QWidget, QPushButton, dict]] = {}
+
         # Adding save debounce
         self._emit_timers: dict[str, QTimer] = {}
         self.pending_values: dict[str, object] = {}
@@ -34,6 +37,7 @@ class SettingsCategoryPage(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)    # Remove border
         outer.addWidget(scroll)
 
         body = QWidget()
@@ -43,14 +47,13 @@ class SettingsCategoryPage(QWidget):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
 
-        self.header = QLabel(self.header_text())
-        self.header.setObjectName("SettingsHeader")
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(0)
+        self._build_breadcrumb(self.header_layout)
+        self.header_layout.addStretch()
 
-        if self.parent_category:
-            self.header.setCursor(Qt.PointingHandCursor)
-            self.header.mousePressEvent = lambda _: self.dialog.pop_page()
-
-        layout.addWidget(self.header)
+        layout.addLayout(self.header_layout)
 
         for key, meta in self.values.items():
             title = key.replace("_", " ").title()
@@ -76,10 +79,15 @@ class SettingsCategoryPage(QWidget):
             description = meta.get("description", "")
             control = self.create_widget(key, meta)
 
+            # Create reset button (visible only when value != default)
+            reset_btn = self.create_reset_button(key, meta)
+            self._controls[key] = (control, reset_btn, meta)
+
             card = SettingsCard(
                 title=title,
                 description=description,
                 control=control,
+                reset_btn=reset_btn,
             )
             layout.addWidget(card)
 
@@ -89,10 +97,33 @@ class SettingsCategoryPage(QWidget):
 
         layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Expanding))
 
-    def header_text(self):
-        if self.parent_category:
-            return f"{self.parent_category} › {self.category}".replace("_", " ").title()
-        return self.category.replace("_", " ").title()
+    def _build_breadcrumb(self, layout: QHBoxLayout):
+        """
+        Build clickable breadcrumb labels from self.path.
+        Each ancestor is clickable and navigates back to that depth.
+        The current (last) segment is non-clickable.
+        """
+        depth = len(self.path)
+
+        for i, segment in enumerate(self.path):
+            is_last = (i == depth - 1)
+            title = segment.replace("_", " ").title()
+
+            label = QLabel(title)
+            label.setObjectName("SettingsHeader")
+
+            if not is_last:
+                # Clickable ancestor - pops back to this depth
+                pops_needed = depth - 1 - i
+                label.setCursor(Qt.PointingHandCursor)
+                label.mousePressEvent = lambda _, n=pops_needed: self.dialog.pop_pages(n)
+
+            layout.addWidget(label)
+
+            if not is_last:
+                separator = QLabel(" › ")
+                separator.setObjectName("SettingsHeader")
+                layout.addWidget(separator)
 
     # ----- SEARCH -----
 
@@ -138,6 +169,93 @@ class SettingsCategoryPage(QWidget):
         self.dialog.push_page(page)
 
 
+    # ----- RESET -----
+
+    def create_reset_button(self, key: str, meta: dict) -> QPushButton:
+        """
+        Create a small reset button for a setting.
+        Visible only when current value differs from the default.
+        """
+        btn = QPushButton("↺")
+        btn.setObjectName("SettingsResetBtn")
+        btn.setFixedSize(24, 24)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip("Restore default")
+        btn.clicked.connect(lambda: self.reset_setting(key))
+
+        has_default = "default" in meta
+        is_changed = has_default and meta.get("value") != meta.get("default")
+        btn.setVisible(is_changed)
+
+        return btn
+
+    def update_reset_visibility(self, key: str, current_value):
+        """ Show or hide the reset button based on whether value differs from default. """
+        if key not in self._controls:
+            return
+
+        _, reset_btn, meta = self._controls[key]
+        has_default = "default" in meta
+        is_changed = has_default and current_value != meta.get("default")
+        reset_btn.setVisible(is_changed)
+
+    def reset_setting(self, key: str):
+        """ Reset a single setting to its default value. """
+        if key not in self._controls:
+            return
+
+        control, reset_btn, meta = self._controls[key]
+        default = meta.get("default")
+
+        if default is None:
+            return
+
+        # Update the control widget (this triggers the change signal automatically)
+        self._set_control_value(control, meta, default)
+        reset_btn.setVisible(False)
+
+    def _set_control_value(self, control: QWidget, meta: dict, value):
+        """ Programmatically set a control widget's value. """
+        typ = meta.get("type")
+
+        if typ == "bool" and isinstance(control, QAnimatedSwitch):
+            control.setChecked(bool(value))
+            return
+
+        if isinstance(control, QComboBox):
+            control.setCurrentText(str(value))
+            return
+
+        if typ == "int":
+            # Container widget with slider + label
+            slider = control.findChild(QSlider)
+            if slider:
+                slider.setValue(int(value))
+            return
+
+        if isinstance(control, QLineEdit):
+            control.setText(str(value))
+            return
+
+    def reset_all_to_defaults(self):
+        """
+        Reset all leaf settings on this page (and sub-categories) to defaults.
+        Returns True if any value was actually changed.
+        """
+        changed = False
+
+        for key, (control, reset_btn, meta) in self._controls.items():
+            if "default" not in meta:
+                continue
+            if meta.get("value") == meta.get("default"):
+                continue
+
+            self._set_control_value(control, meta, meta["default"])
+            reset_btn.setVisible(False)
+            changed = True
+
+        return changed
+
     # ----- CONTROLS -----
 
     def emit_change(self, key: str, value, delay: int = 400):
@@ -145,6 +263,7 @@ class SettingsCategoryPage(QWidget):
         Debounced change emitter.
         """
         self.pending_values[key] = value
+        self.update_reset_visibility(key, value)
 
         if key not in self._emit_timers:
             timer = QTimer(self)

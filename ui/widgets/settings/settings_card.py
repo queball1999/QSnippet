@@ -1,9 +1,9 @@
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSizePolicy, QPushButton
 from PySide6.QtCore import Qt
 
 
 class SettingsCard(QWidget):
-    def __init__(self, title: str, description: str, control: QWidget, parent=None):
+    def __init__(self, title: str, description: str, control: QWidget, reset_btn: QPushButton = None, parent=None):
         super().__init__(parent)
 
         self.title_text = title
@@ -20,6 +20,8 @@ class SettingsCard(QWidget):
         header.addWidget(QLabel(title))
         header.setObjectName("SettingsCardTitle")
         header.addStretch()
+        if reset_btn:
+            header.addWidget(reset_btn, alignment=Qt.AlignRight | Qt.AlignVCenter)
         header.addWidget(control, alignment=Qt.AlignRight | Qt.AlignVCenter)
 
         desc = QLabel(description.strip())
