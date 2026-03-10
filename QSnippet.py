@@ -4,11 +4,8 @@ import logging
 from pathlib import Path
 import psutil, tempfile
 
-# Import utility and UI modules
+# Import utility modules (UI imports moved to __init__ to avoid import errors in test environments)
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
-from ui import QSnippet
-from ui.widgets import AppMessageBox
-from ui.widgets.notice_carousel import NoticeCarouselDialog
 
 # Import build info
 try:
@@ -49,6 +46,11 @@ class main():
         from PySide6.QtCore import QSize, QTimer
         from PySide6.QtGui import QFont, QIcon
 
+        # Import UI modules here (after PySide6 to avoid import errors in test environments)
+        from ui import QSnippet
+        from ui.widgets import AppMessageBox
+        from ui.widgets.notice_carousel import NoticeCarouselDialog
+
         # Store as instance variables for access in other methods
         self.QApplication = QApplication
         self.QMessageBox = QMessageBox
@@ -56,6 +58,9 @@ class main():
         self.QTimer = QTimer
         self.QFont = QFont
         self.QIcon = QIcon
+        self.QSnippet = QSnippet
+        self.AppMessageBox = AppMessageBox
+        self.NoticeCarouselDialog = NoticeCarouselDialog
 
         self.create_global_variables()
         self.load_config()      # config.yaml
@@ -65,7 +70,7 @@ class main():
 
         logger.info("Application bootstrap complete")
 
-        self.message_box = AppMessageBox(icon_path=self.images["icon"])
+        self.message_box = self.AppMessageBox(icon_path=self.images["icon"])
 
         self.check_sys_requirements()  # Check system requirements
         self.check_if_already_running(self.program_name) # Check if application is already running
@@ -649,7 +654,7 @@ class main():
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
-        unread = NoticeCarouselDialog.load_notices(
+        unread = self.NoticeCarouselDialog.load_notices(
             notices_dir,
             dismissed
         )
@@ -661,7 +666,7 @@ class main():
 
         logger.info("Displaying %d notices", len(unread))
 
-        dialog = NoticeCarouselDialog(
+        dialog = self.NoticeCarouselDialog(
             unread,
             icon_path=self.QIcon(self.images["icon"]),
             parent=self,
@@ -717,7 +722,7 @@ class main():
             BUILD_DATE,
             BUILD_COMMIT,
         )
-        self.qsnippet = QSnippet(parent=self)
+        self.qsnippet = self.QSnippet(parent=self)
         self.qsnippet.run()
 
 
