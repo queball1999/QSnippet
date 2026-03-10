@@ -47,7 +47,7 @@ class main():
         from PySide6.QtGui import QFont, QIcon
 
         # Import UI modules here (after PySide6 to avoid import errors in test environments)
-        from ui import QSnippet
+        from ui.window import QSnippet
         from ui.widgets import AppMessageBox
         from ui.widgets.notice_carousel import NoticeCarouselDialog
 

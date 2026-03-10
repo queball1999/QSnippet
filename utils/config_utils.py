@@ -1,9 +1,44 @@
 import os
 import yaml
 import logging
-from PySide6.QtCore import QObject, QFileSystemWatcher, Signal
 
 logger = logging.getLogger(__name__)
+
+# Try to import PySide6, but handle gracefully for test environments
+try:
+    from PySide6.QtCore import QObject, QFileSystemWatcher, Signal
+except ImportError:
+    # Stub classes for test environments without PySide6
+    class QObject:
+        pass
+
+    class QFileSystemWatcher:
+        def __init__(self, parent=None):
+            self._files = []
+
+        def addPath(self, path):
+            self._files.append(path)
+
+        def files(self):
+            return self._files
+
+        def removePath(self, path):
+            if path in self._files:
+                self._files.remove(path)
+
+    class Signal:
+        def __init__(self, *args):
+            self._connections = []
+
+        def emit(self, *args):
+            for callback in self._connections:
+                try:
+                    callback(*args)
+                except Exception as e:
+                    logger.error(f"Error in signal callback: {e}")
+
+        def connect(self, callback):
+            self._connections.append(callback)
 
 class ConfigLoader(QObject):
     """
@@ -56,7 +91,7 @@ class ConfigLoader(QObject):
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
             self.config = data
-            
+
             logger.info("Config loaded successfully")
             logger.debug(f"Loaded config: {self.config_path}")
             self.configChanged.emit(self.config)
@@ -121,7 +156,7 @@ class SettingsLoader(QObject):
         super().__init__()
         self.settings_path = os.path.abspath(settings_path)
         logger.debug("Settings Path: %s", self.settings_path)
-        
+
         self._watcher = QFileSystemWatcher(self)
         self._watcher.addPath(self.settings_path)
         self._watcher.fileChanged.connect(self.on_file_changed)
@@ -153,7 +188,6 @@ class SettingsLoader(QObject):
         except Exception as e:
             logger.error(f"Failed to load Settings {self.settings_path}: {e}")
 
-    
     def infer_type(self, value):
         """
         Infer the string representation of a value's type.
