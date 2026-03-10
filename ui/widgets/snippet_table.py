@@ -30,6 +30,19 @@ class SnippetTable(QTreeView):
     refreshSignal = Signal()    # trigger refresh
 
     def __init__(self, main, parent=None):
+        """
+        Initialize the SnippetTable widget with model, proxy, and signal connections.
+
+        Sets up the tree view with columns, sorting/filtering, drag-and-drop support,
+        and connects signals for selection and data changes.
+
+        Args:
+            main (Any): Reference to the main application object.
+            parent (Any): Optional parent widget.
+
+        Returns:
+            None
+        """
         logger.info("Initializing SnippetTable")
 
         super().__init__(parent)
@@ -76,7 +89,15 @@ class SnippetTable(QTreeView):
         logger.info("SnippetTable initialized successfully")
 
     def _configure_columns(self):
-        """Set default column widths while keeping them resizable."""
+        """
+        Configure table column widths and header properties.
+
+        Sets default widths for all columns while maintaining user resizability.
+        Configures header font, resize mode, and allows section reordering.
+
+        Returns:
+            None
+        """
         logger.info("Configuring column widths")
 
         try:
@@ -102,8 +123,24 @@ class SnippetTable(QTreeView):
 
     def load_entries(self, entries):
         """
-        entries: list of dicts with keys
-          folder, label, trigger, snippet, enabled (bool), paste_style
+        Load and display snippet entries in the table organized by folders.
+
+        Populates the tree view with snippets organized hierarchically by folder.
+        Clears existing data, creates folder nodes, and adds snippet rows with
+        associated metadata. Expands folders based on settings.
+
+        Args:
+            entries (list): List of dictionaries containing snippet data with keys:
+                - folder (str): Folder name for organization.
+                - label (str): Display name of the snippet.
+                - trigger (str): Keyboard shortcut to activate the snippet.
+                - snippet (str): The text content of the snippet.
+                - enabled (bool): Whether the snippet is active.
+                - paste_style (str): Paste method ("Clipboard" or "Keystroke").
+                - tags (str): Comma-separated tags for the snippet.
+
+        Returns:
+            None
         """
         logger.info("Loading snippet entries into table")
         logger.debug("Entry count: %d", len(entries))
@@ -162,7 +199,15 @@ class SnippetTable(QTreeView):
         logger.info("Snippet table populated")
 
     def refresh(self):
-        """ Reload the table data. """
+        """
+        Reload the table data from the cached entries.
+
+        Triggers a full reload of the parent configuration to refresh the table
+        with current data from the database.
+
+        Returns:
+            None
+        """
         logger.info("Refreshing snippet table data")
         
         if self.entries:
@@ -171,11 +216,34 @@ class SnippetTable(QTreeView):
             logger.debug("Refresh requested with no cached entries")
 
     def reload(self, entries):
-        """Reload the table with a fresh snippet list"""
+        """
+        Reload the table with a fresh snippet list.
+
+        Clears and repopulates the entire table with the provided entries,
+        useful for refreshing after external changes.
+
+        Args:
+            entries (list): List of snippet entry dictionaries to load.
+
+        Returns:
+            None
+        """
         logger.info("Reloading snippet table")
         self.load_entries(entries)
 
     def _on_click(self, proxy_idx):
+        """
+        Handle click event on a table item and emit the selected entry.
+
+        Maps the proxy index to the source model, retrieves the entry data,
+        and emits the entrySelected signal with snippet data if applicable.
+
+        Args:
+            proxy_idx (QModelIndex): The proxy model index of the clicked item.
+
+        Returns:
+            None
+        """
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
         data = item.data(Qt.UserRole)
@@ -188,6 +256,19 @@ class SnippetTable(QTreeView):
             self.entrySelected.emit(None)
 
     def _on_selection_changed(self, selected, deselected):
+        """
+        Handle selection change events in the table.
+
+        Processes selection model changes and delegates to _on_click to emit
+        the appropriate entrySelected signal.
+
+        Args:
+            selected (QItemSelection): The newly selected items.
+            deselected (QItemSelection): The previously selected items.
+
+        Returns:
+            None
+        """
         # grab the first index in the new selection
         indexes = selected.indexes()
         if not indexes:
@@ -202,10 +283,16 @@ class SnippetTable(QTreeView):
 
     def contextMenuEvent(self, event):
         """
-        contextMenuEvent handler to show appropriate context menu
-        depending on where the user right-clicked.
-        
-        event: QContextMenuEvent
+        Display the appropriate context menu based on the clicked item.
+
+        Shows different context menus for empty space, folders, and snippets.
+        Connects menu actions to corresponding signals.
+
+        Args:
+            event (QContextMenuEvent): The context menu event.
+
+        Returns:
+            None
         """
         logger.debug("Context menu requested")
 
@@ -243,18 +330,37 @@ class SnippetTable(QTreeView):
 
     # Handlers for expanding/collapsing folders
     def expandAll(self):
-        """ Expand all folders in the table """
+        """
+        Expand all folders in the table.
+
+        Expands all top-level folder nodes to show all snippets.
+
+        Returns:
+            None
+        """
         logger.debug("Expanding all folders in table")
         super().expandAll()
 
     def collapseAll(self):
-        """ Collapse all folders in the table """
+        """
+        Collapse all folders in the table.
+
+        Collapses all top-level folder nodes to hide all snippets.
+
+        Returns:
+            None
+        """
         logger.debug("Collapsing all folders in table")
         super().collapseAll()
 
     def isAnyFolderExpanded(self) -> bool:
         """
-        Return True if any top-level folder row is currently expanded.
+        Check if any top-level folder is currently expanded.
+
+        Iterates through all top-level folder rows and checks their expansion state.
+
+        Returns:
+            bool: True if at least one folder is expanded, False otherwise.
         """
         for row in range(self.model.rowCount()):
             src_idx = self.model.index(row, 0)
@@ -267,11 +373,30 @@ class SnippetTable(QTreeView):
 
     # Helpers to manipulate UI state
     def clear_selection(self):
+        """
+        Clear the current selection in the table.
+
+        Deselects all items, resetting the table to no active selection.
+
+        Returns:
+            None
+        """
         logger.debug("Clearing table selection")
         self.clearSelection()
 
     def select_entry(self, entry):
-        """Find and select the row matching entry['trigger']."""
+        """
+        Find and select the row matching the given entry's trigger.
+
+        Recursively searches the tree model for a snippet matching the provided
+        entry's trigger value and selects it if found.
+
+        Args:
+            entry (dict): Dictionary containing at least a 'trigger' key.
+
+        Returns:
+            None
+        """
         logger.info(
             "Selecting entry by trigger: %s",
             entry.get('trigger')
@@ -308,7 +433,15 @@ class SnippetTable(QTreeView):
         )
 
     def current_entry(self):
-        """ Return the current index in the table """
+        """
+        Get the currently selected snippet entry.
+
+        Returns the full snippet data dictionary for the currently selected row,
+        or None if no valid snippet is selected.
+
+        Returns:
+            dict: The selected snippet entry dictionary, or None if invalid or not a snippet.
+        """
         idx = self.currentIndex()
         if not idx.isValid():
             logger.warning("current_entry called with invalid index")
@@ -330,8 +463,18 @@ class SnippetTable(QTreeView):
 
     def _on_rows_removed(self, parent_idx: QModelIndex, start: int, end: int):
         """
-        If a folder loses all its children, delete the folder automatically.
-        parent_idx is in model coordinates.
+        Automatically remove empty folders when all their children are deleted.
+
+        When a folder loses all its child items, this method removes the empty
+        folder from the model to keep the table clean.
+
+        Args:
+            parent_idx (QModelIndex): The parent folder index in model coordinates.
+            start (int): The starting row of removed items.
+            end (int): The ending row of removed items.
+
+        Returns:
+            None
         """
         if not parent_idx.isValid():
             return
@@ -345,7 +488,18 @@ class SnippetTable(QTreeView):
             self.model.removeRow(parent.row())
 
     def mousePressEvent(self, event):
-        """ Capture all mouse events to handle folder expansion/collapse. """
+        """
+        Handle mouse press events for folder expansion/collapse.
+
+        Captures left mouse clicks to toggle folder expansion state without
+        triggering item selection. Allows normal selection for non-folder rows.
+
+        Args:
+            event (QMouseEvent): The mouse press event.
+
+        Returns:
+            None
+        """
         if event.button() == Qt.LeftButton:
             idx = self.indexAt(event.pos())
             if idx.isValid():
@@ -374,10 +528,29 @@ class SnippetTable(QTreeView):
         return super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        """ Capture and ignore double-clicks """
+        """
+        Handle mouse double-click events.
+
+        Captures and discards double-click events to prevent default editor activation.
+
+        Args:
+            event (QMouseEvent): The mouse double-click event.
+
+        Returns:
+            None
+        """
         event.accept()
 
     def applyStyles(self):
+        """
+        Apply styling properties to the table and its widgets.
+
+        Sets fonts, sizes, and updates the stylesheet for consistent appearance
+        with the rest of the application.
+
+        Returns:
+            None
+        """
         logger.debug("Applying SnippetTable styles")
 
         # Font Sizing
@@ -394,7 +567,14 @@ class SnippetTable(QTreeView):
         self.update()
 
     def update_stylesheet(self):
-        """ This function handles updating the stylesheet. """
+        """
+        Apply the CSS stylesheet to table components.
+
+        Updates styling rules for the tree view and its related widgets.
+
+        Returns:
+            None
+        """
         self.setStyleSheet(""" 
 
         """)

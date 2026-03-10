@@ -165,3 +165,7 @@ images/Thumbs.db
 
 # Exclude build info
 config/build_info.py*
+
+# Exclude package files during build
+package/*
+linux-notes.md

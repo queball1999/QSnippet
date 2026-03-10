@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+LOG_DIR="/var/log/QSnippet"
+GROUP="qsnippet"
+
+# Create group if missing
+if ! getent group "$GROUP" > /dev/null; then
+    groupadd --system "$GROUP"
+fi
+
+# Create log directory
+mkdir -p "$LOG_DIR"
+
+# Set ownership and permissions
+chown root:"$GROUP" "$LOG_DIR"
+chmod 2775 "$LOG_DIR"
+
+# Ensure existing files inherit group
+find "$LOG_DIR" -type f -exec chown root:"$GROUP" {} \;
+find "$LOG_DIR" -type f -exec chmod 664 {} \;
+
+echo "QSnippet installed successfully."

@@ -5,16 +5,22 @@ import zipfile
 import platform, psutil
 import logging
 
+# Only import subprocess on non-Windows platforms
+# Windows uses os.startfile instead
+if sys.platform != "win32":
+    import subprocess
+
 # Import PySide6 Modules
 from PySide6.QtWidgets import (
-    QSystemTrayIcon, QMainWindow, QHBoxLayout, QWidget,
-    QMessageBox
+    QSystemTrayIcon, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
+    QMessageBox, QLabel, QPushButton
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer
 
 # Import custom modules
-from utils import FileUtils, RegUtils, AppLogger
+from utils import FileUtils, AppLogger
+
 from .widgets import SnippetEditor
 from .menus import *
 from .service import *
@@ -25,13 +31,21 @@ logger = logging.getLogger(__name__)
 
 
 class QSnippet(QMainWindow):
-    """
-    Main application window for QSnippet.
-    Handles UI, system tray, service lifecycle,
-    and user-facing actions.
-    """
+    def __init__(self, parent=None) -> None:
+        """
+        Initialize the main QSnippet application window.
 
-    def __init__(self, parent=None):
+        Configures window properties, application metadata, initializes the
+        snippet service, sets up UI components (editor, menus, toolbar, tray),
+        and starts the background service.
+
+        Args:
+            parent (Any): Optional parent object providing configuration and
+                application references.
+
+        Returns:
+            None
+        """
         logger.info("Initializing QSnippet Main Window")
         
         super().__init__()
@@ -42,6 +56,12 @@ class QSnippet(QMainWindow):
 
         self.setWindowTitle(self.parent.program_name)
         self.setWindowIcon(QIcon(self.parent.images["icon"]))
+
+        # Set application-level metadata
+        # This fixes app icon missing on linux taskbar
+        self.app.setWindowIcon(QIcon(self.parent.images["icon"]))
+        self.app.setApplicationName(self.parent.program_name)
+        self.app.setDesktopFileName(self.parent.program_name)
 
         width = self.parent.dimensions_windows["main"]["width"]
         height = self.parent.dimensions_windows["main"]["height"]
@@ -58,19 +78,86 @@ class QSnippet(QMainWindow):
 
         logger.info("QSnippet Main Window initialized successfully")
 
-    def initUI(self):
+    def initUI(self) -> None:
         """
         Initialize the main editor UI.
+
+        Creates the central widget layout, conditionally displays a Linux
+        compatibility notice, initializes the snippet editor, and optionally
+        shows the window at startup based on settings.
+
+        Returns:
+            None
         """
         logger.info("Initializing main UI")
 
         container = QWidget()
-        layout = QHBoxLayout(container)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Linux only notice with close button and GitHub issue link
+        notice_text = (
+            "Linux compatibility is currently limited. "
+            "<a href=\"https://github.com/queball1999/QSnippet/issues/new?title=Linux+Issue&body=Please+describe+the+issue\">"
+            "Report a bug</a> or <a href=\"https://github.com/queball1999/QSnippet/issues\">view existing issues</a>."
+        )
+
+        # Create a container widget for the notice
+        notice_container = QWidget()
+        notice_layout = QHBoxLayout(notice_container)
+        notice_layout.setContentsMargins(10, 5, 5, 5)
+
+        # Create the notice label with HTML
+        self.linux_notice_label = QLabel(notice_text)
+        self.linux_notice_label.setAlignment(Qt.AlignCenter)
+        self.linux_notice_label.setOpenExternalLinks(True)
+
+        # Create close button
+        close_button = QPushButton("✕")
+        close_button.setMaximumWidth(30)
+        close_button.setToolTip("Dismiss notice")
+        close_button.clicked.connect(notice_container.hide)
+
+        # Add widgets to layout
+        notice_layout.addWidget(self.linux_notice_label, 1)
+        notice_layout.addWidget(close_button)
+        notice_container.setLayout(notice_layout)
+
+        # Style the notice container
+        notice_container.setStyleSheet("""
+            QWidget {
+                padding: 5px;
+                background: #ffcc00;
+                color: #000000;
+            }
+            QLabel {
+                background: transparent;
+                color: #000000;
+            }
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #000000;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.1);
+                border-radius: 3px;
+            }
+        """)
+
+        self.linux_notice = notice_container
+        self.linux_notice.hide()
+        if sys.platform.startswith("linux"):
+            self.linux_notice.show()
 
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)
         self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
         
+        layout.addWidget(self.linux_notice)
         layout.addWidget(self.editor)
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -82,9 +169,15 @@ class QSnippet(QMainWindow):
             logger.debug("Showing UI at startup")
             self.show()
 
-    def init_menubar(self):
+    def init_menubar(self) -> None:
         """
-        Initialize application menu bar and connect actions.
+        Initialize the application menu bar and connect actions.
+
+        Creates the menu bar, connects its signals to handler methods,
+        and sets it on the main window.
+
+        Returns:
+            None
         """
         logger.info("Initializing menu bar")
 
@@ -98,23 +191,38 @@ class QSnippet(QMainWindow):
         self.menubar.show_settings.connect(self.show_settings_window)
         self.setMenuBar(self.menubar)
 
-    def init_toolbar(self):
+    def init_toolbar(self) -> None:
         """
-        Initialize toolbar.
+        Initialize the application toolbar.
+
+        Creates the toolbar and adds it to the main window.
+
+        Returns:
+            None
         """
         logger.info("Initializing toolbar")
 
         self.toolbar = ToolbarMenu(self)
         self.addToolBar(self.toolbar)
 
-    def init_tray_menu(self):
+    def init_tray_menu(self) -> None:
         """
-        Initialize the system tray icon and context menu.
+        Initialize the application toolbar.
+
+        Creates the toolbar and adds it to the main window.
+
+        Returns:
+            None
         """
         logger.info("Initializing system tray menu")
 
         try:
             icon_path = self.parent.images.get("icon")
+            
+            # Fix icon for windows os
+            if sys.platform == "win32":
+                icon_path = self.parent.images.get("win_icon")
+
             logger.debug("Tray icon path: %s", icon_path)
 
             icon = QIcon(icon_path)
@@ -140,60 +248,97 @@ class QSnippet(QMainWindow):
         except Exception:
             logger.exception("Failed to initialize system tray")
 
-    def run(self):
+    def run(self) -> None:
         """
         Run the Qt application event loop.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: Always raised when the Qt event loop exits.
         """
         logger.info("Starting Qt application event loop")
         sys.exit(self.app.exec())
 
     # Serivce Control
 
-    def start_service(self):
-        """ Start snippet service. """
+    def start_service(self) -> None:
+        """
+        Start the snippet service and update application state.
+
+        Returns:
+            None
+        """
         logger.info("Starting snippet service")
         self.snippet_service.start()
         self.state = "running"
-        self._update_status_bar("Running")
+        self.update_status_bar("Running")
 
-    def stop_service(self):
-        """ Stop snippet service. """
+    def stop_service(self) -> None:
+        """
+        Stop the snippet service and update application state.
+
+        Returns:
+            None
+        """
         logger.info("Stopping snippet service")
         self.snippet_service.stop()
         self.state = "stopped"
-        self._update_status_bar("Stopped")
+        self.update_status_bar("Stopped")
 
-    def pause_service(self):
-        """ Pause snippet service. """
+    def pause_service(self) -> None:
+        """
+        Pause the snippet service and update application state.
+
+        Returns:
+            None
+        """
         logger.info("Pausing snippet service")
         self.snippet_service.pause()
         self.state = "paused"
-        self._update_status_bar("Paused")
+        self.update_status_bar("Paused")
 
-    def resume_service(self):
-        """ Resume snippet service. """
+    def resume_service(self) -> None:
+        """
+        Resume the snippet service and update application state.
+
+        Returns:
+            None
+        """
         logger.info("Resuming snippet service")
         self.snippet_service.resume()
         self.state = "running"
-        self._update_status_bar("Running")
+        self.update_status_bar("Running")
 
-    def check_service_status(self):
+    def check_service_status(self) -> None:
         """
-        Update status bar based on service state.
+        Update the status bar based on the current service state.
+
+        Returns:
+            None
         """
         logger.debug("Checking service status")
 
         if self.snippet_service.active():
-            self._update_status_bar("Running")
+            self.update_status_bar("Running")
         elif self.state == "paused":
-            self._update_status_bar("Paused")
+            self.update_status_bar("Paused")
         elif self.state == "stopped":
-            self._update_status_bar("Stopped")
+            self.update_status_bar("Stopped")
         else:
-            self._update_status_bar("Error")
+            self.update_status_bar("Error")
 
-    def _update_status_bar(self, status: str):
-        """ Update the status bar message. """
+    def update_status_bar(self, status: str) -> None:
+        """
+        Update the status bar message when the editor is visible.
+
+        Args:
+            status (str): The service status string to display.
+
+        Returns:
+            None
+        """
         try:
             if self.editor.isVisible():
                 self.statusBar().showMessage(f"Service status: {status}")
@@ -201,21 +346,45 @@ class QSnippet(QMainWindow):
             logger.exception(f"Failed to update status bar: {e}")
 
     # Handlers
-    def handle_startup_signal(self, enabled: bool):
+    def handle_startup_signal(self, enabled: bool) -> None:
         """
-        Enable or disable startup at boot.
+        Enable or disable startup at boot and persist the setting.
+
+        Updates platform-specific autostart configuration and writes the
+        updated preference to the settings file.
+
+        Args:
+            enabled (bool): Whether startup at boot should be enabled.
+
+        Returns:
+            None
         """
         logger.info("Updating startup setting: %s", enabled)
-
+        
         try:
-            if enabled:
-                RegUtils.add_to_run_key(
-                    app_exe_path=self.parent.app_exe,
-                    entry_name="QSnippet",
-                )
-            else:
-                RegUtils.remove_from_run_key(entry_name="QSnippet")
+            if sys.platform == "win32":
+                from utils.reg_utils import RegUtils
 
+                if enabled:
+                    RegUtils.add_to_run_key(
+                        app_exe_path=self.parent.app_exe,
+                        entry_name="QSnippet",
+                    )
+                else:
+                    RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+            elif sys.platform.startswith("linux") is not None:
+                from utils.linux_utils import LinuxUtils
+
+                if enabled:
+                    LinuxUtils.enable_autostart()
+                else:
+                    LinuxUtils.disable_autostart()
+                    
+            else:
+                logger.info("Cannot process auto-start change. This operating system is currently unsupported.")
+                return
+            
             self.parent.skip_reg = False
             self.parent.settings["general"]["startup_behavior"]["start_at_boot"]["value"] = enabled
             FileUtils.write_yaml(
@@ -228,9 +397,15 @@ class QSnippet(QMainWindow):
         except Exception:
             logger.exception("Failed to update startup setting")
 
-    def handle_show_ui_signal(self, checked: bool):
+    def handle_show_ui_signal(self, checked: bool) -> None:
         """
-        Persist show UI at startup preference.
+        Persist the show UI at startup preference.
+
+        Args:
+            checked (bool): Whether the UI should be shown at application start.
+
+        Returns:
+            None
         """
         logger.info("Updating show UI at startup: %s", checked)
 
@@ -240,9 +415,12 @@ class QSnippet(QMainWindow):
             self.parent.settings,
         )
 
-    def handle_import_action(self):
+    def handle_import_action(self) -> None:
         """
-        Import snippets via dialog and refresh UI.
+        Import snippets via dialog and refresh service and UI.
+
+        Returns:
+            None
         """
         logger.info("Importing snippets via menu action")
 
@@ -253,9 +431,12 @@ class QSnippet(QMainWindow):
         self.snippet_service.refresh()
         self.editor.load_snippets()
 
-    def handle_export_action(self):
+    def handle_export_action(self) -> None:
         """
-        Export snippets via dialog.
+        Export snippets via dialog and refresh service and UI.
+
+        Returns:
+            None
         """
         logger.info("Exporting snippets via menu action")
 
@@ -266,11 +447,14 @@ class QSnippet(QMainWindow):
         self.snippet_service.refresh()
         self.editor.load_snippets()
 
-    def handle_rename_action(self):
+    def handle_rename_action(self) -> None:
         """
-        Docstring for handle_rename_action
-        
-        :param self: Description
+        Handle the rename action triggered by the menu.
+
+        Invokes the editor rename action handler and logs failures.
+
+        Returns:
+            None
         """
         logger.info("Rename action triggered")
         try:
@@ -278,9 +462,15 @@ class QSnippet(QMainWindow):
         except Exception as e:
             logger.exception(f"Failed to emit rename action signal: {e}")
 
-    def handle_collect_logs(self):
+    def handle_collect_logs(self) -> None:
         """
         Collect logs and configuration files into a ZIP archive.
+
+        Writes log files and configuration files to a timestamped archive in the
+        user's Downloads directory and optionally opens the folder on completion.
+
+        Returns:
+            None
         """
         logger.info("Collecting logs")
 
@@ -344,9 +534,18 @@ class QSnippet(QMainWindow):
                 "An unexpected error occurred while collecting logs.",
             )
 
-    def handle_log_level(self, level: str):
+    def handle_log_level(self, level: str) -> None:
         """
-        Update application log level and persist to settings.
+        Update application log level and persist to configuration.
+
+        Updates the root logger level, saves the selected log level to the
+        configuration file, and reinitializes the application logger.
+
+        Args:
+            level (str): The log level name to apply.
+
+        Returns:
+            None
         """
         logger.info("Updating log level to %s", level)
 
@@ -381,9 +580,14 @@ class QSnippet(QMainWindow):
                 "Failed to update log level.",
             )
 
-    def handle_show_info(self):
+    def handle_show_info(self) -> None:
         """
-        Display About dialog.
+        Display the About dialog.
+
+        Builds application information and shows it in a Qt message box.
+
+        Returns:
+            None
         """
         logger.info("Showing application info dialog")
 
@@ -403,8 +607,18 @@ class QSnippet(QMainWindow):
         box.setText(info["html"])
         box.exec()
 
-    def build_about_info(self):
-        """Return dict with 'html' and 'text' fields or False on failure."""
+    def build_about_info(self) -> dict | bool:
+        """
+        Build application "About" information.
+
+        Generates HTML and plain text representations including build info,
+        support contacts, key file paths, runtime environment details, and
+        system resource information.
+
+        Returns:
+            dict | bool: A dictionary with "html" and "text" keys on success,
+                or False on failure.
+        """
         try:
             # Import build date info
             try:
@@ -515,9 +729,12 @@ class QSnippet(QMainWindow):
             logging.exception("Failed to build about info")
             return False
         
-    def show_settings_window(self):
+    def show_settings_window(self) -> None:
         """
-        Show settings window.
+        Show the settings window dialog.
+
+        Returns:
+            None
         """
         logger.info("Showing settings window")
 
@@ -530,9 +747,18 @@ class QSnippet(QMainWindow):
         )
         self._settings_dialog.exec()
 
-    def save_settings(self, settings: dict):
+    def save_settings(self, settings: dict) -> None:
         """
         Save current settings to file.
+
+        Updates the in-memory settings reference and writes the settings
+        to the settings YAML file.
+
+        Args:
+            settings (dict): The updated settings dictionary to persist.
+
+        Returns:
+            None
         """
         logger.info("Saving settings to file")
 
@@ -544,16 +770,30 @@ class QSnippet(QMainWindow):
             self.parent.settings,
         )
 
+        # Refresh the tray settings
+        self.tray.contextMenu().refresh()
+
     def unset_skip_reg(self):
         """
-        Reset registry skip flag.
+        Reset the registry skip flag.
+
+        Returns:
+            None
         """
         logger.debug("Resetting skip_reg flag")
         self.parent.skip_reg = False
 
-    def on_tray_icon_activated(self, event):
+    def on_tray_icon_activated(self, event) -> None:
         """
-        Handle tray icon activation.
+        Handle system tray icon activation events.
+
+        Shows or focuses the main window when the tray icon is triggered.
+
+        Args:
+            event (Any): The tray activation event value.
+
+        Returns:
+            None
         """
         if event == QSystemTrayIcon.Trigger:
             if not self.isVisible():
@@ -562,26 +802,46 @@ class QSnippet(QMainWindow):
                 self.raise_()
                 self.activateWindow()
 
-    def show_window(self):
+    def show_window(self) -> None:
         """
-        Show main application window.
+        Show the main application window and trigger notice checks.
+
+        Returns:
+            None
         """
         logger.info("Showing main window")
         self.show()
         QTimer.singleShot(500, self.parent.check_notices)
 
-    def exit(self):
+    def exit(self) -> None:
         """
-        Exit application cleanly.
+        Exit the application cleanly.
+
+        Stops the snippet service, hides the tray icon, and exits the process.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: Always raised when exiting the application.
         """
         logger.info("Exiting QSnippet")
         self.stop_service()
         self.tray.hide()
         sys.exit()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         """
-        Override close event to hide window instead of exiting.
+        Handle window close events by hiding the window.
+
+        Overrides the default close behavior to ignore the event and hide the
+        window instead of quitting.
+
+        Args:
+            event (Any): The Qt close event.
+
+        Returns:
+            None
         """
         logger.debug("Close event intercepted; hiding window")
         event.ignore()

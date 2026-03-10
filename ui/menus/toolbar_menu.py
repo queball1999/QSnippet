@@ -8,11 +8,29 @@ class ToolbarMenu(QToolBar):
     to common actions such as creating, saving, and deleting snippets.
     """
     def __init__(self, parent=None):
+        """
+        Initialize the ToolbarMenu with standard toolbar actions.
+
+        Args:
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__("Main Toolbar", parent)
         self.parent = parent
         self.init_actions()
 
     def init_actions(self):
+        """
+        Initialize all toolbar actions with icons and tooltips.
+
+        Creates and adds actions for home, new snippet, save, and delete operations
+        with appropriate icons and keyboard shortcuts.
+
+        Returns:
+            None
+        """
         self.editor = self.parent.editor
 
         home_icon = QIcon.fromTheme("go-home")

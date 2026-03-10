@@ -9,19 +9,37 @@ from .file_utils import FileUtils
 logger = logging.getLogger(__name__)
 
 
+
 class SnippetDB:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path) -> None:
+        """
+        Initialize the SnippetDB instance.
+
+        Establishes a SQLite connection, ensures required tables and indexes
+        exist, and seeds the database with default snippets if empty.
+
+        Args:
+            db_path (Path): Path to the SQLite database file.
+
+        Returns:
+            None
+        """
         logger.info("Initializing SnippetDB")
         self.db_path = db_path
         logger.debug(f"SQLite Path: {db_path}")
         self.conn = sqlite3.connect(self.db_path)
-        self._create_table()
-        self._create_indexes()
-        self._seed_empty_db()
+        self.create_table()
+        self.create_indexes()
+        self.seed_empty_db()
         logger.info("SnippetDB initialized successfully")
 
-    def _create_table(self):
-        """Ensure the table exists."""
+    def create_table(self) -> None:
+        """
+        Create the snippets table if it does not exist.
+
+        Returns:
+            None
+        """
         logger.info("Ensuring snippet table exists in database")
         try:
             with self.conn:
@@ -43,8 +61,13 @@ class SnippetDB:
             logger.error(f"An error occured while ensuring snippet table exists in database: {e}")
             return None
 
-    def _create_indexes(self):
-        """Create indexes for faster lookups"""
+    def create_indexes(self) -> None:
+        """
+        Create database indexes to improve query performance.
+
+        Returns:
+            None
+        """
         logger.info("Ensuring indexes exists in database")
         try:
             with self.conn:
@@ -58,8 +81,13 @@ class SnippetDB:
             logger.error(f"An error occured while ensuring indexes exists in database: {e}")
             return None
 
-    def _seed_empty_db(self):
-        """Seed the database with default snippets if it is empty."""
+    def seed_empty_db(self) -> None:
+        """
+        Seed the database with default snippets if it is empty.
+
+        Returns:
+            None
+        """
         logger.info("Checking to see if the database needs to be seeded.")
         try:
             cur = self.conn.cursor()
@@ -110,9 +138,17 @@ class SnippetDB:
     # CRUD Operations
     def insert_snippet(self, entry: Dict[str, Any]) -> bool:
         """
-        Insert a new snippet or update existing. 
-        Returns True if new, False if updated.
-        Returns None if no valid entry id is provided or an error occured.
+        Insert a new snippet or update an existing one.
+
+        If an entry with the same id exists, it is updated. Otherwise,
+        a new snippet is inserted. Conflicts on trigger result in an update.
+
+        Args:
+            entry (Dict[str, Any]): Snippet data to insert or update.
+
+        Returns:
+            bool | None: True if a new snippet was created, False if updated,
+                or None if an error occurred.
         """
         logger.info("Inserting snippet into the databse.")
         logger.debug(f"Entry: {entry}")
@@ -167,9 +203,16 @@ class SnippetDB:
             logger.error(f"An error occured while inserting a snippet into the database: {e}")
             return None
 
-    def delete_snippet(self, snippet_id: id):
-        """ Delete a snippet from the database. """
-        # FIXME: This needs to be updated to id!
+    def delete_snippet(self, snippet_id: id) -> None:
+        """
+        Delete a snippet from the database.
+
+        Args:
+            snippet_id (id): The identifier of the snippet to delete.
+
+        Returns:
+            None
+        """
         logger.info("Deleting snippet from the database.")
         logger.debug(f"Snippet ID: {snippet_id}")
 
@@ -183,7 +226,13 @@ class SnippetDB:
             return None
 
     def get_all_snippets(self) -> List[Dict[str, Any]]:
-        """ Get all snippets from the database. """
+        """
+        Retrieve all snippets from the database.
+
+        Returns:
+            List[Dict[str, Any]] | None: A list of snippet dictionaries,
+                or None if an error occurred.
+        """
         logger.info("Fetching all snippets from the database.")
 
         try:
@@ -207,7 +256,16 @@ class SnippetDB:
             return None
 
     def get_snippet(self, snippet_id: int) -> Dict[str, Any]:
-        """ Get single snippets from the database. """
+        """
+        Retrieve a single snippet from the database.
+
+        Args:
+            snippet_id (int): The identifier used to query the snippet.
+
+        Returns:
+            Dict[str, Any] | None: The snippet dictionary if found,
+                an empty dictionary if not found, or None if an error occurred.
+        """
         logger.info("Fetching snippet from the database.")
         logger.debug(f"Snippet ID: {snippet_id}")
 
@@ -230,7 +288,13 @@ class SnippetDB:
             return None
     
     def get_random_snippet(self) -> Dict[str, Any]:
-        """Return a random enabled snippet, or empty dict if none exist."""
+        """
+        Retrieve a random enabled snippet.
+
+        Returns:
+            Dict[str, Any] | None: A randomly selected snippet dictionary,
+                an empty dictionary if none exist, or None if an error occurred.
+        """
         logger.info("Fetching random snippet from the database.")
 
         try:
@@ -255,10 +319,16 @@ class SnippetDB:
             logger.error(f"An error occured while retrieving a random snippet from the database: {e}")
             return None
     
-    def rename_folder(self, old_folder: str, new_folder: str):
-        """ 
-        Rename a folder within the database provided the old and new name. 
-        This updates every entry within the old folder.
+    def rename_folder(self, old_folder: str, new_folder: str) -> None:
+        """
+        Rename a folder for all associated snippets.
+
+        Args:
+            old_folder (str): The current folder name.
+            new_folder (str): The new folder name.
+
+        Returns:
+            None
         """
         logger.info("Renaming a folder within the database.")
         logger.debug(f"OLD Folder: {old_folder} - NEW Folder {new_folder}")
@@ -271,8 +341,16 @@ class SnippetDB:
             logger.error(f"An error occured while renaming a folder within the database: {e}")
             return None
         
-    def delete_folder(self, folder: str):
-        """ Delete a folder within the database given its name. """
+    def delete_folder(self, folder: str) -> None:
+        """
+        Delete all snippets within a specified folder.
+
+        Args:
+            folder (str): The folder name to delete.
+
+        Returns:
+            None
+        """
         logger.info("Deleting a folder within the database.")
         logger.debug(f"Folder {folder}")
 
@@ -285,7 +363,12 @@ class SnippetDB:
             return None
 
     def get_all_folders(self) -> List[str]:
-        """Return a list of distinct folder names."""
+        """
+        Retrieve all distinct folder names.
+
+        Returns:
+            List[str] | None: A list of folder names, or None if an error occurred.
+        """
         logger.info("Fetching all folders within the database.")
 
         try:
@@ -301,11 +384,17 @@ class SnippetDB:
             logger.error(f"An error occured while fetching all folders from the database: {e}")
             return None
 
-    def rename_snippet(self, snippet_id: int, new_label: str):
+    def rename_snippet(self, snippet_id: int, new_label: str) -> None:
         """
         Rename a snippet by updating its label.
+
+        Args:
+            snippet_id (int): The identifier of the snippet.
+            new_label (str): The new label for the snippet.
+
+        Returns:
+            None
         """
-        # FIXME: This needs to be updated to id!
         logger.info("Renaming a snippet within the database.")
         logger.debug(f"Snippet ID: {snippet_id} | New Label: {new_label}")
 
@@ -320,8 +409,17 @@ class SnippetDB:
         
     def search_snippets(self, keyword: str) -> List[Dict[str, Any]]:
         """
-        Search for snippets matching a keyword in label, snippet,
-        trigger, or tags.
+        Search for snippets matching a keyword.
+
+        Performs a case-insensitive search across label, snippet,
+        trigger, and tags fields.
+
+        Args:
+            keyword (str): The search keyword.
+
+        Returns:
+            List[Dict[str, Any]] | None: A list of matching snippets,
+                or None if an error occurred.
         """
         logger.info("Searching snippets in the database.")
         logger.debug(f"Keyword: {keyword}")
@@ -346,8 +444,13 @@ class SnippetDB:
     
     def get_all_tags(self) -> list[str]:
         """
-        Return a list of all distinct tags across snippets.
+        Retrieve all distinct tags across snippets.
+
         Tags are normalized to lowercase and split by comma.
+
+        Returns:
+            list[str] | None: A sorted list of unique tags,
+                or None if an error occurred.
         """
         logger.info("Fetching all tags from the database.")
 
@@ -370,9 +473,15 @@ class SnippetDB:
             logger.error(f"An error occured while fetching tags from the database: {e}")
             return None
     
-    def delete_tag(self, tag: str):
+    def delete_tag(self, tag: str) -> None:
         """
         Remove a tag from all snippets that contain it.
+
+        Args:
+            tag (str): The tag to remove.
+
+        Returns:
+            None
         """
         logger.info("Deleting tag from snippets.")
         logger.debug(f"Tag: {tag}")
@@ -394,9 +503,15 @@ class SnippetDB:
             return None
 
     # Import / Export
-    def export_to_yaml(self, yaml_path: Path):
+    def export_to_yaml(self, yaml_path: Path) -> None:
         """
         Export all snippets to a YAML file.
+
+        Args:
+            yaml_path (Path): The destination YAML file path.
+
+        Returns:
+            None
         """
         logger.info("Exporting snippets to YAML.")
         logger.debug(f"YAML Path: {yaml_path}")
@@ -409,9 +524,15 @@ class SnippetDB:
             logger.error(f"An error occured while exporting your snippets: {e}")
             return None
 
-    def import_from_yaml(self, yaml_path: Path):
+    def import_from_yaml(self, yaml_path: Path) -> None:
         """
         Import snippets from a YAML file into the database.
+
+        Args:
+            yaml_path (Path): The source YAML file path.
+
+        Returns:
+            None
         """
         logger.info("Importing snippets from YAML.")
         logger.debug(f"YAML Path: {yaml_path}")
@@ -432,6 +553,9 @@ class SnippetDB:
     def close(self):
         """
         Close the database connection.
+
+        Returns:
+            None
         """
         logger.info("Closing database connection.")
         try:

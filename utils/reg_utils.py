@@ -1,9 +1,10 @@
 import logging
-import platform
+import sys
+import os
 
 logger = logging.getLogger(__name__)
 
-if platform.system() == "Windows":
+if sys.platform == "win32":
     import winreg
 else:
     winreg = None  # dummy placeholder
@@ -11,12 +12,28 @@ else:
 logger = logging.getLogger(__name__)
 
 
+
 class RegUtils:
     @staticmethod
-    def add_to_run_key(app_exe_path: str, entry_name: str = "QSnippet"):
-        if winreg is None:
+    def add_to_run_key(app_exe_path: str, entry_name: str = "QSnippet") -> None:
+        """
+        Add the application to the current user's Windows Run registry key.
+
+        Creates or updates an entry under
+        HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
+        so the application starts automatically when the user logs in.
+
+        Args:
+            app_exe_path (str): Full path to the application executable.
+            entry_name (str): Registry entry name.
+
+        Returns:
+            None
+        """
+        if winreg is None or sys.platform != "win32":
             logger.warning("Registry functions are only available on Windows.")
             return
+        
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as run_key:
@@ -27,10 +44,24 @@ class RegUtils:
             logger.error(f"Failed to add registry key {entry_name}: {e}")
 
     @staticmethod
-    def remove_from_run_key(entry_name: str = "QSnippet"):
-        if winreg is None:
+    def remove_from_run_key(entry_name: str = "QSnippet") -> None:
+        """
+        Remove the application from the current user's Windows Run registry key.
+
+        Deletes the specified entry from
+        HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
+        to disable automatic startup at login.
+
+        Args:
+            entry_name (str): Registry entry name.
+
+        Returns:
+            None
+        """
+        if winreg is None or sys.platform != "win32":
             logger.warning("Registry functions are only available on Windows.")
             return
+        
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as run_key:
@@ -43,9 +74,19 @@ class RegUtils:
 
     @staticmethod
     def is_in_run_key(entry_name: str = "QSnippet") -> bool:
-        if winreg is None:
+        """
+        Check whether the application is registered in the Windows Run key.
+
+        Args:
+            entry_name (str): Registry entry name.
+
+        Returns:
+            bool: True if the entry exists in the Run key, otherwise False.
+        """
+        if winreg is None or sys.platform != "win32":
             logger.warning("Registry functions are only available on Windows.")
             return False
+        
         key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as run_key:

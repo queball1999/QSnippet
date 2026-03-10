@@ -8,7 +8,16 @@ from utils.config_utils import ConfigLoader, SettingsLoader
 
 
 def write_yaml(path: Path, data: dict):
-    """Helper to write YAML data to disk."""
+    """
+    Helper function to write YAML data to a file.
+
+    Args:
+        path (Path): The file path to write to.
+        data (dict): The data dictionary to serialize as YAML.
+
+    Returns:
+        None
+    """
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f)
 
@@ -52,7 +61,7 @@ def test_config_loader_emits_signal_on_load(temp_config_file, mock_qt_app):
     loader.configChanged.connect(spy)
 
     # Manually reload
-    loader._load_config()
+    loader.load_config()
 
     spy.assert_called_once_with(data)
 
@@ -65,7 +74,7 @@ def test_config_loader_reload_on_file_change(temp_config_file, mock_qt_app):
     loader = ConfigLoader(temp_config_file)
 
     write_yaml(temp_config_file, {"a": 2})
-    loader._on_file_changed(str(temp_config_file))
+    loader.on_file_changed(str(temp_config_file))
 
     assert loader.config["a"] == 2
 
@@ -88,6 +97,11 @@ def test_config_loader_stop(temp_config_file, mock_qt_app):
 
 # SettingsLoader tests
 def test_settings_loader_initial_load(temp_settings_file, mock_qt_app):
+    """
+    Test that SettingsLoader correctly loads and wraps YAML settings.
+
+    Verifies that settings are loaded and wrapped with type information.
+    """
     data = {
         "general": {
             "start_at_boot": True
@@ -119,6 +133,11 @@ def test_settings_loader_empty_yaml(temp_settings_file, mock_qt_app):
 
 
 def test_settings_loader_emits_signal_on_load(temp_settings_file, mock_qt_app):
+    """
+    Test that settingsChanged signal is emitted on load.
+
+    Verifies that the signal includes wrapped settings with type information.
+    """
     data = {
         "general": {
             "foo": "bar"
@@ -131,7 +150,7 @@ def test_settings_loader_emits_signal_on_load(temp_settings_file, mock_qt_app):
     spy = MagicMock()
     loader.settingsChanged.connect(spy)
 
-    loader._load_settings()
+    loader.load_settings()
 
     spy.assert_called_once_with({
         "general": {
@@ -144,6 +163,11 @@ def test_settings_loader_emits_signal_on_load(temp_settings_file, mock_qt_app):
 
 
 def test_settings_loader_reload_on_file_change(temp_settings_file, mock_qt_app):
+    """
+    Test that SettingsLoader reloads when the settings file changes.
+
+    Verifies that file changes trigger reload with updated values.
+    """
     write_yaml(temp_settings_file, {
         "general": {
             "enabled": False
@@ -156,7 +180,7 @@ def test_settings_loader_reload_on_file_change(temp_settings_file, mock_qt_app):
             "enabled": True
         }
     })
-    loader._on_file_changed(str(temp_settings_file))
+    loader.on_file_changed(str(temp_settings_file))
 
     assert loader.settings["general"]["enabled"]["value"] is True
 

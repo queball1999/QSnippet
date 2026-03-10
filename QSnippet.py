@@ -3,21 +3,9 @@ import os
 import logging
 from pathlib import Path
 import psutil, tempfile
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QSize, QTimer
-from PySide6.QtGui import QFont, QIcon
 
-# Load RegUtils only if we detect Windows
-if sys.platform == "win32":
-    from utils.reg_utils import RegUtils
-else:
-    RegUtils = None
-
-# Import utility and UI modules
-from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger
-from ui import QSnippet
-from ui.widgets import AppMessageBox
-from ui.widgets.notice_carousel import NoticeCarouselDialog
+# Import utility modules (UI imports moved to __init__ to avoid import errors in test environments)
+from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
 
 # Import build info
 try:
@@ -30,11 +18,50 @@ except ImportError:
 # Setup logging
 logger = logging.getLogger(__name__)
 
+"""
+Name: QSnippet
+
+Description: Snippet manager tool.
+
+Author: Written by Quynn Bell
+"""
 
 class main():
-    def __init__(self):
-        # Main Program Execution
-        # NOTE: logging is NOT fully initialized until after init_logger
+    def __init__(self) -> None:
+        """
+        Initialize the main application.
+
+        Performs startup initialization including creating global variables,
+        loading configuration and settings, initializing logging, verifying
+        system requirements, checking for existing instances, scaling UI
+        configuration, optionally displaying notices, and launching the program.
+
+        NOTE: logging is NOT fully initialized until after init_logger
+
+        Returns:
+            None
+        """
+        # Import PySide6 here to avoid import errors in test environments without display
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtCore import QSize, QTimer
+        from PySide6.QtGui import QFont, QIcon
+
+        # Import UI modules here (after PySide6 to avoid import errors in test environments)
+        from ui.window import QSnippet
+        from ui.widgets import AppMessageBox
+        from ui.widgets.notice_carousel import NoticeCarouselDialog
+
+        # Store as instance variables for access in other methods
+        self.QApplication = QApplication
+        self.QMessageBox = QMessageBox
+        self.QSize = QSize
+        self.QTimer = QTimer
+        self.QFont = QFont
+        self.QIcon = QIcon
+        self.QSnippet = QSnippet
+        self.AppMessageBox = AppMessageBox
+        self.NoticeCarouselDialog = NoticeCarouselDialog
+
         self.create_global_variables()
         self.load_config()      # config.yaml
         self.load_settings()    # settings.yaml
@@ -42,9 +69,10 @@ class main():
         self.fix_image_paths()
 
         logger.info("Application bootstrap complete")
-        
-        self.message_box = AppMessageBox(icon_path=self.images["icon"])
-        
+
+        self.message_box = self.AppMessageBox(icon_path=self.images["icon"])
+
+        self.check_sys_requirements()  # Check system requirements
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
 
@@ -52,14 +80,28 @@ class main():
         # Default to True if setting missing
         if self.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
             # Use time to avoid interfering with main thread
-            QTimer.singleShot(1000, self.check_notices)
+            self.QTimer.singleShot(1000, self.check_notices)
 
         self.start_program()    # start program
         
-    def create_global_variables(self):
+    def create_global_variables(self) -> None:
+        """
+        Initialize global variables and application paths.
+
+        Sets up process metadata, screen geometry references, directory paths,
+        file paths, and loads the merged configuration from default and user YAML files.
+
+        Returns:
+            None
+        """
+        self.REQUIRED_IMAGE_FILES = [
+            "QSnippet.ico",
+            "QSnippet.icns",
+        ]
+
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
-        self.app = QApplication.instance()  # Use the existing QApplication instance
+        self.app = self.QApplication.instance()  # Use the existing QApplication instance
         self.clipboard = self.app.clipboard()
         self.screen_geometry = self.app.primaryScreen().geometry()
         self.screen_width = self.screen_geometry.width()
@@ -76,13 +118,12 @@ class main():
 
         self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
-        self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
-        self.images_path = os.path.join(self.resource_dir, "images")    # set images to resource_dir so we can access within binary
+        self.images_path = FileUtils.resolve_images_path(self)  # dynamically fetch images directory
+
         # Ensure directories exist
-        self.ensure_directories_exist([
+        sys_utils.ensure_directories_exist([
             self.logs_dir,
-            self.documents_dir,
             self.app_data_dir,
             self.images_path
         ])
@@ -106,7 +147,7 @@ class main():
 
         # Use this to ensure files exist
         # Define files in a list of dicts with "file" and "function" keys
-        self.ensure_files_exist([
+        sys_utils.ensure_files_exist([
             {
                 "file": self.snippet_db_file,
                 "function": lambda p=self.snippet_db_file:
@@ -147,44 +188,20 @@ class main():
         self.snippet_db = SnippetDB(self.snippet_db_file)
 
         logger.info("Global variables created")
-
-    def ensure_directories_exist(self, directories: list = []):
-        """
-        Ensures that all directories in the given list exist.
-        If a directory does not exist, it is created.
-
-        :param directories: List of directory paths to check/create
-        """
-        for directory in directories:
-            try:
-                os.makedirs(directory, exist_ok=True)
-            except Exception as e:
-                logging.critical(f"Failed to make directory {directory}! Error: {e}")
-                raise ValueError("Failed to make directory {directory}! "
-                                 f"Please contact application vendor. Error: {e}")
-            
-    def ensure_files_exist(self, files: list = []):
-        """
-        Ensures all specified files exist. If a file is missing,
-        its corresponding creation function is called.
-        
-        :param files: List of dicts like { "file": Path, "function": callable }
-        """
-        for entry in files:
-            path = entry.get("file")
-            create_fn = entry.get("function")
-
-            if not path.exists():
-                logger.warning(f"Missing file: {path}. Creating default...")
-                try:
-                    create_fn(path)
-                    logger.info(f"Created default file: {path}")
-                except Exception as e:
-                    logger.critical(f"Failed to create {path}: {e}")
-                    raise ValueError(f"Failed to create required file: {path}\n\n{e}")
     
-    def init_logger(self):
-        """ Initialize the logger class """
+    def init_logger(self) -> None:
+        """
+        Initialize the application logger.
+
+        Creates an AppLogger instance using the configured log file path and
+        log level.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If the logger cannot be initialized.
+        """
         try:
             logging.info("Setting up Logger")
             self.logger = AppLogger(log_filepath=self.log_path, log_level=self.log_level)
@@ -193,7 +210,19 @@ class main():
             raise ValueError(f"Could not initialize logger class! Please try running as root and if the issue persists, contact the application vendor.\nError: {e}")
 
     def flatten_yaml(self, items: dict) -> bool:
-        """ Flatten yaml to dict and assign to attributes. """
+        """
+        Flatten a nested YAML dictionary into instance attributes.
+
+        Assigns each top-level key in the provided dictionary as an attribute
+        on the instance. For nested dictionaries, creates flattened attributes
+        by prefixing keys with their parent section name.
+
+        Args:
+            items (dict): The dictionary to flatten and assign to attributes.
+
+        Returns:
+            bool: True if flattening succeeds, False otherwise.
+        """
         try:
             # Assign every top-level config key as an attribute on self
             # e.g. config['program_name'] → self.program_name
@@ -215,25 +244,46 @@ class main():
             logger.error("Failed to flatten config")
             return False
 
-    def load_config(self):
-        """ 
-        This function loads a yaml config file 
-        and flattens its entries into attributes. 
+    def load_config(self) -> None:
+        """
+        Load and monitor the configuration YAML file.
+
+        Ensures the configuration file exists, initializes a ConfigLoader to
+        watch for changes, and flattens the loaded configuration into instance
+        attributes.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If the configuration file is missing.
         """
         # Check for config
         if not self.config_file.exists():
-            QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
+            self.QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
             sys.exit(1)
 
         # Setup Config file watcher
         self.loader = ConfigLoader(self.config_file, parent=self)
-        self.loader.configChanged.connect(self._on_config_updated)
+        self.loader.configChanged.connect(self.on_config_updated)
         self.cfg = self.loader.config
         self.flatten_yaml(items=self.cfg)
 
-    def _on_config_updated(self, config):
-        """ When config update is detected, refresh config variable and UI elements. """
+    def on_config_updated(self, config) -> None:
+        """
+        Handle updates to the configuration file.
+
+        Refreshes the stored configuration, re-flattens attributes, rescales
+        UI configuration, and reapplies styles to the editor when changes are detected.
+
+        Args:
+            config (dict): The updated configuration dictionary.
+
+        Returns:
+            None
+        """
         logger.info("Config reloaded.")
+
         if config:
             self.cfg = config
             self.flatten_yaml()  # Flatten config again to refresh attributes.
@@ -242,43 +292,51 @@ class main():
             self.app.processEvents()
         # Should also fire off UI refresh, etc to ensure the UI matches the config
 
-    def load_settings(self):
-        """ This function loads a yaml settings file and flattens its entries into attributes. """
+    def load_settings(self) -> None:
+        """
+        Load and monitor the settings YAML file.
+
+        Ensures the settings file exists, initializes a SettingsLoader to
+        watch for changes, flattens the loaded settings into instance
+        attributes, and applies startup registration behavior.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If the settings file is missing.
+        """
         # Check for config
         if not self.settings_file.exists():
-            QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
+            self.QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
             sys.exit(1)
 
         # Setup Config file watcher
         self.loader = SettingsLoader(self.settings_file, parent=self)
-        self.loader.settingsChanged.connect(self._on_settings_updated)
+        self.loader.settingsChanged.connect(self.on_settings_updated)
         self.settings = self.loader.settings
         self.flatten_yaml(items=self.settings)
         self.handle_start_up_reg()
 
-    def _on_settings_updated(self, config):
-        """ When config update is detected, refresh config variable and UI elements. """
+    def on_settings_updated(self, config) -> None:
+        """
+        Handle updates to the settings file.
+
+        Refreshes the stored settings, re-flattens attributes, and updates
+        startup registration behavior when changes are detected.
+
+        Args:
+            config (dict): The updated settings dictionary.
+
+        Returns:
+            None
+        """
         logger.info("Settings reloaded.")
+
         if config:
             self.settings = config
             self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
             self.handle_start_up_reg()
-
-    def handle_start_up_reg(self):
-        """ Based on settings, set the correct registry key for startup """
-        if self.skip_reg or RegUtils is None:
-            return
-        
-        if (
-            not RegUtils.is_in_run_key("QSnippet") and 
-            self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-            ):
-            RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-        elif (
-            RegUtils.is_in_run_key("QSnippet") and 
-            not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-            ):
-            RegUtils.remove_from_run_key(entry_name="QSnippet")
 
     def scale_ui_cfg(self):
         """ 
@@ -291,50 +349,82 @@ class main():
         self.dimensions_windows = self.scale_dict_sizes(size_dict=self.dimensions_windows, screen_geometry=self.screen_geometry)
         
         # Buttons
-        self.mini_button_size = QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
-        self.small_button_size = QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
-        self.medium_button_size = QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
-        self.large_button_size = QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
+        self.mini_button_size = self.QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
+        self.small_button_size = self.QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
+        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
+        self.large_button_size = self.QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
         
         # Font Sizes
-        self.small_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
-        self.small_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["small"], QFont.Bold)
-        self.medium_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
-        self.medium_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], QFont.Bold)
-        self.large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
-        self.large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["large"], QFont.Bold)
-        self.extra_large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
-        self.extra_large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], QFont.Bold)
-        self.humongous_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
-        self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
+        self.small_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
+        self.small_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"], self.QFont.Bold)
+        self.medium_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
+        self.medium_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], self.QFont.Bold)
+        self.large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
+        self.large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"], self.QFont.Bold)
+        self.extra_large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
+        self.extra_large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], self.QFont.Bold)
+        self.humongous_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
+        self.humongous_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], self.QFont.Bold)
 
         # Widget Sizes
-        self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
+        self.small_toggle_size = self.QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
 
-    def fix_image_paths(self):
-        """ This loops through images and appends the right path. """
+    def fix_image_paths(self) -> None:
+        """
+        Update image paths to use the resolved images directory.
+
+        Prefixes configured image filenames with the absolute images path.
+
+        Returns:
+            None
+        """
         for image in self.images:
             old_val = self.images[image]
             self.images[image] = os.path.join(self.images_path, old_val)
+            
+        logger.debug(f"Images Path: {self.images_path}")
 
-    def scale_width(self, original_width, screen_geometry):
-        """ Scale a width value from the 1920 reference to the current screen. """
+    def scale_width(self, original_width, screen_geometry) -> int:
+        """
+        Scale a width value relative to the reference screen width.
+
+        Args:
+            original_width (int): The original width based on the reference resolution.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            int: The scaled width value.
+        """
         ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         return int(original_width * ratio)
 
     def scale_height(self, original_height, screen_geometry):
-        """ Scale a height value from the 1080 reference to the current screen. """
+        """
+        Scale a height value relative to the reference screen height.
+
+        Args:
+            original_height (int): The original height based on the reference resolution.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            int: The scaled height value.
+        """
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
         return int(original_height * ratio)
     
     def scale_dict_sizes(self, size_dict: dict, screen_geometry):
         """
-        Given a dict of widget specs:
-        {
-            "name": {"width": W, "height": H, "radius": R},
-            ...
-        }
-        returns a new dict with each dimension scaled to the current screen.
+        Scale a dictionary of size specifications to the current screen.
+
+        Each entry containing width, height, and optional radius values
+        is proportionally scaled according to the screen geometry.
+
+        Args:
+            size_dict (dict): Dictionary of size specifications.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            dict: A new dictionary with scaled size values.
         """
         w_ratio = screen_geometry.width() / self.REFERENCE_WIDTH
         h_ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
@@ -348,12 +438,17 @@ class main():
                 "radius": int(dims.get("radius", 0) * r_ratio)
             }
         return scaled_size_dict
-                
+    
     def scale_font_sizes(self, font_dict: dict, screen_geometry):
         """
-        Given a dict of font sizes:
-          { "small": 14, "medium": 18, … }
-        returns a new dict with each size scaled to the screen height.
+        Scale font sizes relative to the current screen height.
+
+        Args:
+            font_dict (dict): Dictionary mapping font size labels to integer values.
+            screen_geometry (Any): The current screen geometry object.
+
+        Returns:
+            dict: A new dictionary with scaled font sizes.
         """
         # scale fonts by the ratio of current screen height to reference height
         ratio = screen_geometry.height() / self.REFERENCE_HEIGHT
@@ -363,12 +458,52 @@ class main():
             for name, size in font_dict.items()
         }
 
+    def handle_start_up_reg(self):
+        """ Based on settings, set the correct registry key for startup """
+        if sys.platform == "win32":
+            from utils.reg_utils import RegUtils
+
+            if (
+                not RegUtils.is_in_run_key("QSnippet") and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
+            elif (
+                RegUtils.is_in_run_key("QSnippet") and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+        elif sys.platform.startswith("linux"):
+            from utils.linux_utils import LinuxUtils
+
+            if (
+                not LinuxUtils.is_autostart_enabled() and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                LinuxUtils.enable_autostart()
+            elif (
+                LinuxUtils.is_autostart_enabled() and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                LinuxUtils.disable_autostart()
+                
     def check_if_already_running(self, app_name="QSnippet"):
         """
-        Check for lock file to determine if app is already running.
-        
-        :param self: Main class instance
-        :param app_name: Name of the application.
+        Check whether another instance of the application is running.
+
+        Uses a lock file in the system temporary directory to determine
+        if an existing process with the stored PID is active. If another
+        instance is detected, displays a message and exits.
+
+        Args:
+            app_name (str): Name of the application.
+
+        Returns:
+            bool: False if no other instance is running.
+
+        Raises:
+            SystemExit: If another instance is already running.
         """
         lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
         current_pid = os.getpid()
@@ -390,9 +525,101 @@ class main():
             f.write(str(current_pid))
         return False
     
+    def check_sys_requirements(self):
+        """
+        Validate system compatibility and required dependencies.
+
+        Checks the operating system and verifies required packages on
+        supported platforms. Displays an error message and exits if
+        requirements are not satisfied or the OS is unsupported.
+
+        Returns:
+            None
+
+        Raises:
+            SystemExit: If system requirements are not met or the OS is unsupported.
+        """
+        package_manager = sys_utils.detect_package_manager()
+        requirements = {
+            "libxcb-cursor": {
+                "library": "libxcb-cursor",
+                "install_hint": f"sudo {package_manager} install libxcb-cursor0"
+            },
+            "xclip": {
+                "library": "xclip",
+                "install_hint": f"sudo {package_manager} install xclip"
+            }
+        }
+        
+        logger.info("Checking system requirements")
+
+        if sys.platform == "win32":
+            sys_details = f"Windows OS detected: {sys.platform}, Python {sys.version}"
+            logger.info(sys_details)
+            logger.debug("No additional system requirements for Windows.")
+
+        elif sys.platform.startswith("linux"):
+            sys_details = f"Linux OS detected: {sys.platform}, Python {sys.version}"
+            logger.info(sys_details)
+
+            try:
+                missing_packages = sys_utils.check_required_packages(requirements)
+                logger.debug(f"Missing packages: {missing_packages}")
+
+                # If anything missing, show user friendly error
+                if missing_packages:
+                    install_lines = "\n".join(
+                        f"• {pkg}: {hint}" for pkg, hint in missing_packages
+                    )
+
+                    message = (
+                        "The following required dependencies are missing:\n\n"
+                        f"{install_lines}\n\n"
+                        "Please install them using your package manager and restart the application."
+                    )
+
+                    self.message_box.error(
+                        message,
+                        title="System Requirement Error"
+                    )
+
+                    sys.exit(1)
+            except OSError:
+                self.message_box.error(
+                    "An error occured while performing system check. If the issue persists, please contact the application vendor.",
+                    title="Application Error"
+                )
+                sys.exit(1)
+            
+        elif sys.platform == "darwin":
+            sys_details = f"macOS detected: {sys.platform}, Python {sys.version}"
+            logger.warning(sys_details)
+            self.message_box.error(
+                "macOS is not currently supported. This application supports Windows and Linux only.",
+                title="System Requirement Error"
+            )
+            sys.exit(1)
+
+        else:
+            sys_details = f"Unsupported OS detected: {sys.platform}, Python {sys.version}"
+            logger.warning(sys_details)
+            self.message_box.critical(
+                f"Unsupported operating system: {sys.platform}. This application supports Windows and Linux only.",
+                title="System Requirement Error"
+            )
+            sys.exit(1)
+
+        logger.info("System requirements check complete")
+
     def check_notices(self):
         """
-        Load and display unread notices.
+        Load and display unread application notices.
+
+        Reads notice settings, determines unread notices, displays them
+        in a dialog, and persists any dismissals or user preferences.
+
+        Returns:
+            None
         """
         logger.debug("Checking for unread notices")
 
@@ -413,7 +640,7 @@ class main():
         notices_dir = Path(self.working_dir) / "notices"
         notices_dir.mkdir(exist_ok=True)
 
-        unread = NoticeCarouselDialog.load_notices(
+        unread = self.NoticeCarouselDialog.load_notices(
             notices_dir,
             dismissed
         )
@@ -425,9 +652,9 @@ class main():
 
         logger.info("Displaying %d notices", len(unread))
 
-        dialog = NoticeCarouselDialog(
+        dialog = self.NoticeCarouselDialog(
             unread,
-            icon_path=QIcon(self.images["icon"]),
+            icon_path=self.QIcon(self.images["icon"]),
             parent=self,
         )
         dialog.exec()
@@ -465,6 +692,12 @@ class main():
     def start_program(self):
         """
         Create and launch the main application window.
+
+        Initializes the QSnippet UI, logs build information, and starts
+        the main application interface.
+
+        Returns:
+            None
         """
         program_name = self.program_name if hasattr(self, "program_name") else "QSnippet"
         logger.info(f"Starting {program_name} UI")
@@ -475,11 +708,14 @@ class main():
             BUILD_DATE,
             BUILD_COMMIT,
         )
-        self.qsnippet = QSnippet(parent=self)
+        self.qsnippet = self.QSnippet(parent=self)
         self.qsnippet.run()
 
 
 if __name__ == '__main__':
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtGui import QIcon
+
     app = QApplication(sys.argv)
     try:
         ex = main()

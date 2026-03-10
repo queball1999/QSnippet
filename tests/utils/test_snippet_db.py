@@ -4,9 +4,7 @@ from utils.snippet_db import SnippetDB
 
 
 def test_db_initializes_and_seeds(temp_snippet_db_path):
-    """
-    Database should initialize and seed with default snippet.
-    """
+    """Database should initialize and seed with default snippet."""
     db = SnippetDB(temp_snippet_db_path)
 
     snippets = db.get_all_snippets()
@@ -18,9 +16,7 @@ def test_db_initializes_and_seeds(temp_snippet_db_path):
 
 
 def test_insert_new_snippet(temp_snippet_db_path):
-    """
-    Inserting a new snippet should increase row count.
-    """
+    """Inserting a new snippet should increase row count."""
     db = SnippetDB(temp_snippet_db_path)
 
     initial_count = len(db.get_all_snippets())
@@ -45,9 +41,7 @@ def test_insert_new_snippet(temp_snippet_db_path):
 
 
 def test_insert_updates_existing_snippet(temp_snippet_db_path):
-    """
-    Inserting with an existing trigger should update, not duplicate.
-    """
+    """Inserting with an existing trigger should update, not duplicate."""
     db = SnippetDB(temp_snippet_db_path)
 
     db.insert_snippet({
@@ -86,9 +80,7 @@ def test_insert_updates_existing_snippet(temp_snippet_db_path):
 
 
 def test_delete_snippet(temp_snippet_db_path):
-    """
-    Deleting a snippet should remove it.
-    """
+    """Deleting a snippet should remove it."""
     db = SnippetDB(temp_snippet_db_path)
 
     db.insert_snippet({
@@ -111,9 +103,7 @@ def test_delete_snippet(temp_snippet_db_path):
 
 
 def test_get_random_snippet(temp_snippet_db_path):
-    """
-    Random snippet should return an enabled snippet.
-    """
+    """Random snippet should return an enabled snippet."""
     db = SnippetDB(temp_snippet_db_path)
 
     snippet = db.get_random_snippet()
@@ -123,9 +113,7 @@ def test_get_random_snippet(temp_snippet_db_path):
 
 
 def test_folder_operations(temp_snippet_db_path):
-    """
-    Folder rename and delete should work correctly.
-    """
+    """Folder rename and delete should work correctly."""
     db = SnippetDB(temp_snippet_db_path)
 
     db.insert_snippet({
@@ -152,9 +140,7 @@ def test_folder_operations(temp_snippet_db_path):
 
 
 def test_tag_helpers(temp_snippet_db_path):
-    """
-    Tags should normalize, list, and delete correctly.
-    """
+    """Tags should normalize, list, and delete correctly."""
     db = SnippetDB(temp_snippet_db_path)
 
     db.insert_snippet({
@@ -181,9 +167,7 @@ def test_tag_helpers(temp_snippet_db_path):
 
 
 def test_search_snippets(temp_snippet_db_path):
-    """
-    Keyword search should match label, trigger, snippet, or tags.
-    """
+    """Keyword search should match label, trigger, snippet, or tags."""
     db = SnippetDB(temp_snippet_db_path)
 
     db.insert_snippet({

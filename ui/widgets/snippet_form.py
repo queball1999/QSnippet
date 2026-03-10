@@ -19,6 +19,20 @@ class SnippetForm(QWidget):
     cancelPressed = Signal()
 
     def __init__(self, mode="new", main=None, parent=None):
+        """
+        Initialize the SnippetForm widget.
+
+        Sets the form mode, stores references to the main application and parent,
+        defines validation patterns, and initializes UI components and styles.
+
+        Args:
+            mode (str): Form mode, either "new" or "edit".
+            main (Any): Reference to the main application object.
+            parent (Any): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.main = main
         self.parent = parent
@@ -31,6 +45,15 @@ class SnippetForm(QWidget):
         self.applyStyles()
 
     def define_text(self):
+        """
+        Define instructional and tooltip text for the form.
+
+        Initializes descriptive text, validation requirements, and tooltips
+        used throughout the snippet form interface.
+
+        Returns:
+            None
+        """
         self.instructions_text = """Fill out the form below to add a new snippet or modify an existing one. 
 
 Use the toggle to turn this snippet on or off without deleting it. Perfect for temporarily disabling shortcuts you don’t need right now. 
@@ -59,6 +82,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
     • Simulate Typing – simulates typing each character (useful in apps or fields that block direct clipboard pastes)."""
 
     def initUI(self):
+        """
+        Initialize and configure all user interface components.
+
+        Creates form fields, switches, buttons, layouts, popup completion list,
+        and connects relevant signals.
+
+        Returns:
+            None
+        """
         # Main Layout
         layout = QGridLayout(self)
         layout.setSpacing(10)
@@ -163,16 +195,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.intellisense_popup.setFocusPolicy(Qt.NoFocus)
         self.intellisense_popup.itemActivated.connect(self.insert_completion)
         self.intellisense_popup.itemClicked.connect(self.insert_completion)
-
-        # Fill with placeholders + sub-snippets
-        self.completions = [
-            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
-            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
-        ]
-        # Add snippet triggers too
-        self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])
-        for c in self.completions:
-            QListWidgetItem(c, self.intellisense_popup)
+        # Fill list
+        self.fill_intellisense_popup_list()
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -228,7 +252,14 @@ Snippets come in handy for text you enter often or for standard messages you sen
         layout.addLayout(btn_layout, 8, 0, 1, 3)
 
     def clear_form(self):
-        """ Clear all entries in the form. """
+        """
+        Clear all input fields and reset form state.
+
+        Resets text inputs, switches, tags, and stored entry identifier.
+
+        Returns:
+            None
+        """
         self.folder_input.setCurrentText("Default")
         self.entry_id = None
         self.new_input.clear()
@@ -241,8 +272,17 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     def load_entry(self, entry: dict):
         """
-        Populate form fields from snippet entry dict
-        {folder, label, trigger, snippet, enabled, paste_style}
+        Populate form fields from a snippet entry dictionary.
+
+        Loads snippet data into corresponding UI fields, including tags,
+        switch states, and folder selection.
+
+        Args:
+            entry (dict): Snippet entry containing keys such as
+                folder, label, trigger, snippet, enabled, paste_style, and tags.
+
+        Returns:
+            None
         """
         self.entry_id = entry.get("id")
         self.new_input.setText(entry.get('label', ''))
@@ -263,7 +303,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     def get_entry(self) -> dict:
         """
-        Read form fields into snippet entry dict
+        Collect form data into a snippet entry dictionary.
+
+        Reads current UI field values and formats them into a dictionary
+        suitable for database insertion or update.
+
+        Returns:
+            dict: Dictionary containing snippet data.
         """
         id = getattr(self, "entry_id", None)
         folder = self.folder_input.currentText().strip() or 'Default'
@@ -293,6 +339,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
         }
 
     def populate_folder_input(self):
+        """
+        Populate the folder selection input from the database.
+
+        Retrieves all folders and updates the combo box, ensuring
+        a default folder is present.
+
+        Returns:
+            None
+        """
         # Populate from DB if available
         folders = self.main.snippet_db.get_all_folders()
 
@@ -304,19 +359,47 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.folder_input.setCurrentText("Default")
 
     def populate_tags_input(self):
+        """
+        Populate the tags input from the database.
+
+        Clears existing items and adds all available tags.
+
+        Returns:
+            None
+        """
         tags = self.main.snippet_db.get_all_tags()
         self.tags_input.clear() # clear and repopulate
         if tags:
             self.tags_input.addItems(tags)
 
     def on_delete_tag(self, tag):
+        """
+        Delete a tag from the database and refresh the UI.
+
+        Removes the specified tag from all snippets and updates the tag input.
+        Displays a confirmation message to the user.
+
+        Args:
+            tag (str): The tag name to delete.
+
+        Returns:
+            None
+        """
         self.main.snippet_db.delete_tag(tag)
         self.main.message_box.info(f"Tag '{tag}' deleted from all snippets.", title="Tag Deleted")
         self.parent.load_config()   # refresh table
         self.populate_tags_input()
 
     def validate(self) -> bool:
-        """Ensure required fields are populated"""
+        """
+        Validate that all required form fields are properly filled.
+
+        Checks that trigger, snippet, and label fields are non-empty and that
+        the trigger meets the special character requirements.
+
+        Returns:
+            bool: True if validation passes, False otherwise.
+        """
         # FIXME: Needs additional logic here
         entry = self.get_entry()
         if not entry['trigger']:
@@ -337,8 +420,38 @@ Snippets come in handy for text you enter often or for standard messages you sen
         return True
     
     # ----- Pop-Up Menu -----
+    def fill_intellisense_popup_list(self):
+        """
+        Populate the intellisense popup list with placeholders and snippet triggers.
+
+        Fills the popup with available placeholder options (e.g., {date}, {time})
+        and all existing snippet triggers for auto-completion.
+
+        Returns:
+            None
+        """
+        
+        # Fill with placeholders + sub-snippets
+        self.completions = [
+            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
+            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
+        ]
+
+        # Add snippet triggers too
+        self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])
+        for c in self.completions:
+            QListWidgetItem(c, self.intellisense_popup)
+
     def show_intellisense(self):
-        """ Function to setup and show intellisense pop-up """
+        """
+        Display the intellisense popup near the cursor position.
+
+        Positions and shows the intellisense popup below the current cursor
+        position in the snippet input field.
+
+        Returns:
+            None
+        """
         if not self.isVisible():    # Exit if not visible
             return
 
@@ -352,7 +465,18 @@ Snippets come in handy for text you enter often or for standard messages you sen
         
 
     def insert_completion(self, item):
-        """ Function to move cursor and insert completion. """
+        """
+        Insert the selected completion item at the cursor position.
+
+        Replaces the text from the opening brace to the cursor with the
+        selected completion item and hides the popup.
+
+        Args:
+            item (QListWidgetItem): The selected completion item from the popup.
+
+        Returns:
+            None
+        """
         if not item:
             return
         cursor = self.snippet_input.textCursor()
@@ -373,7 +497,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_input.setFocus()
 
     def update_prefix(self):
-        """ Recompute prefix from text and update popup """
+        """
+        Update the intellisense popup based on current cursor position.
+
+        Recomputes the prefix from the most recent opening brace and filters
+        the popup items accordingly. Hides the popup if no opening brace is found.
+
+        Returns:
+            None
+        """
         if not self.snippet_input.isVisible():  # Exit if snippet input is not visible
             return
 
@@ -395,7 +527,18 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
 
     def filter_intellisense(self, prefix: str):
-        """ Filter popup items to only those starting with prefix """
+        """
+        Filter intellisense popup items based on the provided prefix.
+
+        Filters the completion list to show only items that match the prefix,
+        handling both placeholder syntax (with braces) and plain snippet triggers.
+
+        Args:
+            prefix (str): The prefix text to filter by.
+
+        Returns:
+            None
+        """
         self.intellisense_popup.clear()
 
         # strip brackets to ensure we match snippets too
@@ -420,6 +563,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     # ----- Styling Functions -----
     def applyStyles(self):
+        """
+        Apply all styling properties to the form and its widgets.
+
+        Sets fonts, sizes, and stylesheets for all form components including
+        labels, inputs, buttons, and switches.
+
+        Returns:
+            None
+        """
         # Font Sizing
         self.form_title.setFont(self.main.large_font_size)
         self.instructions.setFont(self.main.small_font_size)
@@ -466,7 +618,14 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.update()
     
     def update_stylesheet(self):
-        """ This function handles updating the stylesheet. """
+        """
+        Apply the CSS stylesheet to form components.
+
+        Sets padding and styling rules for buttons, combo boxes, and text inputs.
+
+        Returns:
+            None
+        """
         self.setStyleSheet("""
             QPushButton {
                 padding: 8px;
@@ -483,8 +642,21 @@ Snippets come in handy for text you enter often or for standard messages you sen
     
     # ----- Event Handlers -----
     def eventFilter(self, obj, event):
+        """
+        Handle keyboard events in the snippet input field.
+
+        Processes special key events including brace detection, popup navigation,
+        and completion insertion. Shows and filters the intellisense popup based
+        on user input.
+
+        Args:
+            obj (QObject): The object that received the event.
+            event (QEvent): The event object.
+
+        Returns:
+            bool: True if the event was handled, False otherwise.
+        """
         if obj is self.snippet_input and event.type() == QEvent.KeyPress:
-            """ Event handler for snippet input that detects { character """
             # Detect opening {
             if event.text() == "{":
                 self.start_brace_pos = self.snippet_input.textCursor().position()
@@ -531,8 +703,22 @@ Snippets come in handy for text you enter often or for standard messages you sen
         return super().eventFilter(obj, event)
 
     def showEvent(self, event):
+        """
+        Handle the widget show event.
+
+        Sets focus to the name input, reloads available tags, and refreshes
+        the intellisense popup list when the form becomes visible.
+
+        Args:
+            event (QShowEvent): The show event object.
+
+        Returns:
+            None
+        """
         super().showEvent(event)
         # force focus when the form is shown
         self.new_input.setFocus(Qt.TabFocusReason)
         self.populate_tags_input()
+        # Reload popup list. Fixing Issue #24
+        self.fill_intellisense_popup_list()
 
