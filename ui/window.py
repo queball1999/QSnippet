@@ -12,8 +12,8 @@ if sys.platform != "win32":
 
 # Import PySide6 Modules
 from PySide6.QtWidgets import (
-    QSystemTrayIcon, QMainWindow, QVBoxLayout, QWidget,
-    QMessageBox, QLabel
+    QSystemTrayIcon, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
+    QMessageBox, QLabel, QPushButton
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer
@@ -95,20 +95,60 @@ class QSnippet(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Linux only notice
+        # Linux only notice with close button and GitHub issue link
         notice_text = (
             "Linux compatibility is currently limited. "
-            "Please report any bugs or broken features."
+            "<a href=\"https://github.com/queball1999/QSnippet/issues/new?title=Linux+Issue&body=Please+describe+the+issue\">"
+            "Report a bug</a> or <a href=\"https://github.com/queball1999/QSnippet/issues\">view existing issues</a>."
         )
-        self.linux_notice = QLabel(notice_text)
-        self.linux_notice.setAlignment(Qt.AlignCenter)
-        self.linux_notice.setStyleSheet(f"""
-            QLabel {{
+
+        # Create a container widget for the notice
+        notice_container = QWidget()
+        notice_layout = QHBoxLayout(notice_container)
+        notice_layout.setContentsMargins(10, 5, 5, 5)
+
+        # Create the notice label with HTML
+        self.linux_notice_label = QLabel(notice_text)
+        self.linux_notice_label.setAlignment(Qt.AlignCenter)
+        self.linux_notice_label.setOpenExternalLinks(True)
+
+        # Create close button
+        close_button = QPushButton("✕")
+        close_button.setMaximumWidth(30)
+        close_button.setToolTip("Dismiss notice")
+        close_button.clicked.connect(notice_container.hide)
+
+        # Add widgets to layout
+        notice_layout.addWidget(self.linux_notice_label, 1)
+        notice_layout.addWidget(close_button)
+        notice_container.setLayout(notice_layout)
+
+        # Style the notice container
+        notice_container.setStyleSheet("""
+            QWidget {
                 padding: 5px;
                 background: #ffcc00;
                 color: #000000;
-            }}""")
-        
+            }
+            QLabel {
+                background: transparent;
+                color: #000000;
+            }
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #000000;
+                padding: 0px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.1);
+                border-radius: 3px;
+            }
+        """)
+
+        self.linux_notice = notice_container
         self.linux_notice.hide()
         if sys.platform.startswith("linux"):
             self.linux_notice.show()
