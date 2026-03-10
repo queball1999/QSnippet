@@ -5,7 +5,6 @@ import yaml
 import sys
 from datetime import datetime
 from pathlib import Path
-from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +12,18 @@ logger = logging.getLogger(__name__)
 class FileUtils:
     def resolve_images_path(self) -> Path:
         """
-        Resolve images directory.
+        Resolve and return the valid images directory path.
 
-        Resolution order:
-        1. resource_dir/images
-        2. working_dir/images
+        Searches for an images directory in the resource directory and
+        working directory, in that order. Validates that all required
+        image files are present before returning the path.
 
-        Validates required image files exist.
+        Returns:
+            Path: The resolved images directory path.
+
+        Raises:
+            FileNotFoundError: If no valid images directory containing all
+                required image files is found.
         """
         candidates = [
             Path(self.resource_dir) / "images",
@@ -53,12 +57,24 @@ class FileUtils:
             ""
         )
 
-    """
-    Utility class for common file and directory operations.
-    """
+    # Utility class for common file and directory operations.
     @staticmethod
-    def ensure_dir(path: Path):
-        """Create directory if it doesn"t exist."""
+    def ensure_dir(path: Path) -> None:
+        """
+        Ensure that a directory exists.
+
+        Creates the specified directory and any necessary parent directories
+        if they do not already exist.
+
+        Args:
+            path (Path): The directory path to create.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: If the directory cannot be created.
+        """
         logger.debug("Ensuring directory exists: %s", path)
 
         try:
@@ -69,7 +85,16 @@ class FileUtils:
 
     @staticmethod
     def read_yaml(path: Path) -> dict:
-        """Read a YAML file and return its contents as a dict."""
+        """
+        Read a YAML file and return its contents.
+
+        Args:
+            path (Path): The path to the YAML file.
+
+        Returns:
+            dict: The parsed YAML contents as a dictionary. Returns an empty
+                dictionary if loading fails.
+        """
         logger.debug("Reading YAML file: %s", path)
 
         try:
@@ -82,8 +107,23 @@ class FileUtils:
             return {}
 
     @staticmethod
-    def write_yaml(path: Path, data: dict):
-        """Write a dict to a YAML file atomically."""
+    def write_yaml(path: Path, data: dict) -> None:
+        """
+        Write a dictionary to a YAML file atomically.
+
+        Writes data to a temporary file and replaces the target file upon
+        successful write to prevent corruption.
+
+        Args:
+            path (Path): The destination YAML file path.
+            data (dict): The dictionary to serialize and write.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: If writing to the file fails.
+        """
         logger.debug("Writing YAML file: %s", path)
         temp_path = path.with_suffix(path.suffix + ".tmp")
         try:
@@ -96,8 +136,20 @@ class FileUtils:
             raise
 
     @staticmethod
-    def export_snippets_yaml(path: Path, snippets: list[dict]):
-        """Export snippets to a YAML file."""
+    def export_snippets_yaml(path: Path, snippets: list[dict]) -> None:
+        """
+        Export snippets to a YAML file.
+
+        Args:
+            path (Path): The destination file path.
+            snippets (list[dict]): A list of snippet dictionaries to export.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: If exporting fails.
+        """
         logger.debug("Exporting %d snippets to %s", len(snippets), path)
         try:
             data = {"snippets": snippets}
@@ -109,7 +161,19 @@ class FileUtils:
 
     @staticmethod
     def import_snippets_yaml(path: Path) -> list[dict]:
-        """Import snippets from a YAML file and return as a list of dicts."""
+        """
+        Import snippets from a YAML file.
+
+        Args:
+            path (Path): The source YAML file path.
+
+        Returns:
+            list[dict]: A list of snippet dictionaries loaded from the file.
+
+        Raises:
+            ValueError: If the YAML format is invalid.
+            Exception: If reading or parsing fails.
+        """
         logger.debug("Importing snippets from YAML: %s", path)
 
         try:
@@ -125,8 +189,25 @@ class FileUtils:
             raise
 
     @staticmethod
-    def import_snippets_with_dialog(parent, db):
-        """Prompt user to import snippets from YAML."""
+    def import_snippets_with_dialog(parent, db) -> int:
+        """
+        Prompt the user to import snippets from a YAML file.
+
+        Opens a file dialog to select a YAML file, imports snippets into the
+        database, and displays a summary of imported and updated entries.
+
+        Args:
+            parent (Any): The parent widget for dialog windows.
+            db (Any): The database instance used to insert snippets.
+
+        Returns:
+            int: The total number of snippets imported or updated.
+
+        Raises:
+            Exception: If importing snippets fails.
+        """
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
         logger.debug("Opening import snippets dialog")
 
         path, _ = QFileDialog.getOpenFileName(
@@ -165,13 +246,30 @@ class FileUtils:
 
 
     @staticmethod
-    def export_snippets_with_dialog(parent, db):
-        """Prompt user to export snippets to YAML."""
+    def export_snippets_with_dialog(parent, db) -> int:
+        """
+        Prompt the user to export snippets to a YAML file.
+
+        Opens a save file dialog, retrieves all snippets from the database,
+        writes them to a YAML file, and displays a completion message.
+
+        Args:
+            parent (Any): The parent widget for dialog windows.
+            db (Any): The database instance used to retrieve snippets.
+
+        Returns:
+            int: The number of snippets exported.
+
+        Raises:
+            Exception: If exporting snippets fails.
+        """
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
         date = datetime.now().date()
         default_name = f"qsnippets-export-{date}.yaml"
 
         logger.debug("Opening export snippets dialog")
-    
+
         path, _ = QFileDialog.getSaveFileName(
             parent,
             "Export Snippets to YAML",
@@ -197,13 +295,32 @@ class FileUtils:
 
     @staticmethod
     def file_exists(path: Path) -> bool:
-        """Check whether a file exists."""
+        """
+        Check whether a file exists.
+
+        Args:
+            path (Path): The file path to check.
+
+        Returns:
+            bool: True if the file exists and is a file, otherwise False.
+        """
         return path.is_file()
     
     @staticmethod
-    def get_default_paths():
+    def get_default_paths() -> dict:
         """
-        Retrieve default directories based on the operating system.
+        Retrieve default application directories based on the operating system.
+
+        Determines appropriate paths for application data, documents, logs,
+        working directory, and resource directory depending on the runtime
+        environment.
+
+        Returns:
+            dict: A dictionary containing resolved Path objects for default
+                directories.
+
+        Raises:
+            ValueError: If OS-specific directories cannot be determined.
         """
         logger.debug("Resolving default OS paths")
 
@@ -248,7 +365,12 @@ class FileUtils:
     def get_executable_dir() -> Path:
         """
         Return the application root directory.
-        Safe to call from utility modules.
+
+        Determines the directory of the executable when running as a bundled
+        application, or the main entry point directory when running from source.
+
+        Returns:
+            Path: The resolved application root directory.
         """
         if getattr(sys, "frozen", False):
             # PyInstaller executable
@@ -261,9 +383,17 @@ class FileUtils:
     @staticmethod
     def merge_dict(default: dict, user: dict) -> dict:
         """
-        Recursively merge default values into user values.
-        User values treated as source of truth. 
-        Only Missing keys are added.
+        Recursively merge default values into user-provided values.
+
+        User values are treated as the source of truth. Only missing keys
+        from the default dictionary are added to the user dictionary.
+
+        Args:
+            default (dict): The default configuration dictionary.
+            user (dict): The user configuration dictionary.
+
+        Returns:
+            dict: The merged dictionary.
         """
         if not isinstance(default, dict):
             return user
@@ -281,10 +411,24 @@ class FileUtils:
         return merged
 
     @staticmethod
-    def create_config_file(default_dir: Path, user_path: Path, parent=None):
+    def create_config_file(default_dir: Path, user_path: Path, parent=None) -> None:
         """
-        Create the user config.yaml by copying from the default config directory.
-        Does NOT overwrite existing user config.
+        Create a user configuration file from the default template.
+
+        Copies the default config.yaml file to the user location if it does
+        not already exist.
+
+        Args:
+            default_dir (Path): Directory containing the default config.yaml.
+            user_path (Path): Destination path for the user config file.
+            parent (Any): Optional parent widget for error dialogs.
+
+        Returns:
+            None
+
+        Raises:
+            FileNotFoundError: If the default config file is missing.
+            RuntimeError: If the config file cannot be created.
         """
         if user_path.exists():
             logger.debug("Config file already exists, skipping: %s", user_path)
@@ -317,10 +461,24 @@ class FileUtils:
             raise RuntimeError(f"Failed to create config file: {e}")
 
     @staticmethod
-    def create_settings_file(default_dir: Path, user_path: Path, parent=None):
+    def create_settings_file(default_dir: Path, user_path: Path, parent=None) -> None:
         """
-        Create the user settings.yaml by copying from the default config directory.
-        Does NOT overwrite existing user settings.
+        Create a user settings file from the default template.
+
+        Copies the default settings.yaml file to the user location if it does
+        not already exist.
+
+        Args:
+            default_dir (Path): Directory containing the default settings.yaml.
+            user_path (Path): Destination path for the user settings file.
+            parent (Any): Optional parent widget for error dialogs.
+
+        Returns:
+            None
+
+        Raises:
+            FileNotFoundError: If the default settings file is missing.
+            RuntimeError: If the settings file cannot be created.
         """
         if user_path.exists():
             logger.debug("Settings file already exists, skipping: %s", user_path)
@@ -353,7 +511,18 @@ class FileUtils:
             raise RuntimeError(f"Failed to create settings file: {e}")
     
     @staticmethod
-    def create_snippets_db_file(path):
+    def create_snippets_db_file(path) -> None:
+        """
+        Create the snippets database file if it does not exist.
+
+        Initializes the database and creates the required table structure.
+
+        Args:
+            path (Path): The path to the database file.
+
+        Returns:
+            None
+        """
         if path.exists():
             logging.debug(f"DB already exists: {path}, skipping creation.")
             return
@@ -364,14 +533,23 @@ class FileUtils:
         from .snippet_db import SnippetDB
         logger.info("Creating snippets database: %s", path)
         db = SnippetDB(path)
-        db._create_table()
+        db.create_table()
 
     @staticmethod
     def load_and_merge_yaml(default_path: Path, user_path: Path) -> dict:
         """
-        Load default YAML and merge it into the user YAML.
-        Writes merged result back to user_path.
-        User values are treated as the source of truth.
+        Load default and user YAML files and merge them.
+
+        User values are treated as authoritative. Missing default keys are
+        added to the user configuration. The merged result is written back
+        to the user file if changes are detected.
+
+        Args:
+            default_path (Path): Path to the default YAML file.
+            user_path (Path): Path to the user YAML file.
+
+        Returns:
+            dict: The merged configuration dictionary.
         """
         logger.debug("Loading default YAML: %s", default_path)
         default_data = FileUtils.read_yaml(default_path)

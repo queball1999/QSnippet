@@ -4,16 +4,23 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
+
+
 class LinuxUtils:
     APPLICATION_FILE = Path("/usr/share/applications/qsnippet.desktop")
     AUTOSTART_FILE = Path.home() / ".config/autostart/QSnippet.desktop"
 
     @staticmethod
-    def _ensure_autostart_file():
+    def ensure_autostart_file() -> None:
         """
-        Ensure the autostart desktop file exists.
-        Copies the system desktop file into the user autostart directory
-        if missing.
+        Ensure the autostart desktop file exists for the current user.
+
+        Creates the autostart directory if necessary and copies the system
+        desktop file into the user's autostart directory if it is missing.
+
+        Returns:
+            bool: True if the autostart file exists or was successfully created,
+                otherwise False.
         """
         autostart_dir = LinuxUtils.AUTOSTART_FILE.parent
         autostart_dir.mkdir(parents=True, exist_ok=True)
@@ -47,15 +54,18 @@ class LinuxUtils:
             return False
 
     @staticmethod
-    def enable_autostart():
+    def enable_autostart() -> None:
         """
         Enable application autostart for the current user on Linux.
 
-        This ensures the autostart desktop file exists and updates or inserts
-        the X-GNOME-Autostart-enabled key to true, making the application start
-        automatically when the user logs in.
+        Ensures the autostart desktop file exists and updates or inserts
+        the X-GNOME-Autostart-enabled key to true. Also ensures the
+        Hidden key is set to false if present.
+
+        Returns:
+            None
         """
-        if not LinuxUtils._ensure_autostart_file():
+        if not LinuxUtils.ensure_autostart_file():
             return
 
         lines = LinuxUtils.AUTOSTART_FILE.read_text(
@@ -82,12 +92,15 @@ class LinuxUtils:
         logger.info("Enabled Linux autostart for QSnippet")
 
     @staticmethod
-    def disable_autostart():
+    def disable_autostart() -> None:
         """
         Disable application autostart for the current user on Linux.
 
-        This updates the autostart desktop file to set
-        X-GNOME-Autostart-enabled to false if the file exists.
+        Updates the autostart desktop file to set the
+        X-GNOME-Autostart-enabled key to false if the file exists.
+
+        Returns:
+            None
         """
         if not LinuxUtils.AUTOSTART_FILE.exists():
             return
@@ -110,7 +123,11 @@ class LinuxUtils:
     @staticmethod
     def is_autostart_enabled() -> bool:
         """
-        Check whether Linux autostart is currently enabled for the application.
+        Check whether Linux autostart is enabled for the application.
+
+        Returns:
+            bool: True if the autostart file exists and contains
+                X-GNOME-Autostart-enabled=true, otherwise False.
         """
         if not LinuxUtils.AUTOSTART_FILE.exists():
             return False

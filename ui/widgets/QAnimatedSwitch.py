@@ -16,7 +16,28 @@ class QAnimatedSwitch(QWidget):
                  text_font: QFont = QFont("Arial", 10),
                  toggle_size: QSize = QSize(50, 35),
                  start_state: str = "off",
-                 parent=None) -> QWidget:
+                 parent=None) -> None:
+        """
+        Initialize the QAnimatedSwitch widget.
+
+        Configures display text, colors, layout orientation, toggle size,
+        initial state, and connects internal signals.
+
+        Args:
+            objectName (str): Object name identifier.
+            on_text (str): Text displayed when enabled.
+            off_text (str): Text displayed when disabled.
+            checked_color (str): Color used when toggled on.
+            background_color (str): Optional background color.
+            text_position (str): Position of label relative to toggle.
+            text_font (QFont): Font used for the label.
+            toggle_size (QSize): Size of the toggle control.
+            start_state (str): Initial state ("on" or "off").
+            parent (Any): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.objectName = objectName
         self.on_text = on_text
@@ -41,9 +62,18 @@ class QAnimatedSwitch(QWidget):
             self.toggled = self.start_state
             self.label.setText(self.on_text if self.start_state else self.off_text)
             self.toggle_button.blockSignals(False)
-            self.toggle_button.stateChanged.connect(self._on_toggled)
+            self.toggle_button.stateChanged.connect(self.on_toggled)
 
     def initUI(self) -> None:
+        """
+        Initialize the toggle switch layout and child widgets.
+
+        Creates the toggle control and label, arranges them according
+        to the specified text position, and applies background styling.
+
+        Returns:
+            None
+        """
         if self.layout():
             QWidget().setLayout(self.layout())
 
@@ -53,7 +83,7 @@ class QAnimatedSwitch(QWidget):
 
         self.toggle_button = AnimatedToggle(checked_color=self.checked_color)
         self.toggle_button.setFixedSize(self.toggle_size)
-        self.toggle_button.stateChanged.connect(self._on_toggled)
+        self.toggle_button.stateChanged.connect(self.on_toggled)
 
         self.label = QLabel(self.off_text)
         if self.text_font:
@@ -82,64 +112,174 @@ class QAnimatedSwitch(QWidget):
         if self.background_color:
             self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
 
-    def handle_mouse_press(self, 
-                           event: QMouseEvent) -> None:
+    def handle_mouse_press(self,
+            event: QMouseEvent) -> None:
+        """
+        Handle mouse press events on the label.
+
+        Triggers the toggle action when the label is clicked.
+
+        Args:
+            event (QMouseEvent): The mouse event.
+
+        Returns:
+            None
+        """
         self.toggle(True)
 
-    def toggle(self, 
-               state: bool = True) -> None:
+    def toggle(self,
+            state: bool = True) -> None:
+        """
+        Toggle the switch state.
+
+        Args:
+            state (bool): If True, toggles the internal button state.
+
+        Returns:
+            None
+        """
         if state:
             self.toggle_button.toggle()
 
-    def _on_toggled(self, 
-                    checked: bool) -> None:
+    def on_toggled(self,
+            checked: bool) -> None:
+        """
+        Handle internal toggle state changes.
+
+        Updates the displayed label text and emits the stateChanged signal.
+
+        Args:
+            checked (bool): The new checked state.
+
+        Returns:
+            None
+        """
         self.toggled = checked
         self.label.setText(self.on_text if checked else self.off_text)
         self.stateChanged.emit(checked)
 
     def setChecked(self, state: bool) -> None:
+        """
+        Set the checked state of the toggle.
+
+        Args:
+            state (bool): Desired checked state.
+
+        Returns:
+            None
+        """
         if state != self.isChecked():
             self.toggle_button.toggle()
             self.toggled = state
             
-    def isChecked(self) -> None:
+    def isChecked(self) -> bool:
+        """
+        Return the current checked state.
+
+        Returns:
+            bool: True if checked, otherwise False.
+        """
         return self.toggled
 
     def enable(self, 
-               activate: bool) -> None:
+            activate: bool) -> None:
+        """
+        Enable or disable the toggle interaction.
+
+        Args:
+            activate (bool): If True, enables interaction; otherwise disables it.
+
+        Returns:
+            None
+        """
         if activate:
             self.disabled = False
         else:
             self.disabled = True
 
-    def isEnabled(self):
+    def isEnabled(self) -> bool:
+        """
+        Return whether the toggle is enabled.
+
+        Returns:
+            bool: True if enabled, otherwise False.
+        """
         return not self.disabled
 
     def disable(self, 
-                activate: bool) -> None:
+            activate: bool) -> None:
+        """
+        Disable or enable the toggle interaction.
+
+        Args:
+            activate (bool): If True, disables interaction; otherwise enables it.
+
+        Returns:
+            None
+        """ 
         if activate:
             self.disabled = True
         else:
             self.disabled = False
 
-    def isDisabled(self) -> None:
+    def isDisabled(self) -> bool:
+        """
+        Return whether the toggle is disabled.
+
+        Returns:
+            bool: True if disabled, otherwise False.
+        """
         return self.disabled
 
     def hide(self):
+        """
+        Hide the toggle widget.
+
+        Returns:
+            None
+        """
         self.setVisible(False)
 
     def show(self):
+        """
+        Show the toggle widget.
+
+        Returns:
+            None
+        """
         self.setVisible(True)
 
     def setWidth(self, width: int = 60):
+        """
+        Set the width of the internal toggle button.
+
+        Args:
+            width (int): Desired width.
+
+        Returns:
+            None
+        """
         self.toggle_button.setWidth(width)
        
     def setCheckedColor(self) -> None:
+        """
+        Set the checked color of the toggle.
+
+        Returns:
+            None
+        """
         #FIXME: Needs work
         pass
 
     def applyStyles(self):
-        """ Function to redraw and apply new styles """
+        """
+        Reapply styling and sizing to the toggle widget.
+
+        Updates toggle size, font, background color, and refreshes layout.
+
+        Returns:
+            None
+        """
         if self.toggle_size:
             self.toggle_button.setFixedSize(self.toggle_size)
 
@@ -168,6 +308,21 @@ class Toggle(QCheckBox):
         checked_color="#00B0FF",
         handle_color=Qt.white,
         ):
+        """
+        Initialize the Toggle widget.
+
+        Configures brush colors for the bar and handle in both checked and
+        unchecked states, sets layout margins, and connects state change handling.
+
+        Args:
+            parent (Any): Optional parent widget.
+            bar_color (Any): Color of the toggle bar when unchecked.
+            checked_color (str): Color used when the toggle is checked.
+            handle_color (Any): Color of the toggle handle when unchecked.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
 
         # Save our properties on the object via self, so we can access them later
@@ -186,13 +341,39 @@ class Toggle(QCheckBox):
         self.stateChanged.connect(self.handle_state_change)
 
     def sizeHint(self):
+        """
+        Return the recommended size for the widget.
+
+        Returns:
+            QSize: Suggested size for the toggle.
+        """
         return QSize(58, 45)
 
     def hitButton(self, pos: QPoint):
+        """
+        Determine whether a position is within the clickable area.
+
+        Args:
+            pos (QPoint): Position to test.
+
+        Returns:
+            bool: True if the position is within the button area, otherwise False.
+        """
         return self.contentsRect().contains(pos)
 
     def paintEvent(self, e: QPaintEvent):
+        """
+        Handle the paint event for the toggle.
 
+        Draws the toggle bar and handle based on the current checked state
+        and handle position.
+
+        Args:
+            e (QPaintEvent): The paint event.
+
+        Returns:
+            None
+        """
         contRect = self.contentsRect()
         handleRadius = round(0.24 * contRect.height())
 
@@ -230,28 +411,59 @@ class Toggle(QCheckBox):
 
     @Slot(int)
     def handle_state_change(self, value):
+        """
+        Update handle position when the state changes.
+
+        Args:
+            value (int): The new state value.
+
+        Returns:
+            None
+        """
         self._handle_position = 1 if value else 0
 
     @Property(float)
     def handle_position(self):
+        """
+        Get the current handle position.
+
+        Returns:
+            float: The current handle position.
+        """
         return self._handle_position
 
     @handle_position.setter
     def handle_position(self, pos):
-        """change the property
-        we need to trigger QWidget.update() method, either by:
-            1- calling it here [ what we're doing ].
-            2- connecting the QPropertyAnimation.valueChanged() signal to it.
+        """
+        Set the handle position and trigger a repaint.
+
+        Args:
+            pos (float): New handle position.
+
+        Returns:
+            None
         """
         self._handle_position = pos
         self.update()
 
     @Property(float)
     def pulse_radius(self):
+        """
+        Get the current pulse radius.
+
+        Returns:
+            float: The current pulse radius.
+        """
         return self._pulse_radius
 
     @pulse_radius.setter
     def pulse_radius(self, pos):
+        """
+        Get the current pulse radius.
+
+        Returns:
+            float: The current pulse radius.
+        """
         self._pulse_radius = pos
         self.update()
 
@@ -264,7 +476,21 @@ class AnimatedToggle(Toggle):
 
     def __init__(self, *args, pulse_unchecked_color="#44999999",
         pulse_checked_color="#4400B0EE", **kwargs):
+        """
+        Initialize the AnimatedToggle widget.
 
+        Sets up property animations for handle movement and pulse effects,
+        and configures animation grouping and pulse colors.
+
+        Args:
+            *args (Any): Positional arguments passed to the base class.
+            pulse_unchecked_color (str): Pulse color when unchecked.
+            pulse_checked_color (str): Pulse color when checked.
+            **kwargs (Any): Keyword arguments passed to the base class.
+
+        Returns:
+            None
+        """
         self._pulse_radius = 0
 
         super().__init__(*args, **kwargs)
@@ -287,6 +513,18 @@ class AnimatedToggle(Toggle):
 
     @Slot(int)
     def handle_state_change(self, value):
+        """
+        Start animations in response to state changes.
+
+        Stops any running animations, sets the target handle position,
+        and begins the animation sequence.
+
+        Args:
+            value (int): The new state value.
+
+        Returns:
+            None
+        """
         self.animations_group.stop()
         if value:
             self.animation.setEndValue(1)
@@ -295,7 +533,18 @@ class AnimatedToggle(Toggle):
         self.animations_group.start()
 
     def paintEvent(self, e: QPaintEvent):
+        """
+        Handle the paint event for the animated toggle.
 
+        Draws the toggle bar, handle, and optional pulse animation
+        based on the current state and animation progress.
+
+        Args:
+            e (QPaintEvent): The paint event.
+
+        Returns:
+            None
+        """
         contRect = self.contentsRect()
         handleRadius = round(0.24 * contRect.height())
 

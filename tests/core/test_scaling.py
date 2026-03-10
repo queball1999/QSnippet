@@ -22,6 +22,11 @@ class DummyMain(main):
 
 
 def test_scale_width_and_height():
+    """
+    Test basic width and height scaling calculations.
+
+    Verifies that dimensions are scaled proportionally based on screen resolution.
+    """
     app = DummyMain()
     screen = FakeScreen(3840, 2160)  # 2x scale
 
@@ -30,6 +35,11 @@ def test_scale_width_and_height():
 
 
 def test_scale_dict_sizes():
+    """
+    Test scaling of nested dictionary size values.
+
+    Verifies that all numeric values in a dict of sizes are scaled correctly.
+    """
     app = DummyMain()
     screen = FakeScreen(2560, 1440)  # ~1.33x
 
@@ -49,6 +59,11 @@ def test_scale_dict_sizes():
 
 
 def test_scale_font_sizes():
+    """
+    Test scaling of font size values.
+
+    Verifies that font sizes are scaled based on vertical screen resolution.
+    """
     app = DummyMain()
     screen = FakeScreen(1920, 2160)  # 2x height
 

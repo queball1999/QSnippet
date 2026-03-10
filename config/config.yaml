@@ -1,7 +1,7 @@
 # Default Config
 program_name: QSnippet
-version: "0.0.5"
-log_level: DEBUG
+version: "0.0.6-beta"
+log_level: ERROR
 
 support_info:
   email: admin@quynnbell.com

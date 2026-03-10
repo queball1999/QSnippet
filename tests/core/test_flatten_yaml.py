@@ -12,6 +12,12 @@ class DummyMain(main):
 
 
 def test_flatten_yaml_basic():
+    """
+    Test basic YAML flattening with nested dictionaries.
+
+    Verifies that nested keys are flattened with underscores as separators
+    and that all values are correctly accessible as attributes.
+    """
     app = DummyMain()
 
     config = {
@@ -43,11 +49,21 @@ def test_flatten_yaml_basic():
 
 
 def test_flatten_yaml_handles_empty_dict():
+    """
+    Test that flattening an empty dictionary returns True.
+
+    Verifies that the flatten_yaml method handles edge case of empty input.
+    """
     app = DummyMain()
     assert app.flatten_yaml({}) is True
 
 
 def test_flatten_yaml_failure_returns_false():
+    """
+    Test that flatten_yaml returns False when given invalid input.
+
+    Verifies error handling when the input is not a valid dictionary.
+    """
     app = DummyMain()
 
     # items.items() will raise AttributeError

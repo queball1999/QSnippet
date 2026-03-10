@@ -15,6 +15,16 @@ class TrayMenu(QMenu):
     showui_signal = Signal(bool)    # Signal to toggle show UI at start option
 
     def __init__(self, main=None, parent=None):
+        """
+        Initialize the TrayMenu with system tray actions.
+
+        Args:
+            main (Any): Reference to the main application object.
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.main = main
         self.parent = parent
@@ -23,6 +33,15 @@ class TrayMenu(QMenu):
         self.add_actions()
 
     def add_actions(self):
+        """
+        Add all actions to the tray menu.
+
+        Configures startup behavior, UI display options, and application control
+        actions with appropriate signals and checkable states.
+
+        Returns:
+            None
+        """
         # Launch at Startup (Checkbox style)
         self.launch_action = self.addAction("Launch at boot")
         self.launch_action.setData("Launch at boot")
@@ -69,5 +88,12 @@ class TrayMenu(QMenu):
         self.showui_action.blockSignals(False)
 
     def update_stylesheet(self):
-        """ This function handles updating the stylesheet. """
+        """
+        Apply the CSS stylesheet to tray menu components.
+
+        Updates styling rules for the tray menu and its items.
+
+        Returns:
+            None
+        """
         #self.setStyleSheet(f""" """)

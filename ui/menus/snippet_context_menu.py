@@ -12,11 +12,29 @@ class SnippetContextMenu(QMenu):
     deleteRequested = Signal(dict)
 
     def __init__(self, entry: dict, parent=None):
+        """
+        Initialize the SnippetContextMenu.
+
+        Args:
+            entry (dict): The snippet entry data dictionary.
+            parent (QWidget): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.entry = entry
         self._build()
 
     def _build(self):
+        """
+        Build the snippet context menu with all available snippet actions.
+
+        Adds menu items for editing, renaming, and deleting the snippet.
+
+        Returns:
+            None
+        """
         self.addAction(
             "Edit Item",
             lambda: self.editRequested.emit(self.entry)

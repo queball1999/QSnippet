@@ -5,6 +5,6 @@ from .logging_utils import *
 from .sys_utils import *
 from .snippet_db import SnippetDB
 
-import platform
-if platform.system() == "Windows":
+import sys
+if sys.platform == "win32":
     from .reg_utils import *

@@ -1,13 +1,42 @@
-from PySide6.QtWidgets import QComboBox, QStyledItemDelegate, QListView, QMenu, QMessageBox
+from PySide6.QtWidgets import (
+    QComboBox, QStyledItemDelegate, QListView, 
+    QMenu, QMessageBox
+)
 from PySide6.QtCore import Qt, Signal
 
 
+
 class ComboListView(QListView):
-    def __init__(self, parent_combo):
+    def __init__(self, parent_combo) -> None:
+        """
+        Initialize the ComboListView.
+
+        Stores a reference to the parent combo box for delegated
+        interaction handling.
+
+        Args:
+            parent_combo (Any): The associated combo box instance.
+
+        Returns:
+            None
+        """
         super().__init__()
         self.parent_combo = parent_combo
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event) -> None:
+        """
+        Handle mouse press events within the combo list view.
+
+        Right-click displays a context menu, left-click toggles the
+        check state without closing the popup, and other events are
+        handled by the base implementation.
+
+        Args:
+            event (Any): The mouse event.
+
+        Returns:
+            None
+        """ 
         index = self.indexAt(event.pos())
         if not index.isValid():
             return super().mousePressEvent(event)
@@ -26,7 +55,20 @@ class ComboListView(QListView):
 class CheckableComboBox(QComboBox):
     tagDeleteRequested = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
+        """
+        Initialize the CheckableComboBox.
+
+        Configures the combo box to support checkable items, editable
+        input for new tags, custom list view handling, and automatic
+        text updates when item states change.
+
+        Args:
+            parent (Any): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__(parent)
         self.setEditable(True)
         self.lineEdit().setPlaceholderText("Select tags...")
@@ -42,38 +84,87 @@ class CheckableComboBox(QComboBox):
         self.model().dataChanged.connect(lambda *_: self.updateText())
 
         # Connect return press to addNewTagIfTyped
-        self.lineEdit().returnPressed.connect(self._onReturnPressed)
+        self.lineEdit().returnPressed.connect(self.onReturnPressed)
 
-    def _onReturnPressed(self):
+    def onReturnPressed(self) -> None:
+        """
+        Handle the return key press in the line edit.
+
+        Adds any newly typed tags and updates the displayed text.
+
+        Returns:
+            None
+        """
         self.addNewTagIfTyped()
         self.updateText()
 
-    def addItem(self, text, data=None, checked=False):
-        """Add a new item, optionally defaulting to checked."""
+    def addItem(self, text, data=None, checked=False) -> None:
+        """
+        Add a new checkable item to the combo box.
+
+        Args:
+            text (str): The display text for the item.
+            data (Any): Optional associated data.
+            checked (bool): Whether the item should be initially checked.
+
+        Returns:
+            None
+        """
         super().addItem(text, data)
         item = self.model().item(self.count() - 1, 0)
         item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
         item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
 
-    def addItems(self, texts, checked=False):
+    def addItems(self, texts, checked=False) -> None:
+        """
+        Add multiple checkable items to the combo box.
+
+        Args:
+            texts (list): A list of item display texts.
+            checked (bool): Whether the items should be initially checked.
+
+        Returns:
+            None
+        """
         for text in texts:
             self.addItem(text, checked=checked)
 
-    def handleItemPressed(self, index):
-        """Toggle check state when an item is clicked."""
+    def handleItemPressed(self, index) -> None:
+        """
+        Toggle the check state of an item when clicked.
+
+        Args:
+            index (Any): The model index of the clicked item.
+
+        Returns:
+            None
+        """
         item = self.model().itemFromIndex(index)
         item.setCheckState(Qt.Unchecked if item.checkState() == Qt.Checked else Qt.Checked)
 
-    def checkedItems(self):
-        """Return a list of checked item texts."""
+    def checkedItems(self) -> list:
+        """
+        Retrieve the texts of all checked items.
+
+        Returns:
+            list: A list of checked item texts.
+        """
         return [
             self.itemText(i)
             for i in range(self.count())
             if self.model().item(i, 0).checkState() == Qt.Checked
         ]
 
-    def setCheckedItems(self, items):
-        """Check/uncheck items based on provided list of strings."""
+    def setCheckedItems(self, items) -> None:
+        """
+        Set the checked state of items based on a list of strings.
+
+        Args:
+            items (list): A list of item texts to mark as checked.
+
+        Returns:
+            None
+        """
         items = set(i.lower() for i in items)
         for i in range(self.count()):
             item = self.model().item(i, 0)
@@ -81,8 +172,16 @@ class CheckableComboBox(QComboBox):
                 Qt.Checked if item.text().lower() in items else Qt.Unchecked
             )
 
-    def updateText(self):
-        """Update the line edit text based on checked items."""
+    def updateText(self) -> None:
+        """
+        Update the line edit text to reflect checked items.
+
+        Displays no text if none are checked, a single item if only
+        one is checked, or a comma-separated list if multiple are checked.
+
+        Returns:
+            None
+        """
         checked = self.checkedItems()
         if not checked:
             self.lineEdit().setText("")
@@ -91,9 +190,16 @@ class CheckableComboBox(QComboBox):
         else:
             self.lineEdit().setText(", ".join(checked))
 
-    def addNewTagIfTyped(self):
-        print("addNewTagIfTyped")
-        """If the user typed one or more new tags and pressed Enter, add them checked."""
+    def addNewTagIfTyped(self) -> None:
+        """
+        Add new tags entered by the user and mark them as checked.
+
+        Splits the current text by commas, checks existing matching tags,
+        and adds new ones if they do not already exist.
+
+        Returns:
+            None
+        """
         raw_text = self.currentText().strip()
         if not raw_text:
             return
@@ -102,8 +208,8 @@ class CheckableComboBox(QComboBox):
         candidates = [t.strip() for t in raw_text.split(",") if t.strip()]
         existing = {self.itemText(i).lower() for i in range(self.count())}
 
-        print(f"candidates - {candidates}")
-        print(f"existing - {existing}")
+        # print(f"candidates - {candidates}")
+        # print(f"existing - {existing}")
 
         added_any = False
         for tag in candidates:
@@ -122,8 +228,20 @@ class CheckableComboBox(QComboBox):
         if added_any or candidates:
             self.updateText()
 
-    def showContextMenu(self, index, globalPos):
-        """Show context menu with delete option; ask for confirmation."""
+    def showContextMenu(self, index, globalPos) -> None:
+        """
+        Display a context menu for deleting a tag.
+
+        Prompts the user for confirmation before removing the tag
+        and emitting the tagDeleteRequested signal.
+
+        Args:
+            index (Any): The model index of the selected item.
+            globalPos (Any): The global screen position for the menu.
+
+        Returns:
+            None
+        """
         item = self.model().itemFromIndex(index)
         if not item:
             return

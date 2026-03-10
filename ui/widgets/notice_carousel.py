@@ -30,7 +30,22 @@ class NoticeCarouselDialog(QDialog):
     def __init__(self, 
                  notices: list[dict],
                  icon_path=QIcon,
-                 parent=None):
+                 parent=None) -> None:
+        """
+        Initialize the NoticeCarouselDialog.
+
+        Configures dialog properties, stores notice data, initializes UI
+        components, and loads the first notice for display.
+
+        Args:
+            notices (list[dict]): A list of notice dictionaries containing
+                id, title, and message fields.
+            icon_path (QIcon): The window icon to display.
+            parent (Any): Optional parent widget.
+
+        Returns:
+            None
+        """
         super().__init__()
         self.parent = parent
         self.notices = notices
@@ -43,9 +58,18 @@ class NoticeCarouselDialog(QDialog):
         self.setMinimumSize(520, 340)
 
         self.initUI()
-        self._load_notice()
+        self.load_notice()
 
-    def initUI(self):
+    def initUI(self) -> None:
+        """
+        Initialize the dialog user interface.
+
+        Creates labels, text display, navigation buttons, pagination
+        indicator, and footer controls, and arranges them in layouts.
+
+        Returns:
+            None
+        """
         self.top_label = QLabel("What’s new in QSnippet")
         self.top_label.setStyleSheet("font-weight: bold; font-size: 18px;")
 
@@ -95,7 +119,16 @@ class NoticeCarouselDialog(QDialog):
 
     # HELPER FUNCTIONS
 
-    def _load_notice(self):
+    def load_notice(self) -> None:
+        """
+        Load and display the current notice.
+
+        Updates the title, message content, navigation button states,
+        and pagination label based on the current index.
+
+        Returns:
+            None
+        """
         notice = self.notices[self.index]
         notice_count = len(self.notices)
         self.title_label.setText(notice.get("title", "Update"))
@@ -105,29 +138,66 @@ class NoticeCarouselDialog(QDialog):
         self.next_btn.setEnabled(self.index < notice_count - 1)
         self.pagination_label.setText(f"{self.index + 1} / {notice_count}")
 
-    def prev_notice(self):
+    def prev_notice(self) -> None:
+        """
+        Navigate to the previous notice if available.
+
+        Returns:
+            None
+        """
         if self.index > 0:
             self.index -= 1
-            self._load_notice()
+            self.load_notice()
 
-    def next_notice(self):
+    def next_notice(self) -> None:
+        """
+        Navigate to the next notice if available.
+
+        Returns:
+            None
+        """
         if self.index < len(self.notices) - 1:
             self.index += 1
-            self._load_notice()
+            self.load_notice()
 
-    def accept(self):
+    def accept(self) -> None:
+        """
+        Handle dialog acceptance.
+
+        Stores the state of the disable checkbox and closes the dialog.
+
+        Returns:
+            None
+        """
         self.disable_future = self.disable_checkbox.isChecked()
         super().accept()
 
-    def reject(self):
+    def reject(self) -> None:
+        """
+        Handle dialog rejection.
+
+        Stores the state of the disable checkbox and closes the dialog.
+
+        Returns:
+            None
+        """
         self.disable_future = self.disable_checkbox.isChecked()
         super().reject()
 
     @staticmethod
-    def _parse_notice_dt(stem: str, path: Path) -> datetime:
+    def parse_notice_dt(stem: str, path: Path) -> datetime:
         """
-        Parse dt from the filename stem when possible.
-        Falls back to mtime if parsing fails or filename does not match.
+        Parse a datetime from a notice filename stem.
+
+        If the filename matches the expected pattern, extracts the date.
+        Otherwise, falls back to the file modification time.
+
+        Args:
+            stem (str): The filename stem without extension.
+            path (Path): The full path to the notice file.
+
+        Returns:
+            datetime: The parsed or fallback datetime.
         """
         m = NoticeCarouselDialog.DATE_PATTERN.match(stem)
         if not m:
@@ -146,15 +216,23 @@ class NoticeCarouselDialog(QDialog):
     def notice_cycle(
         notices_dir: Path,
         limit: int = NOTICE_LIMIT,
-        max_day_count: int = MAX_DAY_COUNT
-    ) -> int:
+        max_day_count: int = MAX_DAY_COUNT) -> int:
         """
-        Delete any notice older than `max_day_count` days and 
-        keep only the newest files within notice limit.
-        Returns total number of files deleted.
+        Clean up outdated or excess notice files.
+
+        Deletes notices older than the specified maximum age and
+        ensures only the newest files within the limit are retained.
+
+        Args:
+            notices_dir (Path): Directory containing notice YAML files.
+            limit (int): Maximum number of notice files to retain.
+            max_day_count (int): Maximum age in days before deletion.
+
+        Returns:
+            int: The number of files deleted.
         """
         if not notices_dir.exists():
-            logger.debug(f"notice_cycle: notices dir does not exist: {notices_dir}")
+            logger.debug(f"notices dir does not exist: {notices_dir}")
             return 0
 
         now = datetime.now()
@@ -173,16 +251,16 @@ class NoticeCarouselDialog(QDialog):
             if not NoticeCarouselDialog.DATE_PATTERN.match(stem):
                 continue
 
-            dt = NoticeCarouselDialog._parse_notice_dt(stem, path)
+            dt = NoticeCarouselDialog.parse_notice_dt(stem, path)
 
             # Delete notices older than max_day_count
             if cutoff is not None and dt < cutoff:
                 try:
                     path.unlink(missing_ok=True)
                     deleted += 1
-                    logger.info(f"notice_cycle: deleted old (age) notice: {path.name}")
+                    logger.info(f"deleted old (age) notice: {path.name}")
                 except Exception as e:
-                    logger.warning(f"notice_cycle: failed deleting {path}: {e}")
+                    logger.warning(f"failed deleting {path}: {e}")
                 continue
 
             kept.append((dt, path))
@@ -196,9 +274,9 @@ class NoticeCarouselDialog(QDialog):
                 try:
                     path.unlink(missing_ok=True)
                     deleted += 1
-                    logger.info(f"notice_cycle: deleted old (limit) notice: {path.name}")
+                    logger.info(f"deleted old (limit) notice: {path.name}")
                 except Exception as e:
-                    logger.warning(f"notice_cycle: failed deleting {path}: {e}")
+                    logger.warning(f"failed deleting {path}: {e}")
 
         # Return deleted file count
         return deleted
@@ -208,11 +286,21 @@ class NoticeCarouselDialog(QDialog):
         notices_dir: Path,
         dismissed: set[str],
         limit: int = NOTICE_LIMIT,
-        max_day_count: int = MAX_DAY_COUNT
-    ) -> list[dict]:
+        max_day_count: int = MAX_DAY_COUNT) -> list[dict]:
         """
-        This function loads notices from a givem directory.
-        Return a list of valid files.
+        Load unread notices from a directory.
+
+        Filters valid notice files, removes outdated ones, excludes
+        dismissed notices, and returns structured notice data.
+
+        Args:
+            notices_dir (Path): Directory containing notice YAML files.
+            dismissed (set[str]): Set of dismissed notice identifiers.
+            limit (int): Maximum number of notice files to retain.
+            max_day_count (int): Maximum age in days before deletion.
+
+        Returns:
+            list[dict]: A list of unread notice dictionaries.
         """
         logger.debug(f"loading notices from {notices_dir}")
 
@@ -233,7 +321,7 @@ class NoticeCarouselDialog(QDialog):
             if not NoticeCarouselDialog.DATE_PATTERN.match(stem):
                 continue
 
-            dt = NoticeCarouselDialog._parse_notice_dt(stem, path)
+            dt = NoticeCarouselDialog.parse_notice_dt(stem, path)
             candidates.append((dt, stem, path))
 
         if not candidates:

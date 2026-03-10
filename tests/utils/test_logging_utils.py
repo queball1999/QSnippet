@@ -15,9 +15,7 @@ from utils.logging_utils import (
 # -------------------------
 
 def test_compressed_handler_creates_zip_on_rollover(tmp_path):
-    """
-    Rollover should compress the existing log file into a .zip.
-    """
+    """Rollover should compress the existing log file into a .zip."""
     log_path = tmp_path / "test.log"
 
     handler = CompressedRotatingFileHandler(
@@ -41,9 +39,7 @@ def test_compressed_handler_creates_zip_on_rollover(tmp_path):
 
 
 def test_compressed_handler_rotates_backups(tmp_path):
-    """
-    Old compressed logs should rotate and respect backupCount.
-    """
+    """Old compressed logs should rotate and respect backupCount."""
     log_path = tmp_path / "rotate.log"
 
     handler = CompressedRotatingFileHandler(
