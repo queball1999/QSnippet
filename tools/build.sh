@@ -18,7 +18,7 @@ ICON_LINUX="./images/QSnippet.icns"
 ICON_WINDOWS="./images/QSnippet.ico"
 ICON_MAC="./images/QSnippet.icns"
 
-PYINSTALLER_ARGS="--noconfirm --onefile --windowed"
+PYINSTALLER_ARGS="--noconfirm --onefile --windowed --hidden-import=pynput"
 
 echo "Building $APP_NAME v$VERSION..."
 
