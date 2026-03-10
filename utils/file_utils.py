@@ -224,10 +224,6 @@ class FileUtils:
                 documents = user_home / "Documents" / "QSnippet"
                 log_dir = Path("/var/log/QSnippet")
 
-            # Ensure directories exist
-            FileUtils.ensure_dir(documents)
-            FileUtils.ensure_dir(log_dir)
-
             # Detect runtime working directory
             if hasattr(sys, "_MEIPASS"):
                 # Running inside a PyInstaller bundle

@@ -76,14 +76,12 @@ class main():
 
         self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
-        self.documents_dir = self.default_os_paths["documents"]
         self.app_data_dir = self.default_os_paths["app_data"]
         self.images_path = FileUtils.resolve_images_path(self)  # dynamically fetch images directory
 
         # Ensure directories exist
         sys_utils.ensure_directories_exist([
             self.logs_dir,
-            # self.documents_dir,
             self.app_data_dir,
             self.images_path
         ])
@@ -230,36 +228,6 @@ class main():
             self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
             self.handle_start_up_reg()
 
-    def handle_start_up_reg(self):
-        """ Based on settings, set the correct registry key for startup """
-        if sys.platform == "win32":
-            from utils.reg_utils import RegUtils
-
-            if (
-                not RegUtils.is_in_run_key("QSnippet") and 
-                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-                ):  # If auto-start missing and setting is true, enable auto-start
-                RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
-            elif (
-                RegUtils.is_in_run_key("QSnippet") and 
-                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-                ):  # If auto-start exists and setting is false, disable auto-start
-                RegUtils.remove_from_run_key(entry_name="QSnippet")
-
-        elif sys.platform.startswith("linux"):
-            from utils.linux_utils import LinuxUtils
-
-            if (
-                not LinuxUtils.is_autostart_enabled() and 
-                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-                ):  # If auto-start missing and setting is true, enable auto-start
-                LinuxUtils.enable_autostart()
-            elif (
-                LinuxUtils.is_autostart_enabled() and 
-                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
-                ):  # If auto-start exists and setting is false, disable auto-start
-                LinuxUtils.disable_autostart()
-
     def scale_ui_cfg(self):
         """ 
         Reassigns the size attributes with scaled versions. 
@@ -345,6 +313,36 @@ class main():
             for name, size in font_dict.items()
         }
 
+    def handle_start_up_reg(self):
+        """ Based on settings, set the correct registry key for startup """
+        if sys.platform == "win32":
+            from utils.reg_utils import RegUtils
+
+            if (
+                not RegUtils.is_in_run_key("QSnippet") and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                RegUtils.add_to_run_key(app_exe_path=self.app_exe, entry_name="QSnippet")
+            elif (
+                RegUtils.is_in_run_key("QSnippet") and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                RegUtils.remove_from_run_key(entry_name="QSnippet")
+
+        elif sys.platform.startswith("linux"):
+            from utils.linux_utils import LinuxUtils
+
+            if (
+                not LinuxUtils.is_autostart_enabled() and 
+                self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start missing and setting is true, enable auto-start
+                LinuxUtils.enable_autostart()
+            elif (
+                LinuxUtils.is_autostart_enabled() and 
+                not self.settings["general"]["startup_behavior"]["start_at_boot"]["value"]
+                ):  # If auto-start exists and setting is false, disable auto-start
+                LinuxUtils.disable_autostart()
+                
     def check_if_already_running(self, app_name="QSnippet"):
         """
         Check for lock file to determine if app is already running.

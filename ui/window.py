@@ -591,6 +591,9 @@ class QSnippet(QMainWindow):
             self.parent.settings,
         )
 
+        # Refresh the tray settings
+        self.tray.contextMenu().refresh()
+
     def unset_skip_reg(self):
         """
         Reset registry skip flag.

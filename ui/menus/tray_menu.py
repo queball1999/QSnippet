@@ -53,6 +53,21 @@ class TrayMenu(QMenu):
         self.exit_action.setData("Exit")
         self.exit_action.triggered.connect(self.exit_signal.emit)
 
+    def refresh(self):
+        """Sync tray menu checkboxes with current settings."""
+        self.launch_action.blockSignals(True)
+        self.showui_action.blockSignals(True)
+
+        self.launch_action.setChecked(
+            self.main.settings["general"]["startup_behavior"]["start_at_boot"].get("value", False)
+        )
+        self.showui_action.setChecked(
+            self.main.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", False)
+        )
+
+        self.launch_action.blockSignals(False)
+        self.showui_action.blockSignals(False)
+
     def update_stylesheet(self):
         """ This function handles updating the stylesheet. """
         #self.setStyleSheet(f""" """)
