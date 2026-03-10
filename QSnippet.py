@@ -3,9 +3,6 @@ import os
 import logging
 from pathlib import Path
 import psutil, tempfile
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import QSize, QTimer
-from PySide6.QtGui import QFont, QIcon
 
 # Import utility and UI modules
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
@@ -47,6 +44,19 @@ class main():
         Returns:
             None
         """
+        # Import PySide6 here to avoid import errors in test environments without display
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtCore import QSize, QTimer
+        from PySide6.QtGui import QFont, QIcon
+
+        # Store as instance variables for access in other methods
+        self.QApplication = QApplication
+        self.QMessageBox = QMessageBox
+        self.QSize = QSize
+        self.QTimer = QTimer
+        self.QFont = QFont
+        self.QIcon = QIcon
+
         self.create_global_variables()
         self.load_config()      # config.yaml
         self.load_settings()    # settings.yaml
@@ -65,7 +75,7 @@ class main():
         # Default to True if setting missing
         if self.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
             # Use time to avoid interfering with main thread
-            QTimer.singleShot(1000, self.check_notices)
+            self.QTimer.singleShot(1000, self.check_notices)
 
         self.start_program()    # start program
         
@@ -86,7 +96,7 @@ class main():
 
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
-        self.app = QApplication.instance()  # Use the existing QApplication instance
+        self.app = self.QApplication.instance()  # Use the existing QApplication instance
         self.clipboard = self.app.clipboard()
         self.screen_geometry = self.app.primaryScreen().geometry()
         self.screen_width = self.screen_geometry.width()
@@ -246,7 +256,7 @@ class main():
         """
         # Check for config
         if not self.config_file.exists():
-            QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
+            self.QMessageBox.critical(None, "Error", f"Missing config: {self.config_file}")
             sys.exit(1)
 
         # Setup Config file watcher
@@ -294,7 +304,7 @@ class main():
         """
         # Check for config
         if not self.settings_file.exists():
-            QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
+            self.QMessageBox.critical(None, "Error", f"Missing settings: {self.settings_file}")
             sys.exit(1)
 
         # Setup Config file watcher
@@ -378,25 +388,25 @@ class main():
         self.dimensions_windows = self.scale_dict_sizes(size_dict=self.dimensions_windows, screen_geometry=self.screen_geometry)
         
         # Buttons
-        self.mini_button_size = QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
-        self.small_button_size = QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
-        self.medium_button_size = QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
-        self.large_button_size = QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
+        self.mini_button_size = self.QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
+        self.small_button_size = self.QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
+        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
+        self.large_button_size = self.QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
         
         # Font Sizes
-        self.small_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
-        self.small_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["small"], QFont.Bold)
-        self.medium_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
-        self.medium_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], QFont.Bold)
-        self.large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
-        self.large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["large"], QFont.Bold)
-        self.extra_large_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
-        self.extra_large_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], QFont.Bold)
-        self.humongous_font_size = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
-        self.humongous_font_size_bold = QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], QFont.Bold)
+        self.small_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
+        self.small_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"], self.QFont.Bold)
+        self.medium_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
+        self.medium_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], self.QFont.Bold)
+        self.large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
+        self.large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"], self.QFont.Bold)
+        self.extra_large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
+        self.extra_large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], self.QFont.Bold)
+        self.humongous_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
+        self.humongous_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], self.QFont.Bold)
 
         # Widget Sizes
-        self.small_toggle_size = QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
+        self.small_toggle_size = self.QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
 
     def fix_image_paths(self) -> None:
         """
@@ -653,7 +663,7 @@ class main():
 
         dialog = NoticeCarouselDialog(
             unread,
-            icon_path=QIcon(self.images["icon"]),
+            icon_path=self.QIcon(self.images["icon"]),
             parent=self,
         )
         dialog.exec()
@@ -712,6 +722,9 @@ class main():
 
 
 if __name__ == '__main__':
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtGui import QIcon
+
     app = QApplication(sys.argv)
     try:
         ex = main()
