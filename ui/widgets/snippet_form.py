@@ -165,12 +165,12 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.folder_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         # Debounce timer for folder search filtering
-        self._folder_all_paths = []
-        self._folder_search_timer = QTimer(self)
-        self._folder_search_timer.setSingleShot(True)
-        self._folder_search_timer.setInterval(500)  # 500 ms debounce
-        self._folder_search_timer.timeout.connect(self._filter_folder_input)
-        self.folder_input.lineEdit().textEdited.connect(self._on_folder_text_edited)
+        self.folder_all_paths = []
+        self.folder_search_timer = QTimer(self)
+        self.folder_search_timer.setSingleShot(True)
+        self.folder_search_timer.setInterval(500)  # 500 ms debounce
+        self.folder_search_timer.timeout.connect(self.filter_folder_input)
+        self.folder_input.lineEdit().textEdited.connect(self.on_folder_text_edited)
 
         self.populate_folder_input()
 
@@ -185,11 +185,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.populate_tags_input()
 
         # Debounce timer for tags search filtering
-        self._tags_search_timer = QTimer(self)
-        self._tags_search_timer.setSingleShot(True)
-        self._tags_search_timer.setInterval(500)  # 500 ms debounce
-        self._tags_search_timer.timeout.connect(self._filter_tags_input)
-        self.tags_input.lineEdit().textEdited.connect(self._on_tags_text_edited)
+        self.tags_search_timer = QTimer(self)
+        self.tags_search_timer.setSingleShot(True)
+        self.tags_search_timer.setInterval(500)  # 500 ms debounce
+        self.tags_search_timer.timeout.connect(self.filter_tags_input)
+        self.tags_input.lineEdit().textEdited.connect(self.on_tags_text_edited)
 
         # Snippet Input
         self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
@@ -392,11 +392,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         if "Default" not in path_set:
             path_set.add("Default")
 
-        self._folder_all_paths = sorted(path_set, key=str.lower)
+        self.folder_all_paths = sorted(path_set, key=str.lower)
 
         self.folder_input.blockSignals(True)
         self.folder_input.clear()
-        self.folder_input.addItems(self._folder_all_paths)
+        self.folder_input.addItems(self.folder_all_paths)
         self.folder_input.setCurrentText("Default")
         self.folder_input.blockSignals(False)
 
@@ -414,7 +414,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         if tags:
             self.tags_input.addItems(tags)
 
-    def _on_tags_text_edited(self, text: str):
+    def on_tags_text_edited(self, text: str):
         """
         Restart the debounce timer whenever the user edits the tags line edit.
 
@@ -425,10 +425,10 @@ Snippets come in handy for text you enter often or for standard messages you sen
         Returns:
             None
         """
-        self._tags_search_timer.stop()
-        self._tags_search_timer.start()
+        self.tags_search_timer.stop()
+        self.tags_search_timer.start()
 
-    def _filter_tags_input(self):
+    def filter_tags_input(self):
         """
         Filter tag dropdown items based on the last typed segment.
 
@@ -454,7 +454,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         else:
             self.tags_input.hidePopup()
 
-    def _on_folder_text_edited(self, text: str):
+    def on_folder_text_edited(self, text: str):
         """
         Restart the debounce timer whenever the user edits the folder line edit.
 
@@ -465,10 +465,10 @@ Snippets come in handy for text you enter often or for standard messages you sen
         Returns:
             None
         """
-        self._folder_search_timer.stop()
-        self._folder_search_timer.start()
+        self.folder_search_timer.stop()
+        self.folder_search_timer.start()
 
-    def _filter_folder_input(self):
+    def filter_folder_input(self):
         """
         Filter folder dropdown items based on the current search text.
 
@@ -484,9 +484,9 @@ Snippets come in handy for text you enter often or for standard messages you sen
         lower_query = query.lower()
 
         if lower_query:
-            matching = [p for p in self._folder_all_paths if lower_query in p.lower()]
+            matching = [p for p in self.folder_all_paths if lower_query in p.lower()]
         else:
-            matching = list(self._folder_all_paths)
+            matching = list(self.folder_all_paths)
 
         self.folder_input.blockSignals(True)
         self.folder_input.clear()
@@ -564,6 +564,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
             "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
             "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
         ]
+
+        # Add user-defined custom placeholders
+        try:
+            for ph in self.main.snippet_db.get_all_custom_placeholders():
+                token = "{" + ph["name"] + "}"
+                if token not in self.completions:
+                    self.completions.append(token)
+        except Exception:
+            pass
 
         # Add snippet triggers too
         self.completions.extend([s["trigger"] for s in self.main.snippet_db.get_all_snippets()])

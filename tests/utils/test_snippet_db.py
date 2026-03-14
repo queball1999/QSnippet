@@ -1,4 +1,6 @@
 import pytest
+import sqlite3
+from pathlib import Path
 
 from utils.snippet_db import SnippetDB
 
@@ -184,3 +186,80 @@ def test_search_snippets(temp_snippet_db_path):
     results = db.search_snippets("needle")
     assert len(results) >= 1
     assert any(r["trigger"] == "/search" for r in results)
+
+
+def test_default_custom_placeholders_seeded(temp_snippet_db_path):
+    """Default editable custom placeholders should exist and start blank."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    placeholders = db.get_all_custom_placeholders()
+    by_name = {p["name"]: p for p in placeholders}
+
+    for name in ["name", "location", "email", "phone"]:
+        assert name in by_name
+        assert by_name[name]["value"] == ""
+
+
+def test_insert_snippet_works_without_unique_trigger_constraint(tmp_path):
+    """insert_snippet should upsert by trigger even if DB schema lacks UNIQUE(trigger)."""
+    db_path = tmp_path / "legacy_schema.db"
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE snippets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled BOOLEAN DEFAULT True,
+            label TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            snippet TEXT NOT NULL,
+            paste_style TEXT,
+            return_press BOOLEAN DEFAULT False,
+            folder TEXT,
+            tags TEXT DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE custom_placeholders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = SnippetDB(Path(db_path))
+
+    first = {
+        "enabled": True,
+        "label": "Legacy One",
+        "trigger": "/legacy",
+        "snippet": "one",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "Default",
+        "tags": "",
+    }
+    second = {
+        "enabled": True,
+        "label": "Legacy Two",
+        "trigger": "/legacy",
+        "snippet": "two",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "Default",
+        "tags": "",
+    }
+
+    assert db.insert_snippet(first) is True
+    assert db.insert_snippet(second) is True
+
+    rows = [s for s in db.get_all_snippets() if s["trigger"] == "/legacy"]
+    assert len(rows) == 1
+    assert rows[0]["label"] == "Legacy Two"
+    assert rows[0]["snippet"] == "two"

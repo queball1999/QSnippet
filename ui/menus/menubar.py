@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QMenuBar
 from PySide6.QtGui import QIcon, QAction, QActionGroup
-from PySide6.QtCore import Signal, QSize
+from PySide6.QtCore import Signal, QUrl
+from PySide6.QtGui import QDesktopServices
 
 class MenuBar(QMenuBar):
     """
@@ -14,6 +15,7 @@ class MenuBar(QMenuBar):
     logLevelChanged = Signal(str)
     showAppInfo = Signal()
     show_settings = Signal()
+    showPlaceholderManager = Signal()
 
     def __init__(self, main=None, parent=None):
         """
@@ -30,9 +32,9 @@ class MenuBar(QMenuBar):
         self.main = main
         self.parent = parent
         
-        self._build_menus()
+        self.build_menus()
 
-    def _build_menus(self):
+    def build_menus(self):
         """
         Build all menu structures (File, Edit, Tools, Help).
 
@@ -93,13 +95,13 @@ class MenuBar(QMenuBar):
         undo_icon = QIcon.fromTheme("edit-undo")
         undo_act = QAction(undo_icon, "Undo", self)
         undo_act.setShortcut("Ctrl+Z")
-        undo_act.triggered.connect(lambda: self._do_edit_action("undo"))
+        undo_act.triggered.connect(lambda: self.do_edit_action("undo"))
         edit_menu.addAction(undo_act)
 
         redo_icon = QIcon.fromTheme("edit-redo")
         redo_act = QAction(redo_icon, "Redo", self)
         redo_act.setShortcut("Ctrl+Y")
-        redo_act.triggered.connect(lambda: self._do_edit_action("redo"))
+        redo_act.triggered.connect(lambda: self.do_edit_action("redo"))
         edit_menu.addAction(redo_act)
 
         edit_menu.addSeparator()
@@ -107,25 +109,25 @@ class MenuBar(QMenuBar):
         cut_icon = QIcon.fromTheme("edit-cut")
         cut_act = QAction(cut_icon, "Cut", self)
         cut_act.setShortcut("Ctrl+X")
-        cut_act.triggered.connect(lambda: self._do_edit_action("cut"))
+        cut_act.triggered.connect(lambda: self.do_edit_action("cut"))
         edit_menu.addAction(cut_act)
 
         copy_icon = QIcon.fromTheme("edit-copy")
         copy_act = QAction(copy_icon, "Copy", self)
         copy_act.setShortcut("Ctrl+C")
-        copy_act.triggered.connect(lambda: self._do_edit_action("copy"))
+        copy_act.triggered.connect(lambda: self.do_edit_action("copy"))
         edit_menu.addAction(copy_act)
 
         paste_icon = QIcon.fromTheme("edit-paste")
         paste_act = QAction(paste_icon, "Paste", self)
         paste_act.setShortcut("Ctrl+V")
-        paste_act.triggered.connect(lambda: self._do_edit_action("paste"))
+        paste_act.triggered.connect(lambda: self.do_edit_action("paste"))
         edit_menu.addAction(paste_act)
 
         edit_menu.addSeparator()
         rename_act = QAction("Rename", self)
         rename_act.setShortcut("F2")
-        rename_act.triggered.connect(lambda: self._do_edit_action("rename"))
+        rename_act.triggered.connect(lambda: self.do_edit_action("rename"))
         edit_menu.addAction(rename_act)
 
         edit_menu.addSeparator()
@@ -160,7 +162,7 @@ class MenuBar(QMenuBar):
             },
             context_menu: {
                 "Greeting": ("{greeting}", "Insert context-aware greeting"),
-                "Location": ("{location}", "Insert configured location"),
+                "Location": ("{location}", "Insert user-defined location"),
             }
         }
 
@@ -171,6 +173,12 @@ class MenuBar(QMenuBar):
                 act.setStatusTip(tip)
                 act.triggered.connect(lambda checked=False, t=token: self.insert_token(t))
                 menu.addAction(act)
+
+        # Custom placeholders submenu
+        custom_icon = QIcon.fromTheme("user-bookmarks")
+        self.custom_ph_menu = tools_menu.addMenu(custom_icon, "Custom")
+        self.custom_ph_items_start = None  # separator before dynamic items
+        self.build_custom_placeholder_menu_static()
 
         # ----- Help Menu -----
         help_menu = self.addMenu("Help")
@@ -183,6 +191,16 @@ class MenuBar(QMenuBar):
         collect_logs_act.setStatusTip("Export logs to Downloads folder")
         collect_logs_act.triggered.connect(self.collectLogsRequested.emit)
         help_menu.addAction(collect_logs_act)
+
+        # Report a Bug
+        report_bug_act = QAction("Report a Bug", self)
+        report_bug_act.setStatusTip("Open the GitHub bug report form")
+        report_bug_act.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/queball1999/QSnippet/issues/new?template=bug_report.md")
+            )
+        )
+        help_menu.addAction(report_bug_act)
 
         # Log Level submenu
         debug_icon = QIcon.fromTheme("document-properties")
@@ -205,7 +223,7 @@ class MenuBar(QMenuBar):
             if level == log_level:
                 act.setChecked(True)
 
-            act.triggered.connect(lambda checked=False, lvl=level: self._set_log_level(lvl))
+            act.triggered.connect(lambda checked=False, lvl=level: self.set_log_level(lvl))
             log_level_menu.addAction(act)
 
 
@@ -217,8 +235,53 @@ class MenuBar(QMenuBar):
         about_act.triggered.connect(self.showAppInfo.emit)
         help_menu.addAction(about_act)
 
+    # ----- PLACEHOLDER MENU -----
+
+    def build_custom_placeholder_menu_static(self):
+        """
+        Add the static 'Manage Placeholders' action to the Custom submenu.
+        Called once during menu construction.
+        """
+        manage_act = QAction("Manage Placeholders   ", self)
+        manage_act.setShortcut("F6")
+        manage_act.setStatusTip("Add, edit, or delete user-defined placeholders")
+        manage_act.triggered.connect(self.showPlaceholderManager.emit)
+        self.custom_ph_menu.addAction(manage_act)
+        self.custom_ph_menu.addSeparator()
+        # Store where dynamic token actions begin (after separator)
+        self.dynamic_ph_separator = self.custom_ph_menu.actions()[-1]
+
+    def rebuild_custom_placeholder_menu(self, placeholders: list):
+        """
+        Dynamically rebuild the user-defined token items in the Custom submenu.
+
+        Removes all actions after the separator and re-adds them from *placeholders*.
+
+        Args:
+            placeholders (list[dict]): Each dict has keys 'name', 'value', 'description'.
+        """
+        # Remove all actions that come after the separator
+        actions = self.custom_ph_menu.actions()
+        sep_index = actions.index(self.dynamic_ph_separator) if self.dynamic_ph_separator in actions else -1
+        for act in actions[sep_index + 1:]:
+            self.custom_ph_menu.removeAction(act)
+
+        if not placeholders:
+            placeholder_act = QAction("No custom placeholders defined", self)
+            placeholder_act.setEnabled(False)
+            self.custom_ph_menu.addAction(placeholder_act)
+            return
+
+        for ph in placeholders:
+            token = "{" + ph["name"] + "}"
+            tip = ph.get("description") or f"Insert {token}"
+            act = QAction(ph["name"], self)
+            act.setStatusTip(tip)
+            act.triggered.connect(lambda checked=False, t=token: self.insert_token(t))
+            self.custom_ph_menu.addAction(act)
+
     # ----- HELPER FUNCTIONS -----
-    def _set_log_level(self, level: str):
+    def set_log_level(self, level: str):
         """
         Emit a signal to change the application log level.
 
@@ -230,7 +293,7 @@ class MenuBar(QMenuBar):
         """
         self.logLevelChanged.emit(level)
 
-    def _do_edit_action(self, action: str):
+    def do_edit_action(self, action: str):
         """
         Perform edit actions on the currently focused widget.
 

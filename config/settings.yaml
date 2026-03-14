@@ -13,18 +13,25 @@ general:
       default: true
       description: Display the user interface when the application starts.
 
-    expand_folders_on_load:
-      type: bool
-      value: false
-      default: false
-      description: Expand all folder views when loading the application.
-
   extra_features:
     easter_eggs_enabled:
       type: bool
       value: true
       default: true
       description: Enable or disable easter eggs within the application.
+
+  table_behavior:
+    expand_folders_on_load:
+      type: bool
+      value: false
+      default: false
+      description: Expand all folder views when loading the application.
+
+    expand_on_search:
+      type: bool
+      value: true
+      default: true
+      description: Automatically expand all folder views when a search is performed.
 
 notices:
   disable_notices:

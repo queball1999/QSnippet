@@ -169,3 +169,6 @@ config/build_info.py*
 # Exclude package files during build
 package/*
 linux-notes.md
+
+# Exclude ruff
+.ruff_cache/

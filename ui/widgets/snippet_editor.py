@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import logging
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
@@ -11,6 +12,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
 from .home_widget   import HomeWidget
+
+logger = logging.getLogger(__name__)
 
 
 class TextEditFocusFilter(QObject):
@@ -71,6 +74,15 @@ class SnippetEditor(QWidget):
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(100)  # 0.1 seconds
 
+        # Adding safe reload timer to prevent database lock issues
+        self.reload_timer = QTimer(self)
+        self.reload_timer.setSingleShot(True)
+        self.reload_timer.setInterval(50)  # 50ms delay to ensure DB operations complete
+        self.reload_timer.timeout.connect(self.perform_reload)
+
+        # Track expand state before search started (None = not in search mode)
+        self.pre_search_expanded = None
+
         self.initUI()
         self.load_snippets()
 
@@ -101,7 +113,7 @@ class SnippetEditor(QWidget):
         self.filter_dropdown.addItem("Disabled Only")
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
-        arrow = "↓" if not self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
+        arrow = "↓" if not self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
         self.toggle_collapse_button = QPushButton(arrow)
         self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
         self.toggle_collapse_button.setFixedSize(30, 40)
@@ -191,6 +203,40 @@ class SnippetEditor(QWidget):
         snippets = self.main.snippet_db.get_all_snippets()
         self.table.load_entries(snippets)
         self.parent.statusBar().showMessage(old_text)
+
+    def safe_reload_snippets(self):
+        """
+        Schedule a safe reload of snippets with a small delay.
+
+        Uses a QTimer to defer the reload, preventing database lock contention
+        when multiple operations happen in quick succession (e.g., drag-drop,
+        move, delete). This ensures the database finishes its operation before
+        we try to reload.
+
+        Returns:
+            None
+        """
+        self.reload_timer.stop()  # Reset timer if already running
+        self.reload_timer.start()  # Will trigger perform_reload after 50ms
+
+    def perform_reload(self):
+        """
+        Perform the actual reload after the safety delay.
+
+        Called by the reload_timer when it expires after a database operation.
+
+        Returns:
+            None
+        """
+        try:
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except Exception as e:
+            logger.error(f"Error during safe reload: {e}")
+            self.main.message_box.warning(
+                f"Error reloading snippets: {e}",
+                title="Reload Error"
+            )
 
     def on_entry_selected(self, entry):
         """
@@ -501,9 +547,16 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        self.main.snippet_db.rename_folder(old_path, new_path)
-        self.load_snippets()
-        self.trigger_reload.emit()
+        try:
+            self.main.snippet_db.rename_folder(old_path, new_path)
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except Exception as e:
+            logger.error(f"Error moving folder: {e}")
+            self.main.message_box.warning(
+                f"Error moving folder: {e}",
+                title="Move Error"
+            )
 
     def on_snippet_moved(self, entry: dict, new_folder: str):
         """
@@ -518,10 +571,17 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        updated = {**entry, "folder": new_folder}
-        self.main.snippet_db.insert_snippet(updated)
-        self.load_snippets()
-        self.trigger_reload.emit()
+        try:
+            updated = {**entry, "folder": new_folder}
+            self.main.snippet_db.insert_snippet(updated)
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except Exception as e:
+            logger.error(f"Error moving snippet: {e}")
+            self.main.message_box.warning(
+                f"Error moving snippet: {e}",
+                title="Move Error"
+            )
 
     def on_edit_snippet(self, entry=None, *_):
         """
@@ -659,14 +719,28 @@ class SnippetEditor(QWidget):
         Execute the snippet search operation.
 
         Filters snippets based on keyword and enabled/disabled status,
-        updates the table with results, and optionally triggers an
-        easter egg dialog.
+        updates the table with results, temporarily expands folders when searching
+        (if enabled), and optionally triggers an easter egg dialog.
 
         Returns:
             None
         """
         keyword = self.search_bar.text().strip()
         filter_mode = self.filter_dropdown.currentText()
+        is_searching = bool(keyword)
+
+        # Check setting for expand on search behavior
+        expand_on_search = self.main.settings["general"]["table_behavior"]["expand_on_search"].get("value", True)
+
+        # On transition into search mode: save current expand state
+        if is_searching and self.pre_search_expanded is None:
+            self.pre_search_expanded = self.toggle_collapse_button.text() == "↑"
+
+        # On transition out of search mode: capture restore target and reset state
+        restore_expanded = None
+        if not is_searching and self.pre_search_expanded is not None:
+            restore_expanded = self.pre_search_expanded
+            self.pre_search_expanded = None
 
         # Get results from DB
         results = self.main.snippet_db.search_snippets(keyword)
@@ -679,10 +753,23 @@ class SnippetEditor(QWidget):
 
         self.table.load_entries(results)
 
+        # Override expansion state based on search mode
+        if expand_on_search:
+            if is_searching:
+                self.table.expandAll()
+                self.toggle_collapse_button.setText("↑")
+            elif restore_expanded is not None:
+                if restore_expanded:
+                    self.table.expandAll()
+                    self.toggle_collapse_button.setText("↑")
+                else:
+                    self.table.collapseAll()
+                    self.toggle_collapse_button.setText("↓")
+
         # Easter Egg
         # If user types "cat" in search, show cat dialog
         if (
-            keyword.lower() == "cat" and 
+            keyword.lower() == "cat" and
             self.main.settings["general"]["extra_features"]["easter_eggs_enabled"].get("value", True)
             ):
             self.search_bar.clear()

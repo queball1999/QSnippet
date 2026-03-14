@@ -189,7 +189,11 @@ class QSnippet(QMainWindow):
         self.menubar.logLevelChanged.connect(self.handle_log_level)
         self.menubar.showAppInfo.connect(self.handle_show_info)
         self.menubar.show_settings.connect(self.show_settings_window)
+        self.menubar.showPlaceholderManager.connect(self.show_placeholder_manager)
         self.setMenuBar(self.menubar)
+
+        # Populate any already-saved custom placeholders into the menu
+        self.refresh_placeholder_integrations()
 
     def init_toolbar(self) -> None:
         """
@@ -729,6 +733,46 @@ class QSnippet(QMainWindow):
             logging.exception("Failed to build about info")
             return False
         
+    def show_placeholder_manager(self) -> None:
+        """
+        Show the placeholder manager dialog.
+
+        Lets users add, edit, or delete user-defined placeholders.
+        Refreshes the menu and intellisense after any change.
+
+        Returns:
+            None
+        """
+        logger.info("Showing placeholder manager")
+
+        from ui.widgets.placeholder_dialog import PlaceholderDialog
+
+        self.placeholder_dialog = PlaceholderDialog(
+            snippet_db=self.parent.snippet_db,
+            parent=self,
+        )
+        self.placeholder_dialog.placeholders_updated.connect(self.refresh_placeholder_integrations)
+        self.placeholder_dialog.exec()
+
+    def refresh_placeholder_integrations(self) -> None:
+        """
+        Synchronise the Custom placeholder menu, snippet-form intellisense,
+        and the SnippetExpander's cached custom placeholders with the current
+        state of the database.
+
+        Returns:
+            None
+        """
+        logger.debug("Refreshing placeholder integrations")
+        try:
+            placeholders = self.parent.snippet_db.get_all_custom_placeholders()
+            self.menubar.rebuild_custom_placeholder_menu(placeholders)
+            self.editor.form.fill_intellisense_popup_list()
+            # Reload the expander cache so expansions pick up the latest values
+            self.snippet_service.refresh()
+        except Exception:
+            logger.warning("Failed to refresh placeholder integrations", exc_info=True)
+
     def show_settings_window(self) -> None:
         """
         Show the settings window dialog.
@@ -740,12 +784,12 @@ class QSnippet(QMainWindow):
 
         from ui.widgets.settings import SettingsDialog
 
-        self._settings_dialog = SettingsDialog(
+        self.settings_dialog = SettingsDialog(
             settings=self.parent.settings,
             save_callback=self.save_settings,
             parent=self,
         )
-        self._settings_dialog.exec()
+        self.settings_dialog.exec()
 
     def save_settings(self, settings: dict) -> None:
         """

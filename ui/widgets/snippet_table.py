@@ -31,7 +31,6 @@ class SnippetTable(QTreeView):
     # Emitted when drag-and-drop moves a folder or snippet to a new location
     folderMoved = Signal(str, str)   # old_path, new_path
     snippetMoved = Signal(dict, str) # entry dict, new_folder_path
-
     def __init__(self, main, parent=None):
         """
         Initialize the SnippetTable widget with model, proxy, and signal connections.
@@ -51,7 +50,7 @@ class SnippetTable(QTreeView):
         super().__init__(parent)
         self.main = main
         self.parent = parent
-        self._entries = []
+        self.entries = []
 
         # Set Font Size
         self.setFont(self.main.small_font_size)
@@ -67,7 +66,7 @@ class SnippetTable(QTreeView):
         self.setModel(self.proxy)
 
         # Set Column Width
-        self._configure_columns()
+        self.configure_columns()
 
         # Ensure we select rows
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -83,18 +82,18 @@ class SnippetTable(QTreeView):
         self.setSortingEnabled(True)
 
         # Track current selection
-        #self.clicked.connect(self._on_click)
-        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        #self.clicked.connect(self.on_click)
+        self.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
         # Remove empty folders automatically
-        self.model.rowsRemoved.connect(self._on_rows_removed)
+        self.model.rowsRemoved.connect(self.on_rows_removed)
 
-        # Guard flag to suppress _on_rows_removed during drag-and-drop moves
-        self._is_dragging = False
+        # Guard flag to suppress on_rows_removed during drag-and-drop moves
+        self.is_dragging = False
 
         logger.info("SnippetTable initialized successfully")
 
-    def _configure_columns(self):
+    def configure_columns(self):
         """
         Configure table column widths and header properties.
 
@@ -127,13 +126,55 @@ class SnippetTable(QTreeView):
         except Exception as e:
             logger.error(f"Error configuring columns: {e}")
 
+    def save_expansion_state(self) -> dict:
+        """
+        Save the current expansion state of all folders.
+
+        Safely handles cases where QStandardItem objects have been deleted
+        by Qt's C++ layer.
+
+        Returns:
+            dict: A dictionary mapping folder paths to their expansion state (bool).
+        """
+        expansion_state = {}
+        for folder_path, folder_item in self.folders.items():
+            try:
+                src_idx = self.model.indexFromItem(folder_item)
+                if src_idx.isValid():
+                    proxy_idx = self.proxy.mapFromSource(src_idx)
+                    expansion_state[folder_path] = self.isExpanded(proxy_idx)
+            except RuntimeError:
+                # QStandardItem was already deleted by Qt (e.g. after drag-drop)
+                pass
+        logger.debug(f"Saved expansion state for {len(expansion_state)} folders")
+        return expansion_state
+
+    def restore_expansion_state(self, expansion_state: dict) -> None:
+        """
+        Restore the previous expansion state of folders.
+
+        Args:
+            expansion_state (dict): Dictionary mapping folder paths to their desired state.
+
+        Returns:
+            None
+        """
+        for folder_path, should_expand in expansion_state.items():
+            if folder_path in self.folders:
+                folder_item = self.folders[folder_path]
+                src_idx = self.model.indexFromItem(folder_item)
+                if src_idx.isValid():
+                    proxy_idx = self.proxy.mapFromSource(src_idx)
+                    self.setExpanded(proxy_idx, should_expand)
+        logger.debug(f"Restored expansion state for {len(expansion_state)} folders")
+
     def load_entries(self, entries):
         """
         Load and display snippet entries in the table organized by folders.
 
         Populates the tree view with snippets organized hierarchically by folder.
         Clears existing data, creates folder nodes, and adds snippet rows with
-        associated metadata. Expands folders based on settings.
+        associated metadata. Preserves folder expansion state if possible.
 
         Args:
             entries (list): List of dictionaries containing snippet data with keys:
@@ -151,6 +192,9 @@ class SnippetTable(QTreeView):
         logger.info("Loading snippet entries into table")
         logger.debug("Entry count: %d", len(entries))
 
+        # Save current expansion state before clearing (only if folders dict exists)
+        previous_expansion_state = self.save_expansion_state() if hasattr(self, 'folders') and self.folders else {}
+
         if not entries:
             logger.debug("No entries were loaded")
             return      # if none, return
@@ -162,7 +206,7 @@ class SnippetTable(QTreeView):
 
         for entry in entries:
             folder = entry.get('folder', 'Default')
-            parent = self._get_or_create_folder(folder)
+            parent = self.get_or_create_folder(folder)
 
             # Create child snippet row
             label = entry.get('label', '')
@@ -179,16 +223,19 @@ class SnippetTable(QTreeView):
 
             parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
 
-        # Check if we need to expand all folders on load
-        # Default to False if setting missing
-        if self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False):
+        # Restore previous expansion state
+        if previous_expansion_state:
+            logger.info("Restoring previous folder expansion state")
+            self.restore_expansion_state(previous_expansion_state)
+        # Otherwise, check if we need to expand all folders based on settings
+        elif self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False):
             logger.info("Expanding all folders on load as per settings")
             self.expandAll()    # Expand all folders on load.
 
-        self._configure_columns()   # Resize
+        self.configure_columns()   # Resize
         logger.info("Snippet table populated")
 
-    def _get_or_create_folder(self, folder_path: str) -> QStandardItem:
+    def get_or_create_folder(self, folder_path: str) -> QStandardItem:
         """
         Return the QStandardItem for the given slash-delimited folder path,
         creating intermediate parent folder nodes as needed.
@@ -256,7 +303,7 @@ class SnippetTable(QTreeView):
         logger.info("Reloading snippet table")
         self.load_entries(entries)
 
-    def _on_click(self, proxy_idx):
+    def on_click(self, proxy_idx):
         """
         Handle click event on a table item and emit the selected entry.
 
@@ -280,11 +327,11 @@ class SnippetTable(QTreeView):
         else:
             self.entrySelected.emit(None)
 
-    def _on_selection_changed(self, selected, deselected):
+    def on_selection_changed(self, selected, deselected):
         """
         Handle selection change events in the table.
 
-        Processes selection model changes and delegates to _on_click to emit
+        Processes selection model changes and delegates to on_click to emit
         the appropriate entrySelected signal.
 
         Args:
@@ -304,7 +351,7 @@ class SnippetTable(QTreeView):
         # any column will do, we just need row/parent
         proxy_idx = indexes[0]
         logger.debug("Selection changed: %d indexes", len(indexes))
-        self._on_click(proxy_idx)
+        self.on_click(proxy_idx)
 
     def contextMenuEvent(self, event):
         """
@@ -487,7 +534,7 @@ class SnippetTable(QTreeView):
 
         return data
 
-    def _on_rows_removed(self, parent_idx: QModelIndex, start: int, end: int):
+    def on_rows_removed(self, parent_idx: QModelIndex, start: int, end: int):
         """
         Automatically remove empty folders when all their children are deleted.
 
@@ -504,7 +551,7 @@ class SnippetTable(QTreeView):
             None
         """
         # Never remove folders in the middle of an InternalMove drag-drop
-        if self._is_dragging:
+        if self.is_dragging:
             return
         if not parent_idx.isValid():
             return
@@ -576,16 +623,14 @@ class SnippetTable(QTreeView):
         """
         Handle drag-and-drop drops and persist path changes to the database.
 
-        Qt's InternalMove serialises the dragged item via MIME and recreates it
-        at the destination, which can wipe custom UserRole data on the moved item.
-        We therefore:
+        Instead of letting Qt perform an InternalMove (which destroys and
+        recreates items, wiping UserRole data), we:
 
           1. Capture identity keys from the *pre-drop* item while UserRole is intact.
-          2. Let Qt perform the in-model move (``super().dropEvent``).
-          3. Use ``currentIndex()`` - Qt keeps selection on the moved item -
-             to locate it at its new position.
-          4. Walk up the *stationary* parent's intact UserRole to derive the new path.
-          5. Emit the appropriate signal so the editor persists the change to the DB.
+          2. Resolve the drop target and indicator to determine the new path.
+          3. Emit the appropriate signal so the editor persists the change to the DB.
+          4. Ignore the Qt-level move — the editor's reload will rebuild the tree
+             from the database, which is the single source of truth.
 
         Args:
             event (QDropEvent): The drop event.
@@ -593,17 +638,21 @@ class SnippetTable(QTreeView):
         Returns:
             None
         """
+        logger.debug("dropEvent triggered")
+
         # Identify dragged item BEFORE the move
         sel = self.selectedIndexes()
         if not sel:
-            super().dropEvent(event)
+            logger.debug("dropEvent: no selected indexes, ignoring")
+            event.ignore()
             return
 
         proxy_col0 = sel[0].sibling(sel[0].row(), 0)
         src_col0 = self.proxy.mapToSource(proxy_col0)
         pre_item = self.model.itemFromIndex(src_col0)
         if pre_item is None:
-            super().dropEvent(event)
+            logger.debug("dropEvent: pre_item is None, ignoring")
+            event.ignore()
             return
 
         pre_data   = pre_item.data(Qt.UserRole)
@@ -611,55 +660,65 @@ class SnippetTable(QTreeView):
         is_snippet = isinstance(pre_data, dict) and "trigger" in pre_data
 
         if not is_folder and not is_snippet:
-            super().dropEvent(event)
+            logger.debug("dropEvent: item is neither folder nor snippet, ignoring")
+            event.ignore()
             return
 
-        # Stable keys captured before Qt destroys + recreates the item
+        # Stable keys captured while UserRole is still intact
         old_path     = pre_data.get("path", "")   if is_folder  else ""
         old_folder   = pre_data.get("folder", "") if is_snippet else ""
         item_segment = old_path.split("/")[-1]     if is_folder  else ""
 
-        # Capture drop target info BEFORE the drop
-        # currentIndex() after super().dropEvent() is unreliable for root-level
-        # drops: Qt clears the selection when a folder becomes a top-level row
-        # via InternalMove, so the post-drop lookup silently fails and the
-        # folderMoved signal is never emitted.  Resolving from the pre-drop
-        # event target avoids that race entirely.
-        target_proxy_idx = self.indexAt(event.pos())
+        # Capture drop target info from the UNMODIFIED model
+        drop_pos = event.position().toPoint()
+        target_proxy_idx = self.indexAt(drop_pos)
         drop_indicator   = self.dropIndicatorPosition()
 
-        # Perform the drop
-        self._is_dragging = True
-        super().dropEvent(event)
-        self._is_dragging = False
+        logger.debug(
+            "dropEvent: is_folder=%s, is_snippet=%s, old_path='%s', old_folder='%s', "
+            "target_valid=%s, drop_indicator=%s",
+            is_folder, is_snippet, old_path, old_folder,
+            target_proxy_idx.isValid(), drop_indicator,
+        )
+
+        # Do NOT call super().dropEvent() — we handle the move ourselves via
+        # the database. The editor's reload will rebuild the tree from DB.
+        event.setDropAction(Qt.IgnoreAction)
+        event.accept()
 
         if is_folder:
-            new_path = self._resolve_drop_parent_path(
+            new_path = self.resolve_drop_parent_path(
                 target_proxy_idx, drop_indicator, item_segment
             )
+            logger.debug("dropEvent folder: new_path='%s', old_path='%s'", new_path, old_path)
             if new_path and new_path != old_path:
-                logger.info("Folder drag-moved: '%s'; '%s'", old_path, new_path)
+                logger.info("Folder drag-moved: '%s' -> '%s'", old_path, new_path)
                 self.folderMoved.emit(old_path, new_path)
 
         elif is_snippet:
-            new_folder = self._resolve_drop_parent_path(
+            new_folder = self.resolve_drop_parent_path(
                 target_proxy_idx, drop_indicator, None
             )
+            logger.debug("dropEvent snippet: new_folder='%s', old_folder='%s'", new_folder, old_folder)
             if new_folder is None:
                 logger.warning(
                     "Snippet '%s' dropped at root - ignoring",
                     pre_data.get("trigger"),
                 )
                 return
+
             if new_folder != old_folder:
+                # Snippet moved to a different folder
                 logger.info(
-                    "Snippet '%s' drag-moved: '%s'; '%s'",
+                    "Snippet '%s' drag-moved: '%s' -> '%s'",
                     pre_data.get("trigger"), old_folder, new_folder,
                 )
                 self.snippetMoved.emit(pre_data, new_folder)
+            else:
+                logger.debug("dropEvent snippet: same folder drop ignored (no reordering)")
 
     # Path helpers
-    def _resolve_drop_parent_path(
+    def resolve_drop_parent_path(
         self,
         target_proxy_idx: QModelIndex,
         drop_indicator,
@@ -716,16 +775,33 @@ class SnippetTable(QTreeView):
             # AboveItem / BelowItem; same level as the target (target's parent)
             p = target_item.parent()
             if p is None:
-                # Target is a root item; new item goes to root too
-                return item_segment if is_folder_drag else None
-            pd = p.data(Qt.UserRole)
-            parent_path = pd.get("path", p.text()) if isinstance(pd, dict) else p.text()
+                # Target is a root-level item.
+                if is_folder_drag:
+                    # Folder drag: place at root level
+                    return item_segment
+
+                # Snippet drag: snippets cannot live at root level.
+                # If the target is itself a folder, treat the drop as landing
+                # *inside* that folder so the move isn't silently ignored when
+                # the cursor is slightly above/below the row centre.
+                if isinstance(target_data, dict) and target_data.get("_type") == "folder":
+                    parent_path = target_data.get("path", target_item.text())
+                    logger.debug(
+                        "resolve_drop_parent_path: AboveItem/BelowItem on root folder "
+                        "'%s' — treating as OnItem for snippet",
+                        parent_path,
+                    )
+                else:
+                    return None
+            else:
+                pd = p.data(Qt.UserRole)
+                parent_path = pd.get("path", p.text()) if isinstance(pd, dict) else p.text()
 
         if is_folder_drag:
             return parent_path + "/" + item_segment
         return parent_path
 
-    def _compute_item_path(self, item: QStandardItem) -> str:
+    def compute_item_path(self, item: QStandardItem) -> str:
         """
         Walk up the parent chain to build the full slash-delimited folder path.
 

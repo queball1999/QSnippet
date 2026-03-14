@@ -11,6 +11,29 @@ logger = logging.getLogger(__name__)
 
 
 class SnippetDB:
+    DEFAULT_CUSTOM_PLACEHOLDERS = [
+        {
+            "name": "name",
+            "value": "",
+            "description": "Your name (editable, blank by default)",
+        },
+        {
+            "name": "location",
+            "value": "",
+            "description": "Your location (editable, blank by default)",
+        },
+        {
+            "name": "email",
+            "value": "",
+            "description": "Your email address (editable, blank by default)",
+        },
+        {
+            "name": "phone",
+            "value": "",
+            "description": "Your phone number (editable, blank by default)",
+        },
+    ]
+
     def __init__(self, db_path: Path) -> None:
         """
         Initialize the SnippetDB instance.
@@ -26,10 +49,12 @@ class SnippetDB:
         """
         logger.info("Initializing SnippetDB")
         self.db_path = db_path
-        logger.debug(f"SQLite Path: {db_path}")
+        logger.debug("SQLite path: %s", db_path)
         self.conn = sqlite3.connect(self.db_path)
         self.create_table()
         self.create_indexes()
+        self.create_custom_placeholders_table()
+        self.seed_default_custom_placeholders()
         self.seed_empty_db()
         logger.info("SnippetDB initialized successfully")
 
@@ -56,9 +81,9 @@ class SnippetDB:
                         tags TEXT DEFAULT ''
                     )
                 """)
-            logger.info("Snippet tabe should now exist in database")
-        except Exception as e:
-            logger.error(f"An error occured while ensuring snippet table exists in database: {e}")
+            logger.info("Snippet table should now exist in database")
+        except Exception:
+            logger.exception("An error occurred while ensuring snippet table exists in database")
             return None
 
     def create_indexes(self) -> None:
@@ -77,8 +102,8 @@ class SnippetDB:
                 self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_tags ON snippets(tags);")
 
                 logger.info("Indexes should now exist in database")
-        except Exception as e:
-            logger.error(f"An error occured while ensuring indexes exists in database: {e}")
+        except Exception:
+            logger.exception("An error occurred while ensuring indexes exist in database")
             return None
 
     def seed_empty_db(self) -> None:
@@ -98,8 +123,8 @@ class SnippetDB:
                 logger.info("Database has already been seeded. Skipping...")
                 return  # DB already has snippets, do nothing
         
-        except Exception as e:
-            logger.error(f"An error occured: {e}")
+        except Exception:
+            logger.exception("An error occurred while checking whether the database needs seeding")
             return
 
         default_snippets = [
@@ -115,8 +140,8 @@ class SnippetDB:
             }
         ]
 
-        logger.info("Attempting to seed the databse with default snippets.")
-        logger.debug(f"Default Snippets: {default_snippets}")
+        logger.info("Attempting to seed the database with default snippets")
+        logger.debug("Default snippet seed count: %d", len(default_snippets))
         try:
             with self.conn:
                 for entry in default_snippets:
@@ -131,8 +156,8 @@ class SnippetDB:
                     )
                 logger.info("The database has been seeded successfully!")
 
-        except Exception as e:
-            logger.error(f"An error occured while seeding the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while seeding the database")
             return
 
     # CRUD Operations
@@ -150,8 +175,14 @@ class SnippetDB:
             bool | None: True if a new snippet was created, False if updated,
                 or None if an error occurred.
         """
-        logger.info("Inserting snippet into the databse.")
-        logger.debug(f"Entry: {entry}")
+        logger.info("Inserting snippet into the database")
+        logger.debug(
+            "Snippet entry fields: id=%s trigger=%s folder=%s enabled=%s",
+            entry.get("id"),
+            entry.get("trigger"),
+            entry.get("folder"),
+            entry.get("enabled"),
+        )
         entry_id = entry.get("id")
 
         # Commenting out as this breaks making new snippets
@@ -182,25 +213,48 @@ class SnippetDB:
                     """, entry)
                     
                 else:   # insert new snippet
-                    logger.info("No existing snippet found. Making new entry.")
-                    self.conn.execute("""
-                        INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
-                        VALUES (:enabled, :label, :trigger, :snippet, :paste_style, :return_press, :folder, :tags)
-                        ON CONFLICT(trigger) DO UPDATE SET
-                            enabled = excluded.enabled,
-                            label = excluded.label,
-                            snippet = excluded.snippet,
-                            paste_style = excluded.paste_style,
-                            return_press = excluded.return_press,
-                            folder = excluded.folder,
-                            tags = excluded.tags
-                    """, entry)
+                    logger.info("No existing snippet id found; checking for existing trigger")
+
+                    trigger = entry.get("trigger")
+                    cur.execute(
+                        "SELECT id FROM snippets WHERE trigger = ?",
+                        (trigger,),
+                    )
+                    trigger_row = cur.fetchone()
+
+                    if trigger_row:
+                        logger.info(
+                            "Existing snippet found for trigger '%s' (id=%s). Updating entry.",
+                            trigger,
+                            trigger_row[0],
+                        )
+                        update_entry = dict(entry)
+                        update_entry["id"] = trigger_row[0]
+                        self.conn.execute("""
+                            UPDATE snippets
+                            SET
+                                enabled = :enabled,
+                                label = :label,
+                                trigger = :trigger,
+                                snippet = :snippet,
+                                paste_style = :paste_style,
+                                return_press = :return_press,
+                                folder = :folder,
+                                tags = :tags
+                            WHERE id = :id
+                        """, update_entry)
+                    else:
+                        logger.info("No existing trigger found. Inserting new entry.")
+                        self.conn.execute("""
+                            INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
+                            VALUES (:enabled, :label, :trigger, :snippet, :paste_style, :return_press, :folder, :tags)
+                        """, entry)
 
                 logger.info("Snippet created successfully.")
                 return not exists   # True if it was new
             
-        except Exception as e:
-            logger.error(f"An error occured while inserting a snippet into the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while inserting a snippet into the database")
             return None
 
     def delete_snippet(self, snippet_id: id) -> None:
@@ -214,15 +268,15 @@ class SnippetDB:
             None
         """
         logger.info("Deleting snippet from the database.")
-        logger.debug(f"Snippet ID: {snippet_id}")
+        logger.debug("Snippet ID: %s", snippet_id)
 
         try:
             with self.conn:
                 self.conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
                 logger.info("Snippet deleted from the database")
 
-        except Exception as e:
-            logger.error(f"An error occured while deleting a snippet from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while deleting a snippet from the database")
             return None
 
     def get_all_snippets(self) -> List[Dict[str, Any]]:
@@ -237,7 +291,7 @@ class SnippetDB:
 
         try:
             cur = self.conn.cursor()
-            cur.execute("SELECT * FROM snippets")
+            cur.execute("SELECT * FROM snippets ORDER BY folder, id")
             columns = [col[0] for col in cur.description]
             rows = cur.fetchall()
             result = []
@@ -249,10 +303,10 @@ class SnippetDB:
                 result.append(item)
 
             logger.info("Successfully fetched all snippets from database.")
-            logger.debug(f"Snippets: {result}")
+            logger.debug("Fetched snippets count: %d", len(result))
             return result
-        except Exception as e:
-            logger.error(f"An error occured while retrieving snippets from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while retrieving snippets from the database")
             return None
 
     def get_snippet(self, snippet_id: int) -> Dict[str, Any]:
@@ -267,7 +321,7 @@ class SnippetDB:
                 an empty dictionary if not found, or None if an error occurred.
         """
         logger.info("Fetching snippet from the database.")
-        logger.debug(f"Snippet ID: {snippet_id}")
+        logger.debug("Snippet ID: %s", snippet_id)
 
         try:
             cur = self.conn.cursor()
@@ -278,13 +332,18 @@ class SnippetDB:
                 columns = [col[0] for col in cur.description]
                 result = dict(zip(columns, row))
                 logger.info("Successfully fetched all snippets from database.")
-                logger.debug(f"Snippet: {result}")
+                logger.debug(
+                    "Snippet fetched: id=%s trigger=%s folder=%s",
+                    result.get("id"),
+                    result.get("trigger"),
+                    result.get("folder"),
+                )
                 return result
             
             logger.info("No entry found for the snippet provided.")
             return {}
-        except Exception as e:
-            logger.error(f"An error occured while retrieving a snippet from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while retrieving a snippet from the database")
             return None
     
     def get_random_snippet(self) -> Dict[str, Any]:
@@ -313,10 +372,15 @@ class SnippetDB:
             item["return_press"] = bool(item["return_press"])
 
             logger.info("Successfully fetched random snippets from database.")
-            logger.debug(f"Snippet: {item}")
+            logger.debug(
+                "Random snippet selected: id=%s trigger=%s folder=%s",
+                item.get("id"),
+                item.get("trigger"),
+                item.get("folder"),
+            )
             return item
-        except Exception as e:
-            logger.error(f"An error occured while retrieving a random snippet from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while retrieving a random snippet from the database")
             return None
     
     def rename_folder(self, old_folder: str, new_folder: str) -> None:
@@ -334,7 +398,7 @@ class SnippetDB:
             None
         """
         logger.info("Renaming a folder within the database.")
-        logger.debug(f"OLD Folder: {old_folder} - NEW Folder {new_folder}")
+        logger.debug("Renaming folder: old=%s new=%s", old_folder, new_folder)
 
         try:
             with self.conn:
@@ -349,8 +413,8 @@ class SnippetDB:
                     (new_folder, len(old_folder), old_folder + "/%")
                 )
                 logger.info("Successfully renamed folder and its sub-folders.")
-        except Exception as e:
-            logger.error(f"An error occured while renaming a folder within the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while renaming a folder within the database")
             return None
         
     def delete_folder(self, folder: str) -> None:
@@ -366,7 +430,7 @@ class SnippetDB:
             None
         """
         logger.info("Deleting a folder within the database.")
-        logger.debug(f"Folder {folder}")
+        logger.debug("Folder: %s", folder)
 
         try:
             with self.conn:
@@ -375,8 +439,8 @@ class SnippetDB:
                     (folder, folder + "/%")
                 )
                 logger.info("Successfully deleted folder and its sub-folders.")
-        except Exception as e:
-            logger.error(f"An error occured while deleting a folder from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while deleting a folder from the database")
             return None
 
     def get_all_folders(self) -> List[str]:
@@ -395,10 +459,10 @@ class SnippetDB:
             folders = [row[0] for row in rows if row[0]]
 
             logger.info("Successfully fetched all folders.")
-            logger.debug(f"Folders: {folders}")
+            logger.debug("Folders: %s", folders)
             return folders
-        except Exception as e:
-            logger.error(f"An error occured while fetching all folders from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while fetching all folders from the database")
             return None
 
     def rename_snippet(self, snippet_id: int, new_label: str) -> None:
@@ -413,15 +477,15 @@ class SnippetDB:
             None
         """
         logger.info("Renaming a snippet within the database.")
-        logger.debug(f"Snippet ID: {snippet_id} | New Label: {new_label}")
+        logger.debug("Snippet ID: %s | New label: %s", snippet_id, new_label)
 
         try:
             with self.conn:
                 self.conn.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
                 logger.info("Successfully renamed snippet.")
 
-        except Exception as e:
-            logger.error(f"An error occured while renaming a snippit within the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while renaming a snippet within the database")
             return None
         
     def search_snippets(self, keyword: str) -> List[Dict[str, Any]]:
@@ -439,7 +503,7 @@ class SnippetDB:
                 or None if an error occurred.
         """
         logger.info("Searching snippets in the database.")
-        logger.debug(f"Keyword: {keyword}")
+        logger.debug("Keyword: %s", keyword)
         
         try:
             cur = self.conn.cursor()
@@ -453,10 +517,10 @@ class SnippetDB:
             results =  [dict(zip(columns, row)) for row in cur.fetchall()]
 
             logger.info("Successfully searched snippets.")
-            logger.debug(f"Results: {results}")
+            logger.debug("Search results count: %d", len(results))
             return results
-        except Exception as e:
-            logger.error(f"An error occured while searching snippets within the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while searching snippets within the database")
             return None
     
     def get_all_tags(self) -> list[str]:
@@ -484,10 +548,10 @@ class SnippetDB:
 
             result = sorted(tags)
             logger.info("Successfully fetched all tags.")
-            logger.debug(f"Tags: {result}")
+            logger.debug("Tags: %s", result)
             return result
-        except Exception as e:
-            logger.error(f"An error occured while fetching tags from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while fetching tags from the database")
             return None
     
     def delete_tag(self, tag: str) -> None:
@@ -501,7 +565,7 @@ class SnippetDB:
             None
         """
         logger.info("Deleting tag from snippets.")
-        logger.debug(f"Tag: {tag}")
+        logger.debug("Tag: %s", tag)
 
         try:
             cur = self.conn.cursor()
@@ -515,8 +579,8 @@ class SnippetDB:
                 with self.conn:
                     self.conn.execute("UPDATE snippets SET tags = ? WHERE id = ?", (new_tags, sid))
                     logger.info("Successfully deleted tag from snippets.")
-        except Exception as e:
-            logger.error(f"An error occured while deleting a tag from the database: {e}")
+        except Exception:
+            logger.exception("An error occurred while deleting a tag from the database")
             return None
 
     # Import / Export
@@ -531,14 +595,14 @@ class SnippetDB:
             None
         """
         logger.info("Exporting snippets to YAML.")
-        logger.debug(f"YAML Path: {yaml_path}")
+        logger.debug("YAML path: %s", yaml_path)
 
         try:
             snippets = self.get_all_snippets()
             FileUtils.export_snippets_yaml(yaml_path, snippets)
             logger.info("Successfully exported snippets to YAML.")
-        except Exception as e:
-            logger.error(f"An error occured while exporting your snippets: {e}")
+        except Exception:
+            logger.exception("An error occurred while exporting snippets")
             return None
 
     def import_from_yaml(self, yaml_path: Path) -> None:
@@ -552,19 +616,152 @@ class SnippetDB:
             None
         """
         logger.info("Importing snippets from YAML.")
-        logger.debug(f"YAML Path: {yaml_path}")
+        logger.debug("YAML path: %s", yaml_path)
 
         try:
             snippets = FileUtils.import_snippets_yaml(yaml_path)
-            logger.debug(f"Imported Snippets: {snippets}")
+            logger.debug("Imported snippets count: %d", len(snippets))
 
             for entry in snippets:
                 self.insert_snippet(entry)
 
             logger.info("Successfully imported snippets from YAML.")
-        except Exception as e:
-            logger.error(f"An error occured while importing your snippets: {e}")
+        except Exception:
+            logger.exception("An error occurred while importing snippets")
             return None
+
+    # Custom Placeholders
+
+    def create_custom_placeholders_table(self) -> None:
+        """
+        Create the custom_placeholders table if it does not exist.
+
+        Returns:
+            None
+        """
+        logger.info("Ensuring custom_placeholders table exists in database")
+        try:
+            with self.conn:
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS custom_placeholders (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name        TEXT UNIQUE NOT NULL,
+                        value       TEXT NOT NULL DEFAULT '',
+                        description TEXT NOT NULL DEFAULT ''
+                    )
+                """)
+            logger.info("custom_placeholders table ensured")
+        except Exception:
+            logger.exception("Error ensuring custom_placeholders table")
+
+    def seed_default_custom_placeholders(self) -> None:
+        """
+        Ensure built-in editable custom placeholders exist.
+
+        Inserts the defaults once and leaves any user-modified values intact.
+
+        Returns:
+            None
+        """
+        logger.info("Ensuring built-in editable custom placeholders exist")
+        try:
+            with self.conn:
+                for entry in self.DEFAULT_CUSTOM_PLACEHOLDERS:
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO custom_placeholders (name, value, description)
+                        VALUES (?, ?, ?)
+                        """,
+                        (entry["name"], entry["value"], entry["description"]),
+                    )
+            logger.info("Built-in editable custom placeholders ensured")
+        except Exception:
+            logger.exception("Error seeding built-in custom placeholders")
+
+    def get_all_custom_placeholders(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve all user-defined custom placeholders.
+
+        Returns:
+            list[dict]: A list of dicts with keys id, name, value, description.
+        """
+        logger.info("Fetching all custom placeholders")
+        try:
+            cur = self.conn.cursor()
+            cur.execute("SELECT id, name, value, description FROM custom_placeholders ORDER BY name ASC")
+            rows = cur.fetchall()
+            result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3]} for r in rows]
+            logger.debug("Custom placeholders fetched: %d", len(result))
+            return result
+        except Exception:
+            logger.exception("Error fetching custom placeholders")
+            return []
+
+    def insert_custom_placeholder(self, entry: Dict[str, Any]) -> bool:
+        """
+        Insert a new custom placeholder.
+
+        Args:
+            entry (dict): Dict with keys name, value, description.
+
+        Returns:
+            bool: True on success, False otherwise.
+        """
+        logger.info("Inserting custom placeholder: %s", entry.get("name"))
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "INSERT INTO custom_placeholders (name, value, description) VALUES (:name, :value, :description)",
+                    entry,
+                )
+            logger.info("Custom placeholder inserted successfully")
+            return True
+        except Exception:
+            logger.exception("Error inserting custom placeholder")
+            return False
+
+    def update_custom_placeholder(self, entry: Dict[str, Any]) -> bool:
+        """
+        Update an existing custom placeholder by id.
+
+        Args:
+            entry (dict): Dict with keys id, name, value, description.
+
+        Returns:
+            bool: True on success, False otherwise.
+        """
+        logger.info("Updating custom placeholder id=%s", entry.get("id"))
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE custom_placeholders SET name=:name, value=:value, description=:description WHERE id=:id",
+                    entry,
+                )
+            logger.info("Custom placeholder updated successfully")
+            return True
+        except Exception:
+            logger.exception("Error updating custom placeholder")
+            return False
+
+    def delete_custom_placeholder(self, placeholder_id: int) -> bool:
+        """
+        Delete a custom placeholder by id.
+
+        Args:
+            placeholder_id (int): The id of the placeholder to delete.
+
+        Returns:
+            bool: True on success, False otherwise.
+        """
+        logger.info("Deleting custom placeholder id=%s", placeholder_id)
+        try:
+            with self.conn:
+                self.conn.execute("DELETE FROM custom_placeholders WHERE id=?", (placeholder_id,))
+            logger.info("Custom placeholder deleted successfully")
+            return True
+        except Exception:
+            logger.exception("Error deleting custom placeholder")
+            return False
 
     # Close Connection
     def close(self):
@@ -578,6 +775,6 @@ class SnippetDB:
         try:
             self.conn.close()
             logger.info("Database connection closed successfully.")
-        except Exception as e:
-            logger.error(f"An error occured while closing the database connection: {e}")
+        except Exception:
+            logger.exception("An error occurred while closing the database connection")
             return None

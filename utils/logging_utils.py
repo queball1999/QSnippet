@@ -94,22 +94,26 @@ class AppLogger:
         Configure the root logger with a compressed rotating file handler.
 
         Sets the logging level, applies formatting, removes existing
-        handlers if present, and attaches the configured handler.
+        handlers if present, and attaches the configured handlers.
 
         Returns:
             None
         """
-        handler = CompressedRotatingFileHandler(
+        # File handler - write to log file with UTF-8 encoding
+        file_handler = CompressedRotatingFileHandler(
             self.log_filepath,
             maxBytes=self.max_bytes,
-            backupCount=self.backup_count
+            backupCount=self.backup_count,
+            encoding='utf-8'
         )
         formatter = logging.Formatter('[%(levelname)s] %(asctime)s [%(name)s]: %(message)s')
-        handler.setFormatter(formatter)
+        file_handler.setFormatter(formatter)
         
         logger = logging.getLogger()
         logger.setLevel(self.log_level)
-        # Remove any existing handlers if reconfiguring.
-        if logger.hasHandlers():
-            logger.handlers.clear()
-        logger.addHandler(handler)
+        # Remove and close existing handlers if reconfiguring.
+        if logger.handlers:
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+        logger.addHandler(file_handler)

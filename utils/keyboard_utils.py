@@ -32,6 +32,7 @@ class SnippetExpander():
 
         self.snippets_db = snippets_db
         self.snippets = self.snippets_db.get_all_snippets()
+        self.custom_placeholders = self.snippets_db.get_all_custom_placeholders()
         self.parent = parent
 
         self.disabled = False
@@ -44,9 +45,9 @@ class SnippetExpander():
 
         self.build_trigger_map()
 
-        self.listener = self.keyboard.Listener(on_press=self._on_key_press)
+        self.listener = self.keyboard.Listener(on_press=self.on_key_press)
         self.controller = self.keyboard.Controller()
-        self._paste_mod = self.keyboard.Key.cmd if platform.system() == "Darwin" else self.keyboard.Key.ctrl
+        self.paste_mod = self.keyboard.Key.cmd if platform.system() == "Darwin" else self.keyboard.Key.ctrl
 
         logger.info("SnippetExpander initialized successfully")
 
@@ -75,15 +76,15 @@ class SnippetExpander():
         pattern = r'(?:' + '|'.join(escapes) + r')\Z'
         self.trigger_regex = re.compile(pattern)
 
-        logger.debug(f"Trigger map size: {len(self.trigger_map)}")
-        logger.debug(f"Trigger regex: {self.trigger_regex}")
+        logger.debug("Trigger map size: %d", len(self.trigger_map))
+        logger.debug("Trigger regex pattern: %s", self.trigger_regex.pattern)
 
     def refresh_snippets(self) -> None:
         """
-        Reload snippets from the database and rebuild trigger handling.
+        Reload snippets and custom placeholders from the database.
 
-        Refreshes the internal snippet list, trigger map, and trigger
-        prefix characters to reflect database updates.
+        Refreshes the internal snippet list, trigger map, trigger prefix
+        characters, and cached custom placeholders to reflect database updates.
 
         Returns:
             None
@@ -91,11 +92,12 @@ class SnippetExpander():
         logger.info("Refreshing snippets from database")
 
         self.snippets = self.snippets_db.get_all_snippets()
+        self.custom_placeholders = self.snippets_db.get_all_custom_placeholders()
         self.build_trigger_map()    # Rebuild trigger map
         # This single line fixes the issue where new snippets don't get recognized until restart
         # smh...
         self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)   # Reload prefixes
-        logging.info("SnippetExpander reloaded snippets from DB.")
+        logger.info("SnippetExpander reloaded snippets from DB")
 
     def retrieve_trigger_chars(self, snippets) -> list:
         """
@@ -115,7 +117,7 @@ class SnippetExpander():
             if snippet.get("enabled", True) and prefix not in trigger_prefixs:
                 trigger_prefixs.append(prefix)
 
-        logger.debug(f"Trigger prefixes: {trigger_prefixs}")
+        logger.debug("Trigger prefixes: %s", trigger_prefixs)
         return trigger_prefixs
 
     def clear_buffer(self) -> None:
@@ -134,7 +136,7 @@ class SnippetExpander():
         self.cursor_pos = 0
         self.trigger_flag = False
 
-    def _on_key_press(self, key) -> None:
+    def on_key_press(self, key) -> None:
         """
         Handle key press events from the keyboard listener.
 
@@ -245,10 +247,10 @@ class SnippetExpander():
         # Trigger mode detection
         self.trigger_flag = True
 
-        logger.debug(f"Appending character to buffer: {char}")
+        logger.debug("Appending character to buffer: %r", char)
             
         # Still in trigger mode; update buffer
-        logger.debug(f"Appending buffer with {char}")
+        logger.debug("Appending buffer with character")
         self.buffer = self.buffer[:self.cursor_pos] + char + self.buffer[self.cursor_pos:]
         self.cursor_pos += 1
 
@@ -258,10 +260,10 @@ class SnippetExpander():
             self.buffer = self.buffer[overflow:]
             self.cursor_pos = max(0, self.cursor_pos - overflow)
 
-        logger.debug(f"Buffer state: '{self.buffer}' Cursor: {self.cursor_pos}")
+        logger.debug("Buffer length: %d Cursor: %d", len(self.buffer), self.cursor_pos)
 
         response = self.trigger_regex.search(self.buffer)
-        logger.debug(f"Regex match: {response}")
+        logger.debug("Regex match found: %s", bool(response))
 
         if response:
             trigger = response.group(0)
@@ -269,7 +271,7 @@ class SnippetExpander():
             style = snippet.get("paste_style", "Keystroke")
             return_press = snippet.get("return_press", False)
 
-            logger.info(f"Trigger matched: {trigger}")
+            logger.info("Trigger matched: %s", trigger)
             self.expand(trigger, snippet["snippet"], style, return_press)
             self.clear_buffer()
 
@@ -290,7 +292,7 @@ class SnippetExpander():
         # NOTE: xclip or xsel must be installed on Linux for clipboard support
 
         pyperclip.copy(snippet)
-        with self.controller.pressed(self._paste_mod):
+        with self.controller.pressed(self.paste_mod):
             self.controller.press("v")
             self.controller.release("v")
 
@@ -319,8 +321,8 @@ class SnippetExpander():
                 else:
                     self.controller.press(ch)
                     self.controller.release(ch)
-        except Exception as e:
-            logger.error(f"Error occured while expanding keystrokes: {e}")
+        except Exception:
+            logger.exception("Error occurred while expanding keystrokes")
         finally:
             # Re-enable listener
             # Always re-enable to avoid errors
@@ -344,7 +346,7 @@ class SnippetExpander():
         Returns:
             None
         """
-        logger.info(f"Expanding snippet for trigger: {trigger}")
+        logger.info("Expanding snippet for trigger: %s", trigger)
 
         # Preprocess for placeholders and nested snippets
         snippet = self.process_snippet_text(snippet)
@@ -443,10 +445,13 @@ class SnippetExpander():
 
             # Contextual
             "{greeting}": greeting,                       # Good afternoon
-            "{location}": "Unknown Location",             # still placeholder
         }
         for key, val in replacements.items():
             text = text.replace(key, val)
+
+        # --- User-defined custom placeholders ---
+        for ph in self.custom_placeholders:
+            text = text.replace(f"{{{ph['name']}}}", ph["value"])
 
         # --- Nested snippets ---
         nested_pattern = re.compile(r"\{\W(.+?)\}")
@@ -463,7 +468,7 @@ class SnippetExpander():
             trigger = match.group(0)[1:-1]
 
             if trigger in seen:     # detect circular call
-                logger.error(f"Detected circular reference for trigger '{trigger}'")
+                logger.error("Detected circular reference for trigger '%s'", trigger)
                 replacement = f"{{/{trigger}}}"
 
             elif trigger in self.trigger_map:   # check for trigger in map

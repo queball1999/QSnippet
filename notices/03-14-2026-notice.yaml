@@ -1,0 +1,21 @@
+id: "notice-2026-03-14"
+title: "March 14, 2026"
+message: |
+  New organization and editor improvements are now available in QSnippet.
+
+  **What’s New**
+    - Added support for reverting settings to default values.
+    - Added nested folder support for organizing snippets in multi-level paths.
+    - Improved folder and tag dropdown handling for more reliable selection and editing.
+    - Added user-defined custom placeholders for reusable values.
+    - Open **Manage Placeholders** from **Tools -> Custom -> Manage Placeholders**
+    - Added keyboard shortcut **F6** to open the placeholder manager quickly.
+    - Custom placeholders are available in snippet autocomplete and menu insertion.
+
+  **Examples**
+    - `{work_email}` -> `name@company.com`
+    - `{ticket_prefix}` -> `INC-`
+    - `{signature_short}` -> `Thanks,\nName`
+
+  **Tip**
+    - Use custom placeholders for any repeated static text you type often.
