@@ -203,3 +203,72 @@ def test_get_default_paths_structure(monkeypatch, tmp_path):
 
     for key, value in paths.items():
         assert isinstance(value, Path)
+
+
+# merge_dict
+class TestMergeDict:
+    def test_missing_key_added_from_default(self):
+        default = {"a": 1, "b": 2}
+        user = {"a": 10}
+        result = FileUtils.merge_dict(default, user)
+        assert result == {"a": 10, "b": 2}
+
+    def test_user_value_preserved_at_correct_path(self):
+        default = {"color": "blue"}
+        user = {"color": "red"}
+        result = FileUtils.merge_dict(default, user)
+        assert result["color"] == "red"
+
+    def test_orphan_key_pruned(self):
+        default = {"a": 1}
+        user = {"a": 1, "orphan": "gone"}
+        result = FileUtils.merge_dict(default, user)
+        assert "orphan" not in result
+
+    def test_moved_key_uses_default_at_new_path(self):
+        # 'foo' moved from top-level to nested in default; user still has old location
+        default = {"category": {"foo": 42}}
+        user = {"foo": 99, "category": {}}
+        result = FileUtils.merge_dict(default, user)
+        assert "foo" not in result             # old top-level entry removed
+        assert result["category"]["foo"] == 42  # new path uses default value
+
+    def test_setting_leaf_value_preserved(self):
+        default = {
+            "start_at_boot": {
+                "type": "bool", "value": True, "default": True,
+                "description": "Launch on boot."
+            }
+        }
+        user = {
+            "start_at_boot": {
+                "type": "bool", "value": False, "default": True,
+                "description": "Launch on boot."
+            }
+        }
+        result = FileUtils.merge_dict(default, user)
+        assert result["start_at_boot"]["value"] is False
+
+    def test_setting_leaf_metadata_refreshed(self):
+        default = {
+            "start_at_boot": {
+                "type": "bool", "value": True, "default": True,
+                "description": "New description from update."
+            }
+        }
+        user = {
+            "start_at_boot": {
+                "type": "bool", "value": False, "default": False,
+                "description": "Old description."
+            }
+        }
+        result = FileUtils.merge_dict(default, user)
+        assert result["start_at_boot"]["value"] is False          # user value kept
+        assert result["start_at_boot"]["default"] is True         # default refreshed
+        assert result["start_at_boot"]["description"] == "New description from update."
+
+    def test_type_mismatch_uses_default(self):
+        default = {"nested": {"x": 1}}
+        user = {"nested": "not-a-dict"}
+        result = FileUtils.merge_dict(default, user)
+        assert result["nested"] == {"x": 1}

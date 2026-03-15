@@ -381,33 +381,53 @@ class FileUtils:
         return Path(main_file).resolve().parent
 
     @staticmethod
+    def _is_setting_leaf(d: dict) -> bool:
+        """True for settings leaf nodes that carry both 'value' and 'default' keys."""
+        return "value" in d and "default" in d
+
+    @staticmethod
     def merge_dict(default: dict, user: dict) -> dict:
         """
-        Recursively merge default values into user-provided values.
+        Recursively merge default and user dicts with default structure as authoritative.
 
-        User values are treated as the source of truth. Only missing keys
-        from the default dictionary are added to the user dictionary.
+        Default structure wins completely - keys present in user but absent from
+        default are pruned. Keys that moved to a different path in the default are
+        removed from their old location and replaced at the new location using the
+        default value. For settings leaf nodes (dicts containing both 'value' and
+        'default' keys), only the 'value' field is carried from the user; all other
+        metadata ('type', 'default', 'description', 'hidden') always comes from the
+        default. For plain scalar values, the user value is preserved at exact path
+        matches.
 
         Args:
             default (dict): The default configuration dictionary.
             user (dict): The user configuration dictionary.
 
         Returns:
-            dict: The merged dictionary.
+            dict: Merged dictionary following default structure exactly.
         """
         if not isinstance(default, dict):
             return user
 
-        merged = dict(user)
+        merged = {}
 
         for key, default_val in default.items():
-            if key not in merged:
+            if key not in user:
                 merged[key] = default_val
-            else:
-                user_val = merged[key]
-                if isinstance(default_val, dict) and isinstance(user_val, dict):
+            elif isinstance(default_val, dict) and isinstance(user[key], dict):
+                user_val = user[key]
+                if FileUtils._is_setting_leaf(default_val):
+                    # Settings leaf: refresh all metadata from default, preserve only value
+                    merged[key] = dict(default_val)
+                    merged[key]["value"] = user_val.get("value", default_val["value"])
+                else:
                     merged[key] = FileUtils.merge_dict(default_val, user_val)
+            elif not isinstance(default_val, dict):
+                merged[key] = user[key]  # both scalars - user wins
+            else:
+                merged[key] = default_val  # type mismatch - default wins
 
+        # Keys in user not present in default are intentionally omitted (pruned)
         return merged
 
     @staticmethod
