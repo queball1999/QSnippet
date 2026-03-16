@@ -68,7 +68,10 @@ class QSnippet(QMainWindow):
         self.resize(width, height)
         logger.debug("Window dimensions set: %sx%s", width, height)
 
-        self.snippet_service = SnippetService(self.parent.snippet_db_file)
+        self.snippet_service = SnippetService(
+            self.parent.snippet_db_file,
+            settings_provider=lambda: self.parent.settings,
+        )
 
         self.initUI()
         self.init_menubar()
@@ -861,7 +864,8 @@ class QSnippet(QMainWindow):
         """
         Exit the application cleanly.
 
-        Stops the snippet service, hides the tray icon, and exits the process.
+        Stops the snippet service, clears managed clipboard data, closes
+        database connections, hides the tray icon, and exits the process.
 
         Returns:
             None
@@ -870,7 +874,8 @@ class QSnippet(QMainWindow):
             SystemExit: Always raised when exiting the application.
         """
         logger.info("Exiting QSnippet")
-        self.stop_service()
+        self.snippet_service.shutdown()
+        self.parent.snippet_db.close()
         self.tray.hide()
         sys.exit()
 

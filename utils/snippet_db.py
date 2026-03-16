@@ -1,6 +1,8 @@
 import sqlite3
 import logging
 import random
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -49,14 +51,105 @@ class SnippetDB:
         """
         logger.info("Initializing SnippetDB")
         self.db_path = db_path
+        self.lock = threading.RLock()
+        self.closed = False
         logger.debug("SQLite path: %s", db_path)
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(
+            self.db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
+        self.conn.row_factory = sqlite3.Row
+        self.configure_connection()
         self.create_table()
         self.create_indexes()
         self.create_custom_placeholders_table()
         self.seed_default_custom_placeholders()
         self.seed_empty_db()
         logger.info("SnippetDB initialized successfully")
+
+    def configure_connection(self) -> None:
+        """
+        Configure SQLite pragmas for safer concurrent local access.
+
+        Returns:
+            None
+        """
+        logger.debug("Configuring SQLite connection pragmas")
+        with self.lock:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout = 30000")
+            self.conn.execute("PRAGMA synchronous = NORMAL")
+            self.conn.execute("PRAGMA foreign_keys = ON")
+
+    def ensure_open(self) -> None:
+        """
+        Ensure the database connection is still open.
+
+        Returns:
+            None
+
+        Raises:
+            RuntimeError: If the database connection has already been closed.
+        """
+        if self.closed:
+            raise RuntimeError("The database connection is already closed")
+
+    @contextmanager
+    def managed_connection(self, write: bool = False):
+        """
+        Provide synchronized access to the shared SQLite connection.
+
+        Args:
+            write (bool): When True, wrap the connection in a transaction.
+
+        Returns:
+            sqlite3.Connection: The active SQLite connection.
+        """
+        with self.lock:
+            self.ensure_open()
+            if write:
+                with self.conn:
+                    yield self.conn
+            else:
+                yield self.conn
+
+    def normalize_snippet_row(self, row: sqlite3.Row | None) -> Dict[str, Any]:
+        """
+        Normalize a snippet row from SQLite into application types.
+
+        Args:
+            row (sqlite3.Row | None): The row to normalize.
+
+        Returns:
+            Dict[str, Any]: A normalized snippet dictionary.
+        """
+        if row is None:
+            return {}
+
+        item = dict(row)
+        if "enabled" in item:
+            item["enabled"] = bool(item["enabled"])
+        if "return_press" in item:
+            item["return_press"] = bool(item["return_press"])
+        return item
+
+    def escape_like_value(self, value: str) -> str:
+        """
+        Escape SQLite LIKE wildcard characters in user-supplied text.
+
+        Args:
+            value (str): The raw value to escape.
+
+        Returns:
+            str: The escaped value.
+        """
+        return (
+            str(value)
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
 
     def create_table(self) -> None:
         """
@@ -67,8 +160,8 @@ class SnippetDB:
         """
         logger.info("Ensuring snippet table exists in database")
         try:
-            with self.conn:
-                self.conn.execute("""
+            with self.managed_connection(write=True) as conn:
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS snippets (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         enabled BOOLEAN DEFAULT True,
@@ -95,11 +188,12 @@ class SnippetDB:
         """
         logger.info("Ensuring indexes exists in database")
         try:
-            with self.conn:
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_enabled ON snippets(enabled);")
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_folder ON snippets(folder);")
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_label ON snippets(label);")
-                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_tags ON snippets(tags);")
+            with self.managed_connection(write=True) as conn:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_enabled ON snippets(enabled);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_folder ON snippets(folder);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_label ON snippets(label);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_tags ON snippets(tags);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_trigger ON snippets(trigger);")
 
                 logger.info("Indexes should now exist in database")
         except Exception:
@@ -115,9 +209,10 @@ class SnippetDB:
         """
         logger.info("Checking to see if the database needs to be seeded.")
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM snippets")
-            count = cur.fetchone()[0]
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM snippets")
+                count = cur.fetchone()[0]
 
             if count > 0:
                 logger.info("Database has already been seeded. Skipping...")
@@ -143,9 +238,9 @@ class SnippetDB:
         logger.info("Attempting to seed the database with default snippets")
         logger.debug("Default snippet seed count: %d", len(default_snippets))
         try:
-            with self.conn:
+            with self.managed_connection(write=True) as conn:
                 for entry in default_snippets:
-                    self.conn.execute(
+                    conn.execute(
                         """
                         INSERT INTO snippets
                         (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
@@ -191,14 +286,14 @@ class SnippetDB:
             return None """
         
         try:
-            with self.conn:
-                cur = self.conn.cursor()
+            with self.managed_connection(write=True) as conn:
+                cur = conn.cursor()
                 cur.execute("SELECT 1 FROM snippets WHERE id = ?", (entry_id,))
                 exists = cur.fetchone() is not None
 
                 if exists:  # update existing
                     logger.info("Found existing snippet. Updating entry.")
-                    self.conn.execute("""
+                    conn.execute("""
                         UPDATE snippets
                         SET
                             enabled = :enabled,
@@ -230,7 +325,7 @@ class SnippetDB:
                         )
                         update_entry = dict(entry)
                         update_entry["id"] = trigger_row[0]
-                        self.conn.execute("""
+                        conn.execute("""
                             UPDATE snippets
                             SET
                                 enabled = :enabled,
@@ -245,7 +340,7 @@ class SnippetDB:
                         """, update_entry)
                     else:
                         logger.info("No existing trigger found. Inserting new entry.")
-                        self.conn.execute("""
+                        conn.execute("""
                             INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
                             VALUES (:enabled, :label, :trigger, :snippet, :paste_style, :return_press, :folder, :tags)
                         """, entry)
@@ -271,8 +366,8 @@ class SnippetDB:
         logger.debug("Snippet ID: %s", snippet_id)
 
         try:
-            with self.conn:
-                self.conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
+            with self.managed_connection(write=True) as conn:
+                conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
                 logger.info("Snippet deleted from the database")
 
         except Exception:
@@ -290,17 +385,10 @@ class SnippetDB:
         logger.info("Fetching all snippets from the database.")
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT * FROM snippets ORDER BY folder, id")
-            columns = [col[0] for col in cur.description]
-            rows = cur.fetchall()
-            result = []
-
-            for row in rows:
-                item = dict(zip(columns, row))
-                item["enabled"] = bool(item["enabled"])  # convert 1/0 to True/False
-                item["return_press"] = bool(item["return_press"])
-                result.append(item)
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippets ORDER BY folder, id")
+                result = [self.normalize_snippet_row(row) for row in cur.fetchall()]
 
             logger.info("Successfully fetched all snippets from database.")
             logger.debug("Fetched snippets count: %d", len(result))
@@ -324,13 +412,13 @@ class SnippetDB:
         logger.debug("Snippet ID: %s", snippet_id)
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT * FROM snippets WHERE trigger = ?", (snippet_id,))
-            row = cur.fetchone()
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippets WHERE id = ?", (snippet_id,))
+                row = cur.fetchone()
 
             if row:
-                columns = [col[0] for col in cur.description]
-                result = dict(zip(columns, row))
+                result = self.normalize_snippet_row(row)
                 logger.info("Successfully fetched all snippets from database.")
                 logger.debug(
                     "Snippet fetched: id=%s trigger=%s folder=%s",
@@ -345,6 +433,69 @@ class SnippetDB:
         except Exception:
             logger.exception("An error occurred while retrieving a snippet from the database")
             return None
+
+    def get_snippet_by_trigger(self, trigger: str) -> Dict[str, Any]:
+        """
+        Retrieve a single snippet by trigger.
+
+        Args:
+            trigger (str): The trigger text to query.
+
+        Returns:
+            Dict[str, Any] | None: The snippet dictionary if found,
+                an empty dictionary if not found, or None if an error occurred.
+        """
+        logger.info("Fetching snippet by trigger from the database.")
+        logger.debug("Trigger: %s", trigger)
+
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippets WHERE trigger = ?", (trigger,))
+                row = cur.fetchone()
+
+            if row:
+                return self.normalize_snippet_row(row)
+
+            return {}
+        except Exception:
+            logger.exception("An error occurred while retrieving a snippet by trigger")
+            return None
+
+    def get_enabled_trigger_index(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve the index of enabled trigger.
+
+        Returns:
+            List[Dict[str, Any]] | None: Trigger metadata used by the keyboard
+                expander, or None if an error occurred.
+        """
+        logger.info("Fetching enabled trigger index from the database.")
+
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, trigger, paste_style, return_press
+                    FROM snippets
+                    WHERE enabled = 1
+                    ORDER BY LENGTH(trigger) DESC, trigger ASC
+                    """
+                )
+                rows = cur.fetchall()
+
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["return_press"] = bool(item["return_press"])
+                result.append(item)
+
+            logger.debug("Enabled trigger index count: %d", len(result))
+            return result
+        except Exception:
+            logger.exception("An error occurred while retrieving the enabled trigger index")
+            return None
     
     def get_random_snippet(self) -> Dict[str, Any]:
         """
@@ -357,30 +508,19 @@ class SnippetDB:
         logger.info("Fetching random snippet from the database.")
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT * FROM snippets WHERE enabled = 1")
-            rows = cur.fetchall()
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippets WHERE enabled = 1")
+                rows = cur.fetchall()
 
             if not rows:
                 logger.info("No entry found for the snippet.")
                 return {}
             
-            columns = [col[0] for col in cur.description]
             row = random.choice(rows)
-            item = dict(zip(columns, row))
-            item["enabled"] = bool(item["enabled"])
-            item["return_press"] = bool(item["return_press"])
-
-            logger.info("Successfully fetched random snippets from database.")
-            logger.debug(
-                "Random snippet selected: id=%s trigger=%s folder=%s",
-                item.get("id"),
-                item.get("trigger"),
-                item.get("folder"),
-            )
-            return item
+            return self.normalize_snippet_row(row)
         except Exception:
-            logger.exception("An error occurred while retrieving a random snippet from the database")
+            logger.exception("An error occurred while retrieving a snippet by trigger")
             return None
     
     def rename_folder(self, old_folder: str, new_folder: str) -> None:
@@ -401,16 +541,18 @@ class SnippetDB:
         logger.debug("Renaming folder: old=%s new=%s", old_folder, new_folder)
 
         try:
-            with self.conn:
+            escaped_old_folder = self.escape_like_value(old_folder)
+
+            with self.managed_connection(write=True) as conn:
                 # Rename exact match
-                self.conn.execute(
+                conn.execute(
                     "UPDATE snippets SET folder = ? WHERE folder = ?",
                     (new_folder, old_folder)
                 )
                 # Rename any sub-paths: old_folder/... -> new_folder/...
-                self.conn.execute(
-                    "UPDATE snippets SET folder = ? || substr(folder, ? + 1) WHERE folder LIKE ?",
-                    (new_folder, len(old_folder), old_folder + "/%")
+                conn.execute(
+                    "UPDATE snippets SET folder = ? || substr(folder, ? + 1) WHERE folder LIKE ? ESCAPE '\\'",
+                    (new_folder, len(old_folder), f"{escaped_old_folder}/%")
                 )
                 logger.info("Successfully renamed folder and its sub-folders.")
         except Exception:
@@ -433,10 +575,12 @@ class SnippetDB:
         logger.debug("Folder: %s", folder)
 
         try:
-            with self.conn:
-                self.conn.execute(
-                    "DELETE FROM snippets WHERE folder = ? OR folder LIKE ?",
-                    (folder, folder + "/%")
+            escaped_folder = self.escape_like_value(folder)
+
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "DELETE FROM snippets WHERE folder = ? OR folder LIKE ? ESCAPE '\\'",
+                    (folder, f"{escaped_folder}/%")
                 )
                 logger.info("Successfully deleted folder and its sub-folders.")
         except Exception:
@@ -453,9 +597,10 @@ class SnippetDB:
         logger.info("Fetching all folders within the database.")
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT DISTINCT folder FROM snippets WHERE folder IS NOT NULL AND folder != ''")
-            rows = cur.fetchall()
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT folder FROM snippets WHERE folder IS NOT NULL AND folder != ''")
+                rows = cur.fetchall()
             folders = [row[0] for row in rows if row[0]]
 
             logger.info("Successfully fetched all folders.")
@@ -480,8 +625,8 @@ class SnippetDB:
         logger.debug("Snippet ID: %s | New label: %s", snippet_id, new_label)
 
         try:
-            with self.conn:
-                self.conn.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
+            with self.managed_connection(write=True) as conn:
+                conn.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
                 logger.info("Successfully renamed snippet.")
 
         except Exception:
@@ -506,15 +651,19 @@ class SnippetDB:
         logger.debug("Keyword: %s", keyword)
         
         try:
-            cur = self.conn.cursor()
+            escaped_keyword = self.escape_like_value(keyword)
+            wildcard = f"%{escaped_keyword}%"
             query = """
                 SELECT * FROM snippets
-                WHERE label LIKE ? OR snippet LIKE ? OR trigger LIKE ? OR tags LIKE ?
+                WHERE label LIKE ? ESCAPE '\\'
+                   OR snippet LIKE ? ESCAPE '\\'
+                   OR trigger LIKE ? ESCAPE '\\'
+                   OR tags LIKE ? ESCAPE '\\'
             """
-            wildcard = f"%{keyword}%"
-            cur.execute(query, (wildcard, wildcard, wildcard, wildcard))
-            columns = [col[0] for col in cur.description]
-            results =  [dict(zip(columns, row)) for row in cur.fetchall()]
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query, (wildcard, wildcard, wildcard, wildcard))
+                results = [self.normalize_snippet_row(row) for row in cur.fetchall()]
 
             logger.info("Successfully searched snippets.")
             logger.debug("Search results count: %d", len(results))
@@ -536,9 +685,10 @@ class SnippetDB:
         logger.info("Fetching all tags from the database.")
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT DISTINCT tags FROM snippets WHERE tags IS NOT NULL AND tags != ''")
-            rows = cur.fetchall()
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT DISTINCT tags FROM snippets WHERE tags IS NOT NULL AND tags != ''")
+                rows = cur.fetchall()
             tags = set()
             for row in rows:
                 for tag in row[0].split(","):
@@ -568,17 +718,22 @@ class SnippetDB:
         logger.debug("Tag: %s", tag)
 
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT id, tags FROM snippets WHERE tags LIKE ?", (f"%{tag}%",))
-            rows = cur.fetchall()
+            wildcard = f"%{self.escape_like_value(tag)}%"
+            with self.managed_connection(write=True) as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id, tags FROM snippets WHERE tags LIKE ? ESCAPE '\\'",
+                    (wildcard,),
+                )
+                rows = cur.fetchall()
 
-            for row in rows:
-                sid, tags = row
-                tag_list = [t.strip() for t in tags.split(",") if t.strip().lower() != tag.lower()]
-                new_tags = ",".join(tag_list)
-                with self.conn:
-                    self.conn.execute("UPDATE snippets SET tags = ? WHERE id = ?", (new_tags, sid))
-                    logger.info("Successfully deleted tag from snippets.")
+                for row in rows:
+                    sid, tags = row
+                    tag_list = [t.strip() for t in tags.split(",") if t.strip().lower() != tag.lower()]
+                    new_tags = ",".join(tag_list)
+                    conn.execute("UPDATE snippets SET tags = ? WHERE id = ?", (new_tags, sid))
+
+                logger.info("Successfully deleted tag from snippets.")
         except Exception:
             logger.exception("An error occurred while deleting a tag from the database")
             return None
@@ -641,8 +796,8 @@ class SnippetDB:
         """
         logger.info("Ensuring custom_placeholders table exists in database")
         try:
-            with self.conn:
-                self.conn.execute("""
+            with self.managed_connection(write=True) as conn:
+                conn.execute("""
                     CREATE TABLE IF NOT EXISTS custom_placeholders (
                         id          INTEGER PRIMARY KEY AUTOINCREMENT,
                         name        TEXT UNIQUE NOT NULL,
@@ -665,9 +820,9 @@ class SnippetDB:
         """
         logger.info("Ensuring built-in editable custom placeholders exist")
         try:
-            with self.conn:
+            with self.managed_connection(write=True) as conn:
                 for entry in self.DEFAULT_CUSTOM_PLACEHOLDERS:
-                    self.conn.execute(
+                    conn.execute(
                         """
                         INSERT OR IGNORE INTO custom_placeholders (name, value, description)
                         VALUES (?, ?, ?)
@@ -687,9 +842,10 @@ class SnippetDB:
         """
         logger.info("Fetching all custom placeholders")
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT id, name, value, description FROM custom_placeholders ORDER BY name ASC")
-            rows = cur.fetchall()
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id, name, value, description FROM custom_placeholders ORDER BY name ASC")
+                rows = cur.fetchall()
             result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3]} for r in rows]
             logger.debug("Custom placeholders fetched: %d", len(result))
             return result
@@ -709,8 +865,8 @@ class SnippetDB:
         """
         logger.info("Inserting custom placeholder: %s", entry.get("name"))
         try:
-            with self.conn:
-                self.conn.execute(
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
                     "INSERT INTO custom_placeholders (name, value, description) VALUES (:name, :value, :description)",
                     entry,
                 )
@@ -732,8 +888,8 @@ class SnippetDB:
         """
         logger.info("Updating custom placeholder id=%s", entry.get("id"))
         try:
-            with self.conn:
-                self.conn.execute(
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
                     "UPDATE custom_placeholders SET name=:name, value=:value, description=:description WHERE id=:id",
                     entry,
                 )
@@ -755,8 +911,8 @@ class SnippetDB:
         """
         logger.info("Deleting custom placeholder id=%s", placeholder_id)
         try:
-            with self.conn:
-                self.conn.execute("DELETE FROM custom_placeholders WHERE id=?", (placeholder_id,))
+            with self.managed_connection(write=True) as conn:
+                conn.execute("DELETE FROM custom_placeholders WHERE id=?", (placeholder_id,))
             logger.info("Custom placeholder deleted successfully")
             return True
         except Exception:
@@ -764,7 +920,7 @@ class SnippetDB:
             return False
 
     # Close Connection
-    def close(self):
+    def close(self) -> None:
         """
         Close the database connection.
 
@@ -773,8 +929,45 @@ class SnippetDB:
         """
         logger.info("Closing database connection.")
         try:
-            self.conn.close()
+            with self.lock:
+                if self.closed:
+                    logger.debug("Database connection already closed")
+                    return
+
+                self.conn.close()
+                self.closed = True
             logger.info("Database connection closed successfully.")
         except Exception:
             logger.exception("An error occurred while closing the database connection")
             return None
+
+    def __enter__(self):
+        """
+        Enter a context manager scope for the database instance.
+
+        Returns:
+            SnippetDB: The current database instance.
+        """
+        self.ensure_open()
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        """
+        Exit a context manager scope and close the database connection.
+
+        Returns:
+            None
+        """
+        self.close()
+
+    def __del__(self) -> None:
+        """
+        Best-effort cleanup for the SQLite connection.
+
+        Returns:
+            None
+        """
+        try:
+            self.close()
+        except Exception:
+            logger.debug("Database cleanup during object destruction failed", exc_info=True)

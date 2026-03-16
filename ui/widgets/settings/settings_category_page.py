@@ -218,24 +218,34 @@ class SettingsCategoryPage(QWidget):
         """ Programmatically set a control widget's value. """
         typ = meta.get("type")
 
+        control.blockSignals(True)
+
         if typ == "bool" and isinstance(control, QAnimatedSwitch):
             control.setChecked(bool(value))
+            control.blockSignals(False)
             return
 
         if isinstance(control, QComboBox):
             control.setCurrentText(str(value))
+            control.blockSignals(False)
             return
 
         if typ == "int":
             # Container widget with slider + label
             slider = control.findChild(QSlider)
             if slider:
+                slider.blockSignals(True)
                 slider.setValue(int(value))
+                slider.blockSignals(False)
+            control.blockSignals(False)
             return
 
         if isinstance(control, QLineEdit):
             control.setText(str(value))
+            control.blockSignals(False)
             return
+
+        control.blockSignals(False)
 
     def reset_all_to_defaults(self):
         """
@@ -262,6 +272,16 @@ class SettingsCategoryPage(QWidget):
         """
         Debounced change emitter.
         """
+        control, _, meta = self._controls.get(key, (None, None, {}))
+        old_value = meta.get("value")
+        full_path = self.path + [key]
+
+        if control and hasattr(self.dialog, "approve_setting_change"):
+            approved = self.dialog.approve_setting_change(full_path, old_value, value)
+            if not approved:
+                self._set_control_value(control, meta, old_value)
+                return
+
         self.pending_values[key] = value
         self.update_reset_visibility(key, value)
 

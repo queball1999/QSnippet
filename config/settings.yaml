@@ -33,6 +33,19 @@ general:
       default: true
       description: Automatically expand all folder views when a search is performed.
 
+  clipboard_behavior:
+    clipboard_timeout:
+      type: string
+      value: "30"
+      default: "30"
+      options:
+        - "15"
+        - "30"
+        - "60"
+        - "120"
+        - "off"
+      description: Clear snippet clipboard contents after the specified number of seconds.
+
 notices:
   disable_notices:
     type: bool

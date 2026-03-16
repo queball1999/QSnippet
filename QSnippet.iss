@@ -25,7 +25,10 @@ PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#SourcePath}\output\windows
 OutputBaseFilename=QSnippet-{#MyAppVersion}-windows-installer
 SetupIconFile={#SourcePath}\images\QSnippet.ico
-UninstallDisplayIcon={app}\images\QSnippet.ico
+; Force appwiz icon and name
+UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\{#MyAppExeName}
+ArchitecturesInstallIn64BitMode=x64compatible
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
