@@ -71,7 +71,7 @@ def test_config_loader_reload_on_file_change(temp_config_file, mock_qt_app):
     File change should reload config.
     """
     write_yaml(temp_config_file, {"a": 1})
-    loader = ConfigLoader(temp_config_file)
+    loader = ConfigLoader(temp_config_file, debounce_delay_ms=0)
 
     write_yaml(temp_config_file, {"a": 2})
     loader.on_file_changed(str(temp_config_file))
@@ -173,7 +173,7 @@ def test_settings_loader_reload_on_file_change(temp_settings_file, mock_qt_app):
             "enabled": False
         }
     })
-    loader = SettingsLoader(temp_settings_file)
+    loader = SettingsLoader(temp_settings_file, debounce_delay_ms=0)
 
     write_yaml(temp_settings_file, {
         "general": {

@@ -50,6 +50,8 @@ class SnippetExpander:
         self.trigger_flag = False
         self.buffer_inactivity_timeout = 5.0
         self.last_keypress_at = 0.0
+        self.last_event_processed_at = 0.0
+        self.keyboard_debounce_ms = 20  # Minimum milliseconds between event processing
         self.buffer_lock = threading.RLock()
         self.clipboard_lock = threading.RLock()
         self.clipboard_timer = None
@@ -372,7 +374,8 @@ class SnippetExpander:
         Handle key press events from the keyboard listener.
 
         Processes navigation, deletion, termination keys, and character
-        input to detect and expand snippet triggers.
+        input to detect and expand snippet triggers. Implements debouncing
+        to prevent excessive event processing.
 
         Args:
             key (Any): The key event received from the listener.
@@ -382,6 +385,13 @@ class SnippetExpander:
         try:
             if self.disabled:
                 return
+
+            # Rate limiting: skip processing if events are coming too fast
+            now = time.monotonic() # monotonic cannot go backwards, good for measuring elapsed time
+            elapsed_ms = (now - self.last_event_processed_at) * 1000
+            if elapsed_ms < self.keyboard_debounce_ms:
+                return
+            self.last_event_processed_at = now
 
             if self.last_keypress_at and (time.monotonic() - self.last_keypress_at) > self.buffer_inactivity_timeout:
                 logger.debug("Clearing buffer due to inactivity timeout")
