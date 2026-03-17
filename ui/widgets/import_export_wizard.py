@@ -237,20 +237,21 @@ class ImportExportWizard(QDialog):
         # Update selection count
         self.update_selection_count()
 
-    def on_select_all_toggled(self, state: int) -> None:
+    def on_select_all_toggled(self) -> None:
         """Handle Select All checkbox state change."""
         # Block table signals while updating to avoid recursion
         self.table.blockSignals(True)
 
-        check_state = Qt.Checked if state == Qt.Checked else Qt.Unchecked
+        # Use checkbox's actual check state instead of signal parameter
+        check_state = self.select_all_checkbox.checkState()
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
             if item:
                 item.setCheckState(check_state)
 
-        # Re-enable signals and update count (but don't sync checkbox back)
+        # Re-enable signals and update count
         self.table.blockSignals(False)
-        self._update_count_only()
+        self.update_selection_count()
 
     def get_selected_snippets(self) -> list[dict]:
         """Return list of checked snippet dicts."""
