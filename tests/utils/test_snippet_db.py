@@ -348,7 +348,8 @@ def test_insert_snippet_works_without_unique_trigger_constraint(tmp_path):
     }
 
     assert db.insert_snippet(first) is True
-    assert db.insert_snippet(second) is True
+    # Second insert with same trigger returns False (update, not new)
+    assert db.insert_snippet(second) is False
 
     rows = [s for s in db.get_all_snippets() if s["trigger"] == "/legacy"]
     assert len(rows) == 1

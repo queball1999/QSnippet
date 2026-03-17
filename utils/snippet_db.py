@@ -293,7 +293,7 @@ class SnippetDB:
 
                 if exists:  # update existing
                     logger.info("Found existing snippet. Updating entry.")
-                    conn.execute("""
+                    cur.execute("""
                         UPDATE snippets
                         SET
                             enabled = :enabled,
@@ -306,7 +306,10 @@ class SnippetDB:
                             tags = :tags
                         WHERE id = :id
                     """, entry)
-                    
+                    rows_changed = cur.rowcount
+                    logger.info(f"ID-based update complete. Rows changed: {rows_changed}")
+                    return False  # was an update
+
                 else:   # insert new snippet
                     logger.info("No existing snippet id found; checking for existing trigger")
 
@@ -325,7 +328,7 @@ class SnippetDB:
                         )
                         update_entry = dict(entry)
                         update_entry["id"] = trigger_row[0]
-                        conn.execute("""
+                        cur.execute("""
                             UPDATE snippets
                             SET
                                 enabled = :enabled,
@@ -338,18 +341,21 @@ class SnippetDB:
                                 tags = :tags
                             WHERE id = :id
                         """, update_entry)
+                        rows_changed = cur.rowcount
+                        logger.info(f"Trigger-based update complete for trigger '{trigger}'. Rows changed: {rows_changed}")
+                        return False  # was an update
                     else:
-                        logger.info("No existing trigger found. Inserting new entry.")
-                        conn.execute("""
+                        logger.info("No existing trigger found. Inserting new entry for trigger '%s'.", trigger)
+                        cur.execute("""
                             INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags)
                             VALUES (:enabled, :label, :trigger, :snippet, :paste_style, :return_press, :folder, :tags)
                         """, entry)
+                        rows_changed = cur.rowcount
+                        logger.info(f"Insert complete for trigger '{trigger}'. Rows changed: {rows_changed}")
+                        return True  # was new
 
-                logger.info("Snippet created successfully.")
-                return not exists   # True if it was new
-            
-        except Exception:
-            logger.exception("An error occurred while inserting a snippet into the database")
+        except Exception as e:
+            logger.exception(f"An error occurred while inserting a snippet into the database. Entry trigger: {entry.get('trigger')}, Error: {e}")
             return None
 
     def delete_snippet(self, snippet_id: id) -> None:
