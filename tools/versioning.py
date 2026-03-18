@@ -17,8 +17,8 @@ if os.environ.get("GITHUB_ACTIONS"):
         with open(github_env, "a") as f:
             f.write(f"APP_VERSION={version}\n")
             f.write(f"PROGRAM_NAME={name}\n")
-        print(f"✓ Set APP_VERSION={version}")
-        print(f"✓ Set PROGRAM_NAME={name}")
+        print(f"Set APP_VERSION={version}")
+        print(f"Set PROGRAM_NAME={name}")
     else:
         print("Warning: GITHUB_ENV not set", file=sys.stderr)
 else:
