@@ -112,9 +112,10 @@ class main():
         self.skip_reg = False
 
         # Define Directories
-        self.working_dir = FileUtils.get_default_paths()["working_dir"]
-        self.resource_dir = FileUtils.get_default_paths()["resource_dir"]
-        self.default_os_paths = FileUtils.get_default_paths()
+        default_paths = FileUtils.get_default_paths()
+        self.working_dir = default_paths["working_dir"]
+        self.resource_dir = default_paths["resource_dir"]
+        self.default_os_paths = default_paths
 
         self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
@@ -133,6 +134,9 @@ class main():
         self.snippet_db_file = self.app_data_dir / "snippets.db"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
+
+        # Ensure log directory exists before logger tries to write to it
+        Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
 
         # Config and Settings files
 

@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Step 2: Load version info
 Write-Host "`n[2/4] Loading version info..." -ForegroundColor Cyan
-$VERSION = python -c "import yaml; print(yaml.safe_load(open('config\config.yaml'))['version'])"
+$VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])"
 Write-Host "Version: $VERSION" -ForegroundColor Green
 
 # Step 3: Build Windows binaries (PyInstaller)
@@ -71,8 +71,13 @@ Write-Host "Found ISCC: $isccPath" -ForegroundColor Green
 Write-Host "Waiting for operating system to release lock..." -ForegroundColor DarkGray
 Start-Sleep -Seconds 2
 
-# Call Inno Setup with /F flag to set output filename with version
-$installerFilename = "QSnippet-$VERSION-windows-installer"
+# Update version in Inno Setup script
+Write-Host "Updating Inno Setup version to $VERSION..." -ForegroundColor Cyan
+$issFile = "QSnippet.iss"
+$issContent = Get-Content $issFile -Raw
+$originalContent = $issContent
+$issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion ""$VERSION"""
+Set-Content $issFile $issContent -NoNewline
 
 $maxRetries = 3
 $retryCount = 0
@@ -84,7 +89,7 @@ while ($retryCount -lt $maxRetries -and -not $buildSuccess) {
         Start-Sleep -Seconds 5
     }
 
-    & $isccPath /F"$installerFilename" /O+ "QSnippet.iss"
+    & $isccPath /O+ "QSnippet.iss"
 
     if ($LASTEXITCODE -eq 0) {
         $buildSuccess = $true
@@ -92,6 +97,9 @@ while ($retryCount -lt $maxRetries -and -not $buildSuccess) {
         $retryCount++
     }
 }
+
+# Restore original Inno Setup script
+Set-Content $issFile $originalContent -NoNewline
 
 if (-not $buildSuccess) {
     Write-Error @"

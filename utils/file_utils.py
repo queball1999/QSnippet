@@ -526,15 +526,15 @@ class FileUtils:
             if system == "Windows":
                 app_data = Path(os.path.join(os.environ["LOCALAPPDATA"], "QSnippet"))
                 documents = Path(os.path.join(os.environ["USERPROFILE"], "Documents", "QSnippet"))
-                log_dir = Path(os.getenv("ProgramData", "C:/ProgramData")) / "QSnippet" / "logs"
+                log_dir = app_data / "logs"
             elif system == "Darwin":
                 app_data = user_home / "Library" / "Application Support" / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
-                log_dir = user_home / "Library" / "Logs" / "QSnippet"
+                log_dir = app_data / "logs"
             else:
                 app_data = Path(os.getenv("XDG_DATA_HOME", user_home / ".local" / "share")) / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
-                log_dir = Path("/var/log/QSnippet")
+                log_dir = app_data / "logs"
 
             # Detect runtime working directory
             if hasattr(sys, "_MEIPASS"):

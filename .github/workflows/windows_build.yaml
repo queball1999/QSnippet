@@ -32,11 +32,18 @@ jobs:
         run: tools/build.ps1
         shell: powershell
 
+      - name: Update Inno Setup version
+        run: |
+          $issContent = Get-Content "QSnippet.iss" -Raw
+          $issContent = $issContent -replace '#define MyAppVersion ".*"', '#define MyAppVersion "${{ env.APP_VERSION }}"'
+          Set-Content "QSnippet.iss" $issContent -NoNewline
+        shell: powershell
+
       - name: Build Windows installer (Inno Setup)
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: QSnippet.iss
-          options: /F"QSnippet-${{ env.APP_VERSION }}-windows-installer" /O+
+          options: /O+
 
       - name: Upload Windows executables
         uses: actions/upload-artifact@v4
