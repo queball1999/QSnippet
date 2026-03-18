@@ -10,7 +10,6 @@ from unittest.mock import MagicMock
 
 from utils.snippet_db import SnippetDB
 from utils.file_utils import FileUtils
-from ui.widgets.import_export_wizard import classify_snippets
 
 pytestmark = pytest.mark.gui
 
@@ -216,10 +215,16 @@ class TestExportSubset:
 class TestStatusClassification:
     """Test classify_snippets function for import wizard."""
 
+    @pytest.fixture(autouse=True)
+    def _import_classify_snippets(self):
+        """Lazy import of UI component to avoid import errors in CI/CD."""
+        from ui.widgets.import_export_wizard import classify_snippets
+        self.classify_snippets = classify_snippets
+
     def test_get_status_new(self, db, sample_snippets):
         """Trigger not in DB: status is 'New'."""
         snippets = [sample_snippets[0].copy()]  # /sig
-        classified = classify_snippets(snippets, db)
+        classified = self.classify_snippets(snippets, db)
 
         assert classified[0]["status"] == "New"
 
@@ -229,7 +234,7 @@ class TestStatusClassification:
         db.insert_snippet(sample_snippets[0])
 
         snippets = [sample_snippets[0].copy()]
-        classified = classify_snippets(snippets, db)
+        classified = self.classify_snippets(snippets, db)
 
         assert classified[0]["status"] == "Update"
 
@@ -239,7 +244,7 @@ class TestStatusClassification:
         db.insert_snippet(sample_snippets[0])
 
         snippets = sample_snippets.copy()
-        classified = classify_snippets(snippets, db)
+        classified = self.classify_snippets(snippets, db)
 
         assert classified[0]["status"] == "Update"
         assert classified[1]["status"] == "New"
@@ -250,7 +255,7 @@ class TestStatusClassification:
         snippets = [sample_snippets[0].copy()]
         assert "status" not in snippets[0]
 
-        classified = classify_snippets(snippets, db)
+        classified = self.classify_snippets(snippets, db)
         assert "status" in classified[0]
         assert classified[0]["status"] in ("New", "Update")
 
