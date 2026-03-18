@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import yaml, os
+import yaml
+import os
+import sys
 
 # updating dir 12/22/25 to reflect new config path
 with open("config/config.yaml") as f:
@@ -8,12 +10,17 @@ with open("config/config.yaml") as f:
 version = cfg.get("version")
 name = cfg.get("program_name")
 
-print(f"APP_VERSION={version}")
-print(f"PROGRAM_NAME={name}")
-
-# Write to GITHUB_ENV if available
-gitea_env = os.environ.get("GITHUB_ENV")
-if gitea_env:
-    with open(gitea_env, "a") as envfile:
-        envfile.write(f"APP_VERSION={version}\n")
-        envfile.write(f"PROGRAM_NAME={name}\n")
+# Always output to GitHub Actions environment
+if os.environ.get("GITHUB_ACTIONS"):
+    github_env = os.environ.get("GITHUB_ENV")
+    if github_env:
+        with open(github_env, "a") as f:
+            f.write(f"APP_VERSION={version}\n")
+            f.write(f"PROGRAM_NAME={name}\n")
+        print(f"✓ Set APP_VERSION={version}")
+        print(f"✓ Set PROGRAM_NAME={name}")
+    else:
+        print("Warning: GITHUB_ENV not set", file=sys.stderr)
+else:
+    print(f"APP_VERSION={version}")
+    print(f"PROGRAM_NAME={name}")

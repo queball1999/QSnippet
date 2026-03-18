@@ -26,6 +26,7 @@ jobs:
 
       - name: Load version info
         run: python tools/versioning.py
+        # Sets env.APP_VERSION for later steps
 
       - name: Build Windows binaries (PyInstaller)
         run: tools/build.ps1
@@ -35,7 +36,7 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: QSnippet.iss
-          options: /O+
+          options: /F"QSnippet-${{ env.APP_VERSION }}-windows-installer" /O+
 
       - name: Upload Windows executables
         uses: actions/upload-artifact@v4
