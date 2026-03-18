@@ -3,10 +3,110 @@ import platform
 import logging
 import yaml
 import sys
+import signal
 from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Security constraints for import/export
+MAX_IMPORT_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_SNIPPETS_PER_FILE = 10000  # Prevent DoS via thousands of items
+MAX_FIELD_LENGTH = 10000  # Max characters per field (prevent memory bombs)
+YAML_PARSE_TIMEOUT = 10  # Seconds - timeout for YAML parsing
+ALLOWED_SNIPPET_FIELDS = {
+    "enabled", "label", "trigger", "snippet",
+    "paste_style", "return_press", "folder", "tags"
+}
+REQUIRED_SNIPPET_FIELDS = {"label", "trigger", "snippet"}
+
+
+def validate_snippet_fields(snippet: dict) -> None:
+    """
+    Validate a snippet dictionary for security and type safety.
+
+    Checks:
+    - Required fields present
+    - Field types correct
+    - Field lengths within limits
+    - No invalid boolean/string values
+
+    Raises:
+        ValueError: If validation fails
+        TypeError: If field type is wrong
+    """
+    if not isinstance(snippet, dict):
+        raise TypeError("Snippet must be a dictionary")
+
+    # Check required fields
+    missing = REQUIRED_SNIPPET_FIELDS - set(snippet.keys())
+    if missing:
+        raise ValueError(f"Snippet missing required fields: {missing}")
+
+    # Validate string fields
+    string_fields = ["trigger", "label", "snippet", "folder", "tags", "paste_style"]
+    for field in string_fields:
+        if field in snippet:
+            if not isinstance(snippet[field], str):
+                raise TypeError(f"Field '{field}' must be string, got {type(snippet[field]).__name__}")
+            # Check field length
+            if len(snippet[field]) > MAX_FIELD_LENGTH:
+                raise ValueError(f"Field '{field}' exceeds max length ({MAX_FIELD_LENGTH})")
+
+    # Validate boolean fields
+    bool_fields = ["enabled", "return_press"]
+    for field in bool_fields:
+        if field in snippet and not isinstance(snippet[field], bool):
+            raise TypeError(f"Field '{field}' must be boolean, got {type(snippet[field]).__name__}")
+
+    # Validate trigger is not empty
+    if not snippet["trigger"].strip():
+        raise ValueError("Trigger cannot be empty or whitespace only")
+
+
+def sanitize_snippet(snippet: dict) -> dict:
+    """
+    Remove unknown fields from snippet (whitelist approach).
+
+    Args:
+        snippet (dict): Snippet dictionary from YAML
+    Returns:
+        dict: Sanitized snippet with only allowed fields
+    """
+    return {k: v for k, v in snippet.items() if k in ALLOWED_SNIPPET_FIELDS}
+
+
+def validate_snippets_list(data: dict) -> list:
+    """
+    Validate and extract snippets list from parsed YAML.
+
+    Checks:
+    - Data is a dictionary
+    - 'snippets' key exists
+    - 'snippets' value is a list
+    - List size is reasonable
+
+    Args:
+        data (dict): Parsed YAML data
+    Returns:
+        list: Validated snippets list
+    Raises:
+        ValueError: If validation fails
+    """
+    if not isinstance(data, dict):
+        raise ValueError("YAML content must be a dictionary")
+
+    if "snippets" not in data:
+        raise ValueError("YAML missing required 'snippets' key")
+
+    snippets = data["snippets"]
+    if not isinstance(snippets, list):
+        raise ValueError("'snippets' value must be a list, got " + type(snippets).__name__)
+
+    if len(snippets) > MAX_SNIPPETS_PER_FILE:
+        raise ValueError(f"Too many snippets ({len(snippets)}). Max allowed: {MAX_SNIPPETS_PER_FILE}")
+
+    return snippets
 
 
 class FileUtils:
@@ -88,23 +188,59 @@ class FileUtils:
         """
         Read a YAML file and return its contents.
 
+        Security checks:
+        - File size limit (50MB)
+        - Parsing timeout (10 seconds)
+        - Safe deserialization (yaml.safe_load)
+
         Args:
             path (Path): The path to the YAML file.
 
         Returns:
             dict: The parsed YAML contents as a dictionary. Returns an empty
                 dictionary if loading fails.
+
+        Raises:
+            ValueError: If file is too large
+            TimeoutError: If parsing takes too long
         """
         logger.debug("Reading YAML file: %s", path)
 
         try:
+            # Check file exists first
+            if not path.exists():
+                logger.warning("YAML file does not exist: %s", path)
+                return {}
+
+            # Check file size
+            file_size = path.stat().st_size
+            if file_size > MAX_IMPORT_FILE_SIZE:
+                raise ValueError(
+                    f"File too large ({file_size} bytes). "
+                    f"Maximum allowed: {MAX_IMPORT_FILE_SIZE} bytes"
+                )
+            logger.debug("File size check passed: %d bytes", file_size)
+
+            # Read with timeout protection
             with path.open("r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                # Platform-specific timeout (signal only works on Unix)
+                if sys.platform != "win32":
+                    def _timeout_handler(signum, frame):
+                        raise TimeoutError(f"YAML parsing exceeded {YAML_PARSE_TIMEOUT} second timeout")
+                    signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(YAML_PARSE_TIMEOUT)
+
+                try:
+                    data = yaml.safe_load(f) or {}
+                finally:
+                    if sys.platform != "win32":
+                        signal.alarm(0)  # Cancel alarm
+
             logger.debug("YAML file loaded successfully: %s", path)
             return data
         except Exception as e:
             logging.error(f"Failed to read YAML file {path}: {e}")
-            return {}
+            raise
 
     @staticmethod
     def write_yaml(path: Path, data: dict) -> None:
@@ -152,7 +288,13 @@ class FileUtils:
         """
         logger.debug("Exporting %d snippets to %s", len(snippets), path)
         try:
-            data = {"snippets": snippets}
+            # Remove internal database IDs from exported snippets
+            # IDs are auto-generated on import and should not be preserved
+            clean_snippets = [
+                {k: v for k, v in snippet.items() if k != "id"}
+                for snippet in snippets
+            ]
+            data = {"snippets": clean_snippets}
             FileUtils.write_yaml(path, data)
             logger.info("Exported %d snippets to %s", len(snippets), path)
         except Exception as e:
@@ -162,28 +304,51 @@ class FileUtils:
     @staticmethod
     def import_snippets_yaml(path: Path) -> list[dict]:
         """
-        Import snippets from a YAML file.
+        Import snippets from a YAML file with full validation.
+
+        Security validations:
+        - File size check (50MB max)
+        - Parsing timeout (10s max)
+        - YAML structure validation
+        - Individual snippet field validation
+        - Field type/length validation
+        - Unknown field stripping
 
         Args:
             path (Path): The source YAML file path.
 
         Returns:
-            list[dict]: A list of snippet dictionaries loaded from the file.
+            list[dict]: A list of sanitized snippet dictionaries.
 
         Raises:
-            ValueError: If the YAML format is invalid.
-            Exception: If reading or parsing fails.
+            ValueError: If validation fails (size, format, field values)
+            TypeError: If field types are invalid
+            Exception: If reading or parsing fails
         """
         logger.debug("Importing snippets from YAML: %s", path)
 
         try:
+            # Load with security checks (file size, timeout)
             data = FileUtils.read_yaml(path)
-            snippets = data.get("snippets", [])
-            if not isinstance(snippets, list):
-                raise ValueError("Invalid YAML format: 'snippets' must be a list.")
-            
-            logger.info("Imported %d snippets from %s", len(snippets), path)
-            return snippets
+
+            # Validate structure
+            snippets = validate_snippets_list(data)
+            logger.debug("YAML structure validated: %d snippets", len(snippets))
+
+            # Validate and sanitize each snippet
+            validated_snippets = []
+            for idx, snippet in enumerate(snippets):
+                try:
+                    # Validate fields
+                    validate_snippet_fields(snippet)
+                    # Remove unknown fields
+                    sanitized = sanitize_snippet(snippet)
+                    validated_snippets.append(sanitized)
+                except (ValueError, TypeError) as e:
+                    raise type(e)(f"Snippet #{idx + 1} validation failed: {e}") from None
+
+            logger.info("Imported and validated %d snippets from %s", len(validated_snippets), path)
+            return validated_snippets
         except Exception as e:
             logging.error(f"Failed to import snippets from YAML: {e}")
             raise
@@ -194,7 +359,7 @@ class FileUtils:
         Prompt the user to import snippets from a YAML file.
 
         Opens a file dialog to select a YAML file, imports snippets into the
-        database, and displays a summary of imported and updated entries.
+        database with full validation, and displays a summary.
 
         Args:
             parent (Any): The parent widget for dialog windows.
@@ -202,9 +367,6 @@ class FileUtils:
 
         Returns:
             int: The total number of snippets imported or updated.
-
-        Raises:
-            Exception: If importing snippets fails.
         """
         from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -220,29 +382,62 @@ class FileUtils:
             logger.debug("Import cancelled by user")
             return 0
 
-        snippets = FileUtils.import_snippets_yaml(Path(path))
-        new_count = 0
-        updated_count = 0
+        try:
+            # Import with full validation (file size, parsing timeout, field validation)
+            snippets = FileUtils.import_snippets_yaml(Path(path))
+            new_count = 0
+            updated_count = 0
+            error_count = 0
 
-        for entry in snippets:
-            is_new = db.insert_snippet(entry)
-            if is_new:
-                new_count += 1
-            else:
-                updated_count += 1
+            for entry in snippets:
+                # Strip internal database IDs to prevent ID-based conflicts
+                clean_entry = {k: v for k, v in entry.items() if k != "id"}
+                is_new = db.insert_snippet(clean_entry)
+                if is_new is True:
+                    new_count += 1
+                elif is_new is False:
+                    updated_count += 1
+                else:
+                    error_count += 1
+                    logger.warning(f"Insert error for trigger: {entry.get('trigger')}")
 
-        logger.info(
-            "Snippet import complete: %d new, %d updated",
-            new_count,
-            updated_count,
-        )
+            logger.info(
+                "Snippet import complete: %d new, %d updated, %d errors",
+                new_count,
+                updated_count,
+                error_count,
+            )
 
-        QMessageBox.information(
-            parent,
-            "Import Complete",
-            f"Imported {new_count} new snippets.\nUpdated {updated_count} existing snippets."
-        )
-        return new_count + updated_count
+            QMessageBox.information(
+                parent,
+                "Import Complete",
+                f"Imported {new_count} new snippets.\nUpdated {updated_count} existing snippets."
+            )
+            return new_count + updated_count
+        except (ValueError, TypeError) as e:
+            logger.error(f"Import validation failed: {e}")
+            QMessageBox.critical(
+                parent,
+                "Import Error",
+                f"Invalid YAML file:\n\n{str(e)}"
+            )
+            return 0
+        except TimeoutError as e:
+            logger.error(f"Import timeout: {e}")
+            QMessageBox.critical(
+                parent,
+                "Import Error",
+                "YAML file took too long to parse. File may be corrupted or too large."
+            )
+            return 0
+        except Exception as e:
+            logger.error(f"Import failed: {e}")
+            QMessageBox.critical(
+                parent,
+                "Import Error",
+                f"Failed to import snippets:\n\n{str(e)}"
+            )
+            return 0
 
 
     @staticmethod
@@ -331,15 +526,15 @@ class FileUtils:
             if system == "Windows":
                 app_data = Path(os.path.join(os.environ["LOCALAPPDATA"], "QSnippet"))
                 documents = Path(os.path.join(os.environ["USERPROFILE"], "Documents", "QSnippet"))
-                log_dir = Path(os.getenv("ProgramData", "C:/ProgramData")) / "QSnippet" / "logs"
+                log_dir = app_data / "logs"
             elif system == "Darwin":
                 app_data = user_home / "Library" / "Application Support" / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
-                log_dir = user_home / "Library" / "Logs" / "QSnippet"
+                log_dir = app_data / "logs"
             else:
                 app_data = Path(os.getenv("XDG_DATA_HOME", user_home / ".local" / "share")) / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
-                log_dir = Path("/var/log/QSnippet")
+                log_dir = app_data / "logs"
 
             # Detect runtime working directory
             if hasattr(sys, "_MEIPASS"):

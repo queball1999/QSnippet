@@ -188,6 +188,97 @@ def test_search_snippets(temp_snippet_db_path):
     assert any(r["trigger"] == "/search" for r in results)
 
 
+def test_search_snippets_escapes_like_wildcards(temp_snippet_db_path):
+    """Search should treat LIKE wildcard characters as literal user input."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    db.insert_snippet({
+        "enabled": True,
+        "label": "Percent Match",
+        "trigger": "/percent",
+        "snippet": "contains 100% coverage",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "literal%",
+    })
+
+    results = db.search_snippets("%")
+    assert any(r["trigger"] == "/percent" for r in results)
+    assert not any(r["trigger"] == "/welcome" for r in results)
+
+
+def test_folder_operations_escape_like_characters(temp_snippet_db_path):
+    """Folder rename should only touch the intended literal folder path."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    db.insert_snippet({
+        "enabled": True,
+        "label": "Literal Folder",
+        "trigger": "/literal-folder",
+        "snippet": "x",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "QA_100%/Drafts",
+        "tags": "",
+    })
+    db.insert_snippet({
+        "enabled": True,
+        "label": "Neighbor Folder",
+        "trigger": "/neighbor-folder",
+        "snippet": "x",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "QAx100z/Drafts",
+        "tags": "",
+    })
+
+    db.rename_folder("QA_100%", "Renamed")
+
+    folders = db.get_all_folders()
+    assert "Renamed/Drafts" in folders
+    assert "QAx100z/Drafts" in folders
+
+
+def test_close_is_idempotent(temp_snippet_db_path):
+    """Closing the database more than once should be safe."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    db.close()
+    db.close()
+
+
+def test_get_enabled_trigger_index(temp_snippet_db_path):
+    """Enabled trigger index should only include enabled snippets."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    db.insert_snippet({
+        "enabled": True,
+        "label": "Enabled",
+        "trigger": "/enabled-index",
+        "snippet": "one",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    })
+    db.insert_snippet({
+        "enabled": False,
+        "label": "Disabled",
+        "trigger": "/disabled-index",
+        "snippet": "two",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    })
+
+    triggers = {row["trigger"] for row in db.get_enabled_trigger_index()}
+
+    assert "/enabled-index" in triggers
+    assert "/disabled-index" not in triggers
+
+
 def test_default_custom_placeholders_seeded(temp_snippet_db_path):
     """Default editable custom placeholders should exist and start blank."""
     db = SnippetDB(temp_snippet_db_path)
@@ -257,7 +348,8 @@ def test_insert_snippet_works_without_unique_trigger_constraint(tmp_path):
     }
 
     assert db.insert_snippet(first) is True
-    assert db.insert_snippet(second) is True
+    # Second insert with same trigger returns False (update, not new)
+    assert db.insert_snippet(second) is False
 
     rows = [s for s in db.get_all_snippets() if s["trigger"] == "/legacy"]
     assert len(rows) == 1

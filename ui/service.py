@@ -7,7 +7,7 @@ from utils.snippet_db import SnippetDB
 logger = logging.getLogger(__name__)
 
 class SnippetService():
-    def __init__(self, config_path: str) -> None:
+    def __init__(self, config_path: str, settings_provider=None) -> None:
         """
         Initialize the SnippetService.
 
@@ -16,6 +16,8 @@ class SnippetService():
 
         Args:
             config_path (str): Path to the snippets database file.
+            settings_provider (Callable | None): Optional callback that
+                returns the latest settings dictionary.
 
         Returns:
             None
@@ -25,7 +27,12 @@ class SnippetService():
 
         # Core components
         self.snippet_db = SnippetDB(config_path)
-        self.expander = SnippetExpander(snippets_db=self.snippet_db, parent=self)
+        self.settings_provider = settings_provider
+        self.expander = SnippetExpander(
+            snippets_db=self.snippet_db,
+            parent=self,
+            settings_provider=self.settings_provider,
+        )
 
         # Thread control
         self._thread   = None
@@ -124,6 +131,17 @@ class SnippetService():
             )
         else:
             logger.info("SnippetService stopped successfully")
+
+    def shutdown(self) -> None:
+        """
+        Stop the service and release owned resources.
+
+        Returns:
+            None
+        """
+        logger.info("Shutting down SnippetService resources")
+        self.stop()
+        self.snippet_db.close()
 
     def pause(self) -> None:
         """

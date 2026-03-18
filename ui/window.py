@@ -68,7 +68,10 @@ class QSnippet(QMainWindow):
         self.resize(width, height)
         logger.debug("Window dimensions set: %sx%s", width, height)
 
-        self.snippet_service = SnippetService(self.parent.snippet_db_file)
+        self.snippet_service = SnippetService(
+            self.parent.snippet_db_file,
+            settings_provider=lambda: self.parent.settings,
+        )
 
         self.initUI()
         self.init_menubar()
@@ -421,33 +424,53 @@ class QSnippet(QMainWindow):
 
     def handle_import_action(self) -> None:
         """
-        Import snippets via dialog and refresh service and UI.
+        Import snippets via wizard dialog and refresh service and UI.
 
         Returns:
             None
         """
+        from PySide6.QtWidgets import QFileDialog
+        from ui.widgets.import_export_wizard import ImportExportWizard
+
         logger.info("Importing snippets via menu action")
 
-        FileUtils.import_snippets_with_dialog(
+        path, _ = QFileDialog.getOpenFileName(
             self,
-            self.parent.snippet_db,
+            "Import Snippets from YAML",
+            str(Path.home()),
+            "YAML Files (*.yaml *.yml)"
         )
+        if not path:
+            logger.debug("Import cancelled by user")
+            return
+
+        self.import_export_wizard = ImportExportWizard(
+            mode="import",
+            snippet_db=self.parent.snippet_db,
+            import_path=Path(path),
+            parent=self
+        )
+        self.import_export_wizard.exec()
         self.snippet_service.refresh()
         self.editor.load_snippets()
 
     def handle_export_action(self) -> None:
         """
-        Export snippets via dialog and refresh service and UI.
+        Export snippets via wizard dialog and refresh service and UI.
 
         Returns:
             None
         """
+        from ui.widgets.import_export_wizard import ImportExportWizard
+
         logger.info("Exporting snippets via menu action")
 
-        FileUtils.export_snippets_with_dialog(
-            self,
-            self.parent.snippet_db,
+        self.import_export_wizard = ImportExportWizard(
+            mode="export",
+            snippet_db=self.parent.snippet_db,
+            parent=self
         )
+        self.import_export_wizard.exec()
         self.snippet_service.refresh()
         self.editor.load_snippets()
 
@@ -861,7 +884,8 @@ class QSnippet(QMainWindow):
         """
         Exit the application cleanly.
 
-        Stops the snippet service, hides the tray icon, and exits the process.
+        Stops the snippet service, clears managed clipboard data, closes
+        database connections, hides the tray icon, and exits the process.
 
         Returns:
             None
@@ -870,7 +894,8 @@ class QSnippet(QMainWindow):
             SystemExit: Always raised when exiting the application.
         """
         logger.info("Exiting QSnippet")
-        self.stop_service()
+        self.snippet_service.shutdown()
+        self.parent.snippet_db.close()
         self.tray.hide()
         sys.exit()
 

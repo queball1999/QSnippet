@@ -19,12 +19,26 @@ def pytest_addoption(parser):
         default=False,
         help="run benchmark tests"
     )
+    parser.addoption(
+        "--gui",
+        action="store_true",
+        default=False,
+        help="run GUI tests"
+    )
 
 
 def pytest_configure(config):
-    """Skip benchmark tests by default unless --benchmark flag is passed."""
+    """Skip benchmark and GUI tests by default unless their flags are passed."""
+    markers_to_skip = []
+
     if not config.getoption("--benchmark"):
-        config.option.markexpr = "not benchmark"
+        markers_to_skip.append("not benchmark")
+
+    if not config.getoption("--gui"):
+        markers_to_skip.append("not gui")
+
+    if markers_to_skip:
+        config.option.markexpr = " and ".join(markers_to_skip)
 
 
 @pytest.fixture(scope="session")

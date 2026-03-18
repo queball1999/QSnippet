@@ -47,7 +47,7 @@ class ConfigLoader(QObject):
     """
     configChanged = Signal(dict)
 
-    def __init__(self, config_path: str, parent=None):
+    def __init__(self, config_path: str, parent=None, debounce_delay_ms: int = 500):
         """
         Initialize the ConfigLoader instance.
 
@@ -57,6 +57,7 @@ class ConfigLoader(QObject):
         Args:
             config_path (str): Path to the configuration YAML file.
             parent (Any): Optional parent QObject.
+            debounce_delay_ms (int): Debounce delay in milliseconds (default 500ms, 0 to disable).
 
         Returns:
             None
@@ -69,6 +70,10 @@ class ConfigLoader(QObject):
         self._watcher = QFileSystemWatcher(self)
         self._watcher.addPath(self.config_path)
         self._watcher.fileChanged.connect(self.on_file_changed)
+
+        # Debounce timer to prevent multiple rapid reloads
+        self._debounce_timer = None
+        self._debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
 
         # initial load
         self.config = {}
@@ -103,7 +108,8 @@ class ConfigLoader(QObject):
         Handle file change events for the configuration file.
 
         Re-adds the file path to the watcher if necessary and reloads
-        the configuration from disk.
+        the configuration from disk with debouncing to prevent multiple
+        rapid reloads.
 
         Args:
             path (str): The path of the changed file.
@@ -117,7 +123,21 @@ class ConfigLoader(QObject):
             logger.debug("Re-adding config path to watcher")
             self._watcher.addPath(self.config_path)
 
-        self.load_config()
+        # If debounce is disabled, reload immediately
+        if self._debounce_delay_ms == 0:
+            self.load_config()
+            return
+
+        # Cancel previous debounce timer if it exists
+        if self._debounce_timer is not None:
+            self._debounce_timer.stop()
+
+        # Schedule config reload with debounce delay
+        from PySide6.QtCore import QTimer
+        self._debounce_timer = QTimer()
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.timeout.connect(self.load_config)
+        self._debounce_timer.start(self._debounce_delay_ms)
 
     def stop(self):
         """
@@ -138,7 +158,7 @@ class SettingsLoader(QObject):
     """
     settingsChanged = Signal(dict)
 
-    def __init__(self, settings_path: str, parent=None):
+    def __init__(self, settings_path: str, parent=None, debounce_delay_ms: int = 500):
         """
         Initialize the SettingsLoader instance.
 
@@ -148,6 +168,7 @@ class SettingsLoader(QObject):
         Args:
             settings_path (str): Path to the settings YAML file.
             parent (Any): Optional parent QObject.
+            debounce_delay_ms (int): Debounce delay in milliseconds (default 500ms, 0 to disable).
 
         Returns:
             None
@@ -160,6 +181,10 @@ class SettingsLoader(QObject):
         self._watcher = QFileSystemWatcher(self)
         self._watcher.addPath(self.settings_path)
         self._watcher.fileChanged.connect(self.on_file_changed)
+
+        # Debounce timer to prevent multiple rapid reloads
+        self._debounce_timer = None
+        self._debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
 
         # initial load
         self.settings = {}
@@ -247,7 +272,8 @@ class SettingsLoader(QObject):
         Handle file change events for the settings file.
 
         Re-adds the file path to the watcher if necessary and reloads
-        the settings from disk.
+        the settings from disk with debouncing to prevent multiple
+        rapid reloads.
 
         Args:
             path (str): The path of the changed file.
@@ -261,7 +287,21 @@ class SettingsLoader(QObject):
             logger.debug("Re-adding settings path to watcher")
             self._watcher.addPath(self.settings_path)
 
-        self.load_settings()
+        # If debounce is disabled, reload immediately
+        if self._debounce_delay_ms == 0:
+            self.load_settings()
+            return
+
+        # Cancel previous debounce timer if it exists
+        if self._debounce_timer is not None:
+            self._debounce_timer.stop()
+
+        # Schedule settings reload with debounce delay
+        from PySide6.QtCore import QTimer
+        self._debounce_timer = QTimer()
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.timeout.connect(self.load_settings)
+        self._debounce_timer.start(self._debounce_delay_ms)
 
     def stop(self):
         """

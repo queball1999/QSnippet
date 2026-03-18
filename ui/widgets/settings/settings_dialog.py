@@ -338,6 +338,38 @@ class SettingsDialog(QDialog):
 
     # ----- SETTINGS -----
 
+    def approve_setting_change(self, path: list[str], old_value, new_value) -> bool:
+        """
+        Approve a setting change before it is persisted.
+
+        Args:
+            path (list[str]): The full path of the setting being changed.
+            old_value (Any): The current saved value.
+            new_value (Any): The requested new value.
+
+        Returns:
+            bool: True when the change should be applied.
+        """
+        if path != ["general", "clipboard_behavior", "clipboard_timeout"]:
+            return True
+
+        if str(new_value).strip().lower() != "off":
+            return True
+
+        if str(old_value).strip().lower() == "off":
+            return True
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Disable Clipboard Cleanup")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            "Turning clipboard cleanup off can leave expanded snippet content in your clipboard until you replace it."
+        )
+        msg.setInformativeText("Do you want to keep clipboard cleanup disabled?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+        return msg.exec() == QMessageBox.Yes
+
     def on_setting_changed(self, path: list[str], value):
         """ Handle when a setting value changes. """
         node = self.settings

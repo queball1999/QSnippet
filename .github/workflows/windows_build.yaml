@@ -26,9 +26,17 @@ jobs:
 
       - name: Load version info
         run: python tools/versioning.py
+        # Sets env.APP_VERSION for later steps
 
       - name: Build Windows binaries (PyInstaller)
         run: tools/build.ps1
+        shell: powershell
+
+      - name: Update Inno Setup version
+        run: |
+          $issContent = Get-Content "QSnippet.iss" -Raw
+          $issContent = $issContent -replace '#define MyAppVersion ".*"', '#define MyAppVersion "${{ env.APP_VERSION }}"'
+          Set-Content "QSnippet.iss" $issContent -NoNewline
         shell: powershell
 
       - name: Build Windows installer (Inno Setup)

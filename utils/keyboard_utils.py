@@ -3,25 +3,32 @@ import platform
 import pyperclip
 import re
 import datetime
+import threading
+import time
+from functools import lru_cache
+
 from utils.snippet_db import SnippetDB
+
+# Windows clipboard API via pywin32
+if platform.system() == "Windows":
+    import win32clipboard
 
 logger = logging.getLogger(__name__)
 
-
-
-class SnippetExpander():
-    def __init__(self, snippets_db: SnippetDB, parent) -> None:
+class SnippetExpander:
+    def __init__(self, snippets_db: SnippetDB, parent, settings_provider=None) -> None:
         """
         Initialize the SnippetExpander.
 
-        Loads snippets from the database, prepares trigger handling,
-        initializes keyboard listener and controller, and configures
-        internal state for buffer and trigger tracking.
+        Loads lightweight trigger metadata from the database, prepares
+        trigger handling, initializes keyboard listener and controller,
+        and configures internal state for buffer and clipboard tracking.
 
         Args:
             snippets_db (SnippetDB): The snippet database instance.
             parent (Any): The parent object.
-
+            settings_provider (Callable | None): Optional callback that
+                returns the latest settings dictionary.
         Returns:
             None
         """
@@ -31,19 +38,29 @@ class SnippetExpander():
         logger.info("Initializing SnippetExpander")
 
         self.snippets_db = snippets_db
-        self.snippets = self.snippets_db.get_all_snippets()
         self.custom_placeholders = self.snippets_db.get_all_custom_placeholders()
         self.parent = parent
+        self.settings_provider = settings_provider or getattr(parent, "settings_provider", None)
 
         self.disabled = False
-        self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)
         self.keys_to_ignore = [self.keyboard.Key.space, self.keyboard.Key.shift, self.keyboard.Key.enter, self.keyboard.Key.ctrl_l, self.keyboard.Key.ctrl_r]
         self.buffer = ""
-        self.cursor_pos = 0  # Cursor position in the buffer
-        self.max_trigger_len = 255
-        self.trigger_flag = False   # Used to track if we are within a snippet trigger sequence
+        self.cursor_pos = 0
+        self.max_trigger_len = 1
+        self.trigger_flag = False
+        self.buffer_inactivity_timeout = 5.0
+        self.last_keypress_at = 0.0
+        self.last_event_processed_at = 0.0
+        self.keyboard_debounce_ms = 20  # Minimum milliseconds between event processing
+        self.buffer_lock = threading.RLock()
+        self.clipboard_lock = threading.RLock()
+        self.clipboard_timer = None
+        self.clipboard_generation = 0
+        self.last_managed_clipboard = None
+        self.trigger_map = {}
+        self.trigger_trie = {}
 
-        self.build_trigger_map()
+        self.refresh_snippets()
 
         self.listener = self.keyboard.Listener(on_press=self.on_key_press)
         self.controller = self.keyboard.Controller()
@@ -53,50 +70,51 @@ class SnippetExpander():
 
     def build_trigger_map(self) -> None:
         """
-        Build the trigger lookup map and compiled regex.
+        Build the trigger lookup map and reversed trie.
 
-        Creates a dictionary of enabled snippet triggers mapped to their
-        data and compiles a regex pattern to detect trigger matches
-        at the end of the buffer.
+        Creates a lightweight dictionary of enabled snippet triggers mapped
+        to their metadata and builds a reversed trie used for suffix matching.
 
         Returns:
             None
         """
         logger.info("Building trigger map")
-    
+
+        trigger_index = self.snippets_db.get_enabled_trigger_index() or []
         self.trigger_map = {
-            s["trigger"]: s
-            for s in self.snippets
-            if s.get("enabled", True)
+            row["trigger"]: row
+            for row in trigger_index
+            if row.get("trigger")
         }
-        escapes = sorted(
-            (re.escape(t) for t in self.trigger_map),
-            key=len, reverse=True
-        )
-        pattern = r'(?:' + '|'.join(escapes) + r')\Z'
-        self.trigger_regex = re.compile(pattern)
+        self.trigger_trie = {}
+
+        for trigger in self.trigger_map:
+            node = self.trigger_trie
+            for char in reversed(trigger):
+                node = node.setdefault(char, {})
+            node["__trigger__"] = trigger
+
+        self.max_trigger_len = max((len(trigger) for trigger in self.trigger_map), default=1)
 
         logger.debug("Trigger map size: %d", len(self.trigger_map))
-        logger.debug("Trigger regex pattern: %s", self.trigger_regex.pattern)
+        logger.debug("Maximum trigger length: %d", self.max_trigger_len)
 
     def refresh_snippets(self) -> None:
         """
         Reload snippets and custom placeholders from the database.
 
-        Refreshes the internal snippet list, trigger map, trigger prefix
-        characters, and cached custom placeholders to reflect database updates.
+        Refreshes trigger metadata, the suffix trie, and cached custom
+        placeholders to reflect database updates.
 
         Returns:
             None
         """
         logger.info("Refreshing snippets from database")
 
-        self.snippets = self.snippets_db.get_all_snippets()
         self.custom_placeholders = self.snippets_db.get_all_custom_placeholders()
-        self.build_trigger_map()    # Rebuild trigger map
-        # This single line fixes the issue where new snippets don't get recognized until restart
-        # smh...
-        self.trigger_prefixs = self.retrieve_trigger_chars(self.snippets)   # Reload prefixes
+        self.load_snippet_by_trigger.cache_clear()
+        self.build_trigger_map()
+        self.clear_buffer()
         logger.info("SnippetExpander reloaded snippets from DB")
 
     def retrieve_trigger_chars(self, snippets) -> list:
@@ -120,6 +138,220 @@ class SnippetExpander():
         logger.debug("Trigger prefixes: %s", trigger_prefixs)
         return trigger_prefixs
 
+    def get_settings(self) -> dict:
+        """
+        Return the latest settings dictionary.
+
+        Returns:
+            dict: The current settings dictionary, or an empty dict.
+        """
+        if callable(self.settings_provider):
+            try:
+                return self.settings_provider() or {}
+            except Exception:
+                logger.exception("Failed to resolve settings for SnippetExpander")
+                return {}
+
+        settings = getattr(self.parent, "settings", None)
+        return settings or {}
+
+    def get_clipboard_timeout_seconds(self) -> int | None:
+        """
+        Read the clipboard cleanup timeout from settings.
+
+        Returns:
+            int | None: The timeout in seconds, or None when disabled.
+        """
+        settings = self.get_settings()
+        raw_value = (
+            settings.get("general", {})
+            .get("clipboard_behavior", {})
+            .get("clipboard_timeout", {})
+            .get("value", "30")
+        )
+
+        if isinstance(raw_value, str) and raw_value.strip().lower() == "off":
+            return None
+
+        try:
+            timeout_seconds = int(raw_value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid clipboard timeout %r. Falling back to 30 seconds.", raw_value)
+            return 30
+
+        return timeout_seconds if timeout_seconds > 0 else 30
+
+    def cancel_clipboard_timer(self) -> None:
+        """
+        Cancel any pending clipboard cleanup timer.
+
+        Returns:
+            None
+        """
+        with self.clipboard_lock:
+            if self.clipboard_timer is not None:
+                self.clipboard_timer.cancel()
+                self.clipboard_timer = None
+
+    def empty_clipboard_windows(self) -> None:
+        """
+        Empty clipboard on Windows using pywin32.
+
+        Uses win32clipboard API and always closes the clipboard handle
+        to avoid locking it for other applications.
+
+        Returns:
+            None
+        """
+        opened = False
+        try:
+            win32clipboard.OpenClipboard()
+            opened = True
+            win32clipboard.EmptyClipboard()
+            logger.debug("Active clipboard cleared via win32clipboard.EmptyClipboard()")
+        except Exception as e:
+            logger.warning("win32clipboard clear failed: %s; falling back to pyperclip", e)
+            try:
+                pyperclip.copy("")
+            except Exception:
+                logger.exception("pyperclip fallback also failed")
+        finally:
+            if opened:
+                try:
+                    win32clipboard.CloseClipboard()
+                except Exception:
+                    logger.exception("Failed to close Windows clipboard handle")
+
+    def empty_clipboard_generic(self) -> None:
+        """
+        Empty clipboard using cross-platform method.
+
+        Returns:
+            None
+        """
+        try:
+            pyperclip.copy("")
+            logger.debug("Clipboard cleared")
+        except Exception:
+            logger.exception("Failed to clear clipboard")
+
+    def empty_clipboard(self) -> None:
+        """
+        Empty the clipboard using the most appropriate method for the platform.
+
+        Returns:
+            None
+        """
+        if platform.system() == "Windows":
+            self.empty_clipboard_windows()
+        else:
+            self.empty_clipboard_generic()
+
+    def schedule_clipboard_clear(self, expected_text: str) -> None:
+        """
+        Schedule clipboard cleanup for a managed clipboard expansion.
+
+        Args:
+            expected_text (str): The clipboard content to clear if unchanged.
+        Returns:
+            None
+        """
+        timeout_seconds = self.get_clipboard_timeout_seconds()
+        self.cancel_clipboard_timer()
+
+        with self.clipboard_lock:
+            self.clipboard_generation += 1
+            self.last_managed_clipboard = expected_text
+            generation = self.clipboard_generation
+
+            if timeout_seconds is None:
+                logger.info("Clipboard cleanup disabled by settings")
+                return
+
+            timer = threading.Timer(
+                timeout_seconds,
+                self.clear_managed_clipboard,
+                kwargs={
+                    "expected_text": expected_text,
+                    "generation": generation,
+                    "force": False,
+                },
+            )
+            timer.daemon = True
+            self.clipboard_timer = timer
+            timer.start()
+            logger.debug("Scheduled clipboard cleanup in %s seconds", timeout_seconds)
+
+    def clear_managed_clipboard(
+        self,
+        expected_text: str | None = None,
+        generation: int | None = None,
+        force: bool = False,
+    ) -> None:
+        """
+        Clear clipboard content managed by snippet expansion.
+
+        Args:
+            expected_text (str | None): Expected clipboard content.
+            generation (int | None): Clipboard generation token.
+            force (bool): When True, clear regardless of current clipboard text.
+        Returns:
+            None
+        """
+        try:
+            with self.clipboard_lock:
+                if generation is not None and generation != self.clipboard_generation:
+                    return
+
+            current_text = ""
+            if not force:
+                current_text = pyperclip.paste()
+                if expected_text is not None and current_text != expected_text:
+                    logger.debug("Clipboard changed since expansion. Skipping cleanup.")
+                    return
+
+            self.empty_clipboard()
+            with self.clipboard_lock:
+                self.last_managed_clipboard = None
+                self.clipboard_timer = None
+            logger.info("Managed clipboard content cleared")
+        except Exception:
+            logger.exception("Failed to clear managed clipboard content")
+
+    @lru_cache(maxsize=256)
+    def load_snippet_by_trigger(self, trigger: str) -> dict:
+        """
+        Load full snippet data for a trigger on demand.
+
+        Args:
+            trigger (str): The trigger to load.
+        Returns:
+            dict: The matching snippet dictionary, or an empty dict.
+        """
+        return self.snippets_db.get_snippet_by_trigger(trigger) or {}
+
+    def match_trigger_suffix(self) -> str | None:
+        """
+        Match the longest enabled trigger at the end of the buffer.
+
+        Returns:
+            str | None: The matched trigger, or None if no trigger matches.
+        """
+        if not self.buffer:
+            return None
+
+        node = self.trigger_trie
+        matched_trigger = None
+
+        for char in reversed(self.buffer[-self.max_trigger_len:]):
+            node = node.get(char)
+            if node is None:
+                break
+            if "__trigger__" in node:
+                matched_trigger = node["__trigger__"]
+
+        return matched_trigger
+
     def clear_buffer(self) -> None:
         """
         Reset the internal typing buffer and cursor state.
@@ -132,50 +364,54 @@ class SnippetExpander():
         """
         logger.debug("Clearing trigger buffer")
 
-        self.buffer = ""
-        self.cursor_pos = 0
-        self.trigger_flag = False
+        with self.buffer_lock:
+            self.buffer = ""
+            self.cursor_pos = 0
+            self.trigger_flag = False
 
     def on_key_press(self, key) -> None:
         """
         Handle key press events from the keyboard listener.
 
         Processes navigation, deletion, termination keys, and character
-        input to detect and expand snippet triggers.
+        input to detect and expand snippet triggers. Implements debouncing
+        to prevent excessive event processing.
 
         Args:
             key (Any): The key event received from the listener.
-
         Returns:
             None
         """
         try:
-            # Detect if paused and skip if true
             if self.disabled:
                 return
-            
-            # Handle navigation and deletion keys
+
+            # Rate limiting: skip processing if events are coming too fast
+            now = time.monotonic() # monotonic cannot go backwards, good for measuring elapsed time
+            elapsed_ms = (now - self.last_event_processed_at) * 1000
+            if elapsed_ms < self.keyboard_debounce_ms:
+                return
+            self.last_event_processed_at = now
+
+            if self.last_keypress_at and (time.monotonic() - self.last_keypress_at) > self.buffer_inactivity_timeout:
+                logger.debug("Clearing buffer due to inactivity timeout")
+                self.clear_buffer()
+
             if self.handle_navigation_and_deletion(key):
                 return
-            
-            # Clear buffer on certain keys
-            if self.should_clear_on(key):
-                logger.debug("Clearing buffer due to terminating key")
-                self.clear_buffer()
-                return   
 
-            # Handle character keys
+            if self.should_clear_on(key):
+                logger.debug("Clearing buffer due to sensitive or terminating key")
+                self.clear_buffer()
+                self.last_keypress_at = 0.0
+                return
+
             if hasattr(key, "char") and key.char:
-                # Exit if not in trigger mode and char not a trigger prefix
-                if not self.trigger_flag and key.char not in self.trigger_prefixs:  # Exit if true
-                    self.clear_buffer()
-                    return
-                
-                # Handle character input
+                self.last_keypress_at = time.monotonic()
                 self.handle_char(char=key.char)
             else:
-                # any other special key resets buffer
                 self.clear_buffer()
+                self.last_keypress_at = 0.0
         except Exception:
             logger.exception("Error in key handler, resetting buffer")
             self.clear_buffer()
@@ -189,7 +425,6 @@ class SnippetExpander():
 
         Args:
             key (Any): The key event.
-
         Returns:
             bool: True if the key was handled, otherwise False.
         """
@@ -218,18 +453,42 @@ class SnippetExpander():
 
         Args:
             key (Any): The key event.
-
         Returns:
             bool: True if the buffer should be cleared, otherwise False.
         """
-        if key in (self.keyboard.Key.space,
-                   self.keyboard.Key.enter,
-                   self.keyboard.Key.tab,
-                   self.keyboard.Key.shift,
-                   self.keyboard.Key.ctrl_l,
-                   self.keyboard.Key.ctrl_r):
+        sensitive_keys = {
+            getattr(self.keyboard.Key, "space", None),
+            getattr(self.keyboard.Key, "enter", None),
+            getattr(self.keyboard.Key, "tab", None),
+            getattr(self.keyboard.Key, "esc", None),
+            getattr(self.keyboard.Key, "shift", None),
+            getattr(self.keyboard.Key, "shift_l", None),
+            getattr(self.keyboard.Key, "shift_r", None),
+            getattr(self.keyboard.Key, "ctrl_l", None),
+            getattr(self.keyboard.Key, "ctrl_r", None),
+            getattr(self.keyboard.Key, "alt_l", None),
+            getattr(self.keyboard.Key, "alt_r", None),
+            getattr(self.keyboard.Key, "alt_gr", None),
+            getattr(self.keyboard.Key, "cmd", None),
+            getattr(self.keyboard.Key, "cmd_l", None),
+            getattr(self.keyboard.Key, "cmd_r", None),
+            getattr(self.keyboard.Key, "caps_lock", None),
+            getattr(self.keyboard.Key, "insert", None),
+            getattr(self.keyboard.Key, "home", None),
+            getattr(self.keyboard.Key, "end", None),
+            getattr(self.keyboard.Key, "page_up", None),
+            getattr(self.keyboard.Key, "page_down", None),
+            getattr(self.keyboard.Key, "menu", None),
+            getattr(self.keyboard.Key, "print_screen", None),
+            getattr(self.keyboard.Key, "scroll_lock", None),
+            getattr(self.keyboard.Key, "pause", None),
+        }
+        sensitive_keys.discard(None)
+        if key in sensitive_keys:
             return True
-        return False
+
+        key_name = getattr(key, "name", "")
+        return bool(key_name and key_name.startswith("f"))
 
     def handle_char(self, char: str) -> None:
         """
@@ -240,39 +499,37 @@ class SnippetExpander():
 
         Args:
             char (str): The character to append.
-
         Returns:
             None
         """
-        # Trigger mode detection
-        self.trigger_flag = True
-
         logger.debug("Appending character to buffer: %r", char)
-            
-        # Still in trigger mode; update buffer
-        logger.debug("Appending buffer with character")
-        self.buffer = self.buffer[:self.cursor_pos] + char + self.buffer[self.cursor_pos:]
-        self.cursor_pos += 1
 
-        # Trim buffer if over max trigger length
-        if len(self.buffer) > self.max_trigger_len:
-            overflow = len(self.buffer) - self.max_trigger_len
-            self.buffer = self.buffer[overflow:]
-            self.cursor_pos = max(0, self.cursor_pos - overflow)
+        with self.buffer_lock:
+            self.trigger_flag = True
+            self.buffer = self.buffer[:self.cursor_pos] + char + self.buffer[self.cursor_pos:]
+            self.cursor_pos += 1
 
-        logger.debug("Buffer length: %d Cursor: %d", len(self.buffer), self.cursor_pos)
+            if len(self.buffer) > self.max_trigger_len:
+                overflow = len(self.buffer) - self.max_trigger_len
+                self.buffer = self.buffer[overflow:]
+                self.cursor_pos = max(0, self.cursor_pos - overflow)
 
-        response = self.trigger_regex.search(self.buffer)
-        logger.debug("Regex match found: %s", bool(response))
+            logger.debug("Buffer length: %d Cursor: %d", len(self.buffer), self.cursor_pos)
+            trigger = self.match_trigger_suffix()
 
-        if response:
-            trigger = response.group(0)
-            snippet = self.trigger_map[trigger]
-            style = snippet.get("paste_style", "Keystroke")
-            return_press = snippet.get("return_press", False)
+        if trigger:
+            snippet_meta = self.trigger_map.get(trigger, {})
+            snippet_entry = self.load_snippet_by_trigger(trigger)
+            style = snippet_meta.get("paste_style", "Keystroke")
+            return_press = snippet_meta.get("return_press", False)
+
+            if not snippet_entry:
+                logger.warning("Trigger matched but snippet data could not be loaded: %s", trigger)
+                self.clear_buffer()
+                return
 
             logger.info("Trigger matched: %s", trigger)
-            self.expand(trigger, snippet["snippet"], style, return_press)
+            self.expand(trigger, snippet_entry.get("snippet", ""), style, return_press)
             self.clear_buffer()
 
     def expand_clipboard(self, snippet) -> None:
@@ -284,14 +541,13 @@ class SnippetExpander():
 
         Args:
             snippet (str): The snippet text to insert.
-
         Returns:
             None
         """
         logger.debug("Expanding snippet via clipboard")
-        # NOTE: xclip or xsel must be installed on Linux for clipboard support
 
         pyperclip.copy(snippet)
+        self.schedule_clipboard_clear(snippet)
         with self.controller.pressed(self.paste_mod):
             self.controller.press("v")
             self.controller.release("v")
@@ -305,7 +561,6 @@ class SnippetExpander():
 
         Args:
             snippet (str): The snippet text to insert.
-
         Returns:
             None
         """
@@ -342,7 +597,6 @@ class SnippetExpander():
             paste_style (str): The expansion method ("Clipboard" or other).
             return_press (bool): Whether to simulate an additional
                 return key press after expansion.
-
         Returns:
             None
         """
@@ -378,7 +632,7 @@ class SnippetExpander():
 
         # Expand the snippet
         try:
-            if paste_style == "Clipboard":
+            if str(paste_style).lower() == "clipboard":
                 self.expand_clipboard(snippet)
             else:
                 self.expand_keystrokes(snippet)
@@ -402,7 +656,6 @@ class SnippetExpander():
             text (str): The snippet text to process.
             depth (int): Current recursion depth.
             seen (set | None): Set of triggers already processed to prevent loops.
-
         Returns:
             str: The processed snippet text.
         """
@@ -471,9 +724,10 @@ class SnippetExpander():
                 logger.error("Detected circular reference for trigger '%s'", trigger)
                 replacement = f"{{/{trigger}}}"
 
-            elif trigger in self.trigger_map:   # check for trigger in map
+            elif trigger in self.trigger_map:
                 seen.add(trigger)
-                nested_snip = self.trigger_map[trigger]["snippet"]
+                nested_entry = self.load_snippet_by_trigger(trigger)
+                nested_snip = nested_entry.get("snippet", "")
                 replacement = self.process_snippet_text(
                     nested_snip, depth + 1, seen
                 )
@@ -511,6 +765,13 @@ class SnippetExpander():
             None
         """
         logger.info("Stopping SnippetExpander listener")
+        self.cancel_clipboard_timer()
+        self.clear_managed_clipboard(
+            expected_text=self.last_managed_clipboard,
+            generation=self.clipboard_generation,
+            force=True,
+        )
+        self.clear_buffer()
         self.listener.stop()
 
     def pause(self) -> None:

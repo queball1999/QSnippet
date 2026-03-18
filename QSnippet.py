@@ -2,10 +2,10 @@ import sys
 import os
 import logging
 from pathlib import Path
-import psutil, tempfile
 
 # Import utility modules (UI imports moved to __init__ to avoid import errors in test environments)
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
+from utils.lock_utils import LockFile
 
 # Import build info
 try:
@@ -112,9 +112,10 @@ class main():
         self.skip_reg = False
 
         # Define Directories
-        self.working_dir = FileUtils.get_default_paths()["working_dir"]
-        self.resource_dir = FileUtils.get_default_paths()["resource_dir"]
-        self.default_os_paths = FileUtils.get_default_paths()
+        default_paths = FileUtils.get_default_paths()
+        self.working_dir = default_paths["working_dir"]
+        self.resource_dir = default_paths["resource_dir"]
+        self.default_os_paths = default_paths
 
         self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
@@ -133,6 +134,9 @@ class main():
         self.snippet_db_file = self.app_data_dir / "snippets.db"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
+
+        # Ensure log directory exists before logger tries to write to it
+        Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
 
         # Config and Settings files
 
@@ -488,42 +492,47 @@ class main():
                 ):  # If auto-start exists and setting is false, disable auto-start
                 LinuxUtils.disable_autostart()
                 
-    def check_if_already_running(self, app_name="QSnippet"):
+    def check_if_already_running(self, app_name="QSnippet") -> bool:
         """
-        Check whether another instance of the application is running.
+        Check whether another instance of the application is already running.
 
-        Uses a lock file in the system temporary directory to determine
-        if an existing process with the stored PID is active. If another
-        instance is detected, displays a message and exits.
+        Uses kernel-enforced locking for atomic, cross-platform single instance detection:
+        - Windows: Named mutex via CreateMutex (kernel-enforced, atomic)
+        - Linux/macOS: fcntl.flock() (kernel-enforced, atomic, auto-released on crash)
 
         Args:
-            app_name (str): Name of the application.
+            app_name (str): Name of the application used for single instance detection.
 
         Returns:
-            bool: False if no other instance is running.
+            bool: True if startup can continue, otherwise exits the process.
 
         Raises:
-            SystemExit: If another instance is already running.
+            SystemExit: If another running instance is detected.
         """
-        lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
-        current_pid = os.getpid()
+        if sys.platform == "win32":
+            lock_id = f"Local\\{app_name}.Lock"
+        else:
+            lock_id = str(self.app_data_dir / f".{app_name}.lock")
 
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, "r") as f:
-                    pid = int(f.read().strip())
-                if psutil.pid_exists(pid):
-                    # Already running
-                    self.message_box.info(f"Another instance of '{app_name}' is already running.\nPlease check the task tray for the app icon.",
-                                          title="Already Running")
-                    sys.exit(1)
-            except Exception:
-                pass  # corrupt lock file, ignore
+        logger.debug("Checking single-instance lock: %s", lock_id)
 
-        # Write our PID
-        with open(lock_file, "w") as f:
-            f.write(str(current_pid))
-        return False
+        try:
+            # Moving to new lock_utils with better cross-platform support and automatic cleanup on crashes
+            self.lock_file = LockFile(lock_id)
+            if self.lock_file.try_acquire():
+                self.app.aboutToQuit.connect(self.lock_file.release)
+                logger.debug("Single-instance lock acquired successfully")
+                return True
+
+            logger.warning("Another instance detected. Exiting.")
+            self.message_box.info(
+                f"Another instance of '{app_name}' is already running.\nPlease check the task tray for the app icon.",
+                title="Already Running"
+            )
+            sys.exit(1)
+        except Exception as e:
+            logger.exception("Single-instance check failed: %s", e)
+            raise RuntimeError(f"Failed to initialize single-instance lock: {e}") from e
     
     def check_sys_requirements(self):
         """
