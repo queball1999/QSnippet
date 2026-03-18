@@ -12,6 +12,8 @@ from utils.snippet_db import SnippetDB
 from utils.file_utils import FileUtils
 from ui.widgets.import_export_wizard import classify_snippets
 
+pytestmark = pytest.mark.gui
+
 
 @pytest.fixture
 def db(tmp_path):

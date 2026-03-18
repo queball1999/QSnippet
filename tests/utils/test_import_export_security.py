@@ -21,6 +21,8 @@ from utils.file_utils import (
     validate_snippets_list,
 )
 
+pytestmark = pytest.mark.gui
+
 
 class TestFileSizeLimit:
     """Test file size DoS protection."""
