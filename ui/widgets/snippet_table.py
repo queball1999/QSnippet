@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 class SnippetTable(QTreeView):
     # Signals for context‐menu actions
-    addFolder = Signal(QStandardItem)  # parent folder or None
-    addSnippet = Signal(QStandardItem)  # parent folder
+    addFolder = Signal(object)          # parent folder (QStandardItem) or None
+    addSnippet = Signal(object)         # parent folder (QStandardItem)
     editSnippet = Signal(dict)           # entry data
     renameFolder = Signal(QStandardItem)  # folder item
     renameSnippet = Signal(dict)           # entry data
     deleteFolder = Signal(QStandardItem)  # folder item
     deleteSnippet = Signal(dict)           # entry data
-    entrySelected = Signal(dict)           # when a snippet is clicked
+    entrySelected = Signal(object)         # when a snippet is clicked (dict or None)
     refreshSignal = Signal()    # trigger refresh
     # Emitted when drag-and-drop moves a folder or snippet to a new location
     folderMoved = Signal(str, str)   # old_path, new_path
@@ -318,6 +318,9 @@ class SnippetTable(QTreeView):
         """
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
+        if item is None:
+            self.entrySelected.emit(None)
+            return
         data = item.data(Qt.UserRole)
 
         logger.debug(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
@@ -383,6 +386,8 @@ class SnippetTable(QTreeView):
 
         src_idx = self.proxy.mapToSource(proxy_idx)
         item = self.model.itemFromIndex(src_idx)
+        if item is None:
+            return
         data = item.data(Qt.UserRole)
 
         if isinstance(data, dict) and data.get("_type") == "folder":
@@ -526,6 +531,8 @@ class SnippetTable(QTreeView):
 
         src_idx = self.proxy.mapToSource(idx)
         item = self.model.itemFromIndex(src_idx)
+        if item is None:
+            return None
         data = item.data(Qt.UserRole)
 
         if not isinstance(data, dict) or data.get("_type") == "folder":
