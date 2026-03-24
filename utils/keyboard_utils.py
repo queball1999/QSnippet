@@ -29,6 +29,7 @@ class SnippetExpander:
             parent (Any): The parent object.
             settings_provider (Callable | None): Optional callback that
                 returns the latest settings dictionary.
+        
         Returns:
             None
         """
@@ -74,7 +75,7 @@ class SnippetExpander:
 
         Creates a lightweight dictionary of enabled snippet triggers mapped
         to their metadata and builds a reversed trie used for suffix matching.
-
+        
         Returns:
             None
         """
@@ -105,7 +106,7 @@ class SnippetExpander:
 
         Refreshes trigger metadata, the suffix trie, and cached custom
         placeholders to reflect database updates.
-
+        
         Returns:
             None
         """
@@ -117,13 +118,111 @@ class SnippetExpander:
         self.clear_buffer()
         logger.info("SnippetExpander reloaded snippets from DB")
 
+    # Incremental trigger-map updates - update or remove a
+    # single trigger in memory without a DB round-trip or
+    # keyboard buffer clear.
+
+    def rebuild_trie_from_map(self) -> None:
+        """
+        Rebuild the reversed suffix trie from the current trigger_map.
+
+        Faster than a full build_trigger_map() because it skips the DB
+        query and works entirely in memory.
+        
+        Returns:
+            None
+        """
+        trie: dict = {}
+        for trigger in self.trigger_map:
+            node = trie
+            for char in reversed(trigger):
+                node = node.setdefault(char, {})
+            node["__trigger__"] = trigger
+        self.trigger_trie = trie
+        self.max_trigger_len = max((len(t) for t in self.trigger_map), default=1)
+
+    def update_trigger_entry(self, snippet_meta: dict) -> None:
+        """
+        Add or update a single trigger in the in-memory index without a DB
+        query or buffer clear.
+
+        Intended for single-snippet save/update operations from the UI so
+        that ongoing typing is not disrupted.
+
+        Args:
+            snippet_meta (dict): Must contain at minimum 'trigger' and 'id'.
+                Optional keys: 'enabled' (default True), 'paste_style',
+                'return_press'.
+        
+        Returns:
+            None
+        """
+        trigger = snippet_meta.get("trigger")
+        snippet_id = snippet_meta.get("id")
+        if not trigger:
+            logger.warning("update_trigger_entry called with no trigger; falling back to full refresh")
+            self.refresh_snippets()
+            return
+
+        with self.buffer_lock:
+            # Remove any existing entry for this snippet ID (handles renames)
+            old_trigger = next(
+                (t for t, m in self.trigger_map.items() if m.get("id") == snippet_id),
+                None,
+            )
+            if old_trigger and old_trigger != trigger:
+                self.trigger_map.pop(old_trigger, None)
+
+            enabled = snippet_meta.get("enabled", True)
+            if enabled:
+                self.trigger_map[trigger] = {
+                    "id": snippet_id,
+                    "trigger": trigger,
+                    "paste_style": snippet_meta.get("paste_style", "Keystroke"),
+                    "return_press": bool(snippet_meta.get("return_press", False)),
+                }
+            else:
+                # Disabled snippets must not appear in the trie
+                self.trigger_map.pop(trigger, None)
+
+            self.rebuild_trie_from_map()
+
+        # Invalidate only the affected trigger in the LRU cache
+        self.load_snippet_by_trigger.cache_clear()
+        logger.debug("Incremental trigger update: %s (id=%s)", trigger, snippet_id)
+
+    def remove_trigger_entry(self, snippet_id: int) -> None:
+        """
+        Remove a trigger from the in-memory index by snippet ID without a
+        DB query or buffer clear.
+
+        Args:
+            snippet_id (int): The database ID of the deleted snippet.
+        
+        Returns:
+            None
+        """
+        with self.buffer_lock:
+            trigger = next(
+                (t for t, m in self.trigger_map.items() if m.get("id") == snippet_id),
+                None,
+            )
+            if trigger is None:
+                logger.debug("remove_trigger_entry: snippet id=%s not in trigger map", snippet_id)
+                return
+            self.trigger_map.pop(trigger)
+            self.rebuild_trie_from_map()
+
+        self.load_snippet_by_trigger.cache_clear()
+        logger.debug("Incremental trigger removal: %s (id=%s)", trigger, snippet_id)
+
     def retrieve_trigger_chars(self, snippets) -> list:
         """
         Retrieve unique first characters from enabled snippet triggers.
 
         Args:
             snippets (list[dict]): List of snippet dictionaries.
-
+        
         Returns:
             list: A list of unique trigger prefix characters.
         """
@@ -141,7 +240,7 @@ class SnippetExpander:
     def get_settings(self) -> dict:
         """
         Return the latest settings dictionary.
-
+        
         Returns:
             dict: The current settings dictionary, or an empty dict.
         """
@@ -158,7 +257,7 @@ class SnippetExpander:
     def get_clipboard_timeout_seconds(self) -> int | None:
         """
         Read the clipboard cleanup timeout from settings.
-
+        
         Returns:
             int | None: The timeout in seconds, or None when disabled.
         """
@@ -184,7 +283,7 @@ class SnippetExpander:
     def cancel_clipboard_timer(self) -> None:
         """
         Cancel any pending clipboard cleanup timer.
-
+        
         Returns:
             None
         """
@@ -199,7 +298,7 @@ class SnippetExpander:
 
         Uses win32clipboard API and always closes the clipboard handle
         to avoid locking it for other applications.
-
+        
         Returns:
             None
         """
@@ -225,7 +324,7 @@ class SnippetExpander:
     def empty_clipboard_generic(self) -> None:
         """
         Empty clipboard using cross-platform method.
-
+        
         Returns:
             None
         """
@@ -238,7 +337,7 @@ class SnippetExpander:
     def empty_clipboard(self) -> None:
         """
         Empty the clipboard using the most appropriate method for the platform.
-
+        
         Returns:
             None
         """
@@ -253,6 +352,7 @@ class SnippetExpander:
 
         Args:
             expected_text (str): The clipboard content to clear if unchanged.
+        
         Returns:
             None
         """
@@ -295,6 +395,7 @@ class SnippetExpander:
             expected_text (str | None): Expected clipboard content.
             generation (int | None): Clipboard generation token.
             force (bool): When True, clear regardless of current clipboard text.
+        
         Returns:
             None
         """
@@ -325,6 +426,7 @@ class SnippetExpander:
 
         Args:
             trigger (str): The trigger to load.
+        
         Returns:
             dict: The matching snippet dictionary, or an empty dict.
         """
@@ -333,7 +435,7 @@ class SnippetExpander:
     def match_trigger_suffix(self) -> str | None:
         """
         Match the longest enabled trigger at the end of the buffer.
-
+        
         Returns:
             str | None: The matched trigger, or None if no trigger matches.
         """
@@ -358,7 +460,7 @@ class SnippetExpander:
 
         Clears the buffer, resets the cursor position, and disables
         trigger mode.
-
+        
         Returns:
             None
         """
@@ -379,6 +481,7 @@ class SnippetExpander:
 
         Args:
             key (Any): The key event received from the listener.
+        
         Returns:
             None
         """
@@ -425,6 +528,7 @@ class SnippetExpander:
 
         Args:
             key (Any): The key event.
+        
         Returns:
             bool: True if the key was handled, otherwise False.
         """
@@ -453,6 +557,7 @@ class SnippetExpander:
 
         Args:
             key (Any): The key event.
+        
         Returns:
             bool: True if the buffer should be cleared, otherwise False.
         """
@@ -499,6 +604,7 @@ class SnippetExpander:
 
         Args:
             char (str): The character to append.
+        
         Returns:
             None
         """
@@ -532,25 +638,45 @@ class SnippetExpander:
             self.expand(trigger, snippet_entry.get("snippet", ""), style, return_press)
             self.clear_buffer()
 
-    def expand_clipboard(self, snippet) -> None:
+    def expand_clipboard(self, snippet: str, return_press: bool = False) -> None:
         """
-        Expand a snippet using clipboard paste.
+        Expand a snippet using clipboard paste (non-blocking).
 
-        Copies the snippet text to the clipboard and simulates a
-        paste keyboard shortcut.
+        Audit 3.5: Spawns a background thread to copy the snippet to the
+        clipboard and simulate the paste shortcut, so the keyboard listener
+        thread is not held while pyperclip.copy() completes. The background
+        thread re-enables event processing (self.disabled) when done.
 
         Args:
             snippet (str): The snippet text to insert.
+            return_press (bool): Whether to simulate an Enter key press after paste.
+        
         Returns:
             None
         """
-        logger.debug("Expanding snippet via clipboard")
+        logger.debug("Expanding snippet via clipboard (async)")
 
-        pyperclip.copy(snippet)
-        self.schedule_clipboard_clear(snippet)
-        with self.controller.pressed(self.paste_mod):
-            self.controller.press("v")
-            self.controller.release("v")
+        def copy_and_paste() -> None:
+            try:
+                pyperclip.copy(snippet)
+                self.schedule_clipboard_clear(snippet)
+                # Brief pause to ensure the clipboard is populated before pasting
+                time.sleep(0.05)
+                with self.controller.pressed(self.paste_mod):
+                    self.controller.press("v")
+                    self.controller.release("v")
+                if return_press:
+                    time.sleep(0.02)
+                    self.controller.press(self.keyboard.Key.enter)
+                    self.controller.release(self.keyboard.Key.enter)
+            except Exception:
+                logger.exception("Clipboard expand failed")
+            finally:
+                logger.debug("Clipboard expand complete; re-enabling listener")
+                self.disabled = False
+
+        t = threading.Thread(target=copy_and_paste, daemon=True)
+        t.start()
 
     def expand_keystrokes(self, snippet) -> None:
         """
@@ -561,6 +687,7 @@ class SnippetExpander:
 
         Args:
             snippet (str): The snippet text to insert.
+        
         Returns:
             None
         """
@@ -597,6 +724,7 @@ class SnippetExpander:
             paste_style (str): The expansion method ("Clipboard" or other).
             return_press (bool): Whether to simulate an additional
                 return key press after expansion.
+        
         Returns:
             None
         """
@@ -630,19 +758,20 @@ class SnippetExpander:
         # Temporarily disable event processing, but do NOT stop listener
         self.disabled = True
 
-        # Expand the snippet
-        try:
-            if str(paste_style).lower() == "clipboard":
-                self.expand_clipboard(snippet)
-            else:
+        if str(paste_style).lower() == "clipboard":
+            # expand_clipboard runs on a background thread and owns the
+            # self.disabled lifecycle - it re-enables when the paste is done.
+            self.expand_clipboard(snippet, return_press=return_press)
+        else:
+            try:
                 self.expand_keystrokes(snippet)
 
-            if return_press:
-                self.controller.press(self.keyboard.Key.enter)
-                self.controller.release(self.keyboard.Key.enter) 
-        finally:
-            logger.debug("Restarting listener")
-            self.disabled = False
+                if return_press:
+                    self.controller.press(self.keyboard.Key.enter)
+                    self.controller.release(self.keyboard.Key.enter)
+            finally:
+                logger.debug("Restarting listener")
+                self.disabled = False
 
     def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
         """
@@ -656,6 +785,7 @@ class SnippetExpander:
             text (str): The snippet text to process.
             depth (int): Current recursion depth.
             seen (set | None): Set of triggers already processed to prevent loops.
+        
         Returns:
             str: The processed snippet text.
         """
@@ -750,7 +880,7 @@ class SnippetExpander:
     def start(self) -> None:
         """
         Start the keyboard listener.
-
+        
         Returns:
             None
         """
@@ -760,7 +890,7 @@ class SnippetExpander:
     def stop(self) -> None:
         """
         Stop the keyboard listener.
-
+        
         Returns:
             None
         """
@@ -779,7 +909,7 @@ class SnippetExpander:
         Temporarily disable snippet expansion.
 
         Clears the buffer and prevents trigger handling until resumed.
-
+        
         Returns:
             None
         """
@@ -790,7 +920,7 @@ class SnippetExpander:
     def resume(self) -> None:
         """
         Resume snippet expansion after being paused.
-
+        
         Returns:
             None
         """

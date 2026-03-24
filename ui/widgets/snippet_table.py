@@ -629,7 +629,7 @@ class SnippetTable(QTreeView):
           1. Capture identity keys from the *pre-drop* item while UserRole is intact.
           2. Resolve the drop target and indicator to determine the new path.
           3. Emit the appropriate signal so the editor persists the change to the DB.
-          4. Ignore the Qt-level move — the editor's reload will rebuild the tree
+          4. Ignore the Qt-level move - the editor's reload will rebuild the tree
              from the database, which is the single source of truth.
 
         Args:
@@ -681,7 +681,7 @@ class SnippetTable(QTreeView):
             target_proxy_idx.isValid(), drop_indicator,
         )
 
-        # Do NOT call super().dropEvent() — we handle the move ourselves via
+        # Do NOT call super().dropEvent() - we handle the move ourselves via
         # the database. The editor's reload will rebuild the tree from DB.
         event.setDropAction(Qt.IgnoreAction)
         event.accept()
@@ -788,7 +788,7 @@ class SnippetTable(QTreeView):
                     parent_path = target_data.get("path", target_item.text())
                     logger.debug(
                         "resolve_drop_parent_path: AboveItem/BelowItem on root folder "
-                        "'%s' — treating as OnItem for snippet",
+                        "'%s' - treating as OnItem for snippet",
                         parent_path,
                     )
                 else:

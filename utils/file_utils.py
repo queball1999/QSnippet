@@ -1,4 +1,5 @@
 import os
+import re
 import platform
 import logging
 import yaml
@@ -30,7 +31,7 @@ def validate_snippet_fields(snippet: dict) -> None:
     - Field types correct
     - Field lengths within limits
     - No invalid boolean/string values
-
+    
     Raises:
         ValueError: If validation fails
         TypeError: If field type is wrong
@@ -63,6 +64,12 @@ def validate_snippet_fields(snippet: dict) -> None:
     if not snippet["trigger"].strip():
         raise ValueError("Trigger cannot be empty or whitespace only")
 
+    # Reject control characters in all text fields (import path)
+    control_char_re = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+    for field in string_fields:
+        if field in snippet and control_char_re.search(snippet[field]):
+            raise ValueError(f"Field '{field}' contains invalid control characters.")
+
 
 def sanitize_snippet(snippet: dict) -> dict:
     """
@@ -70,6 +77,7 @@ def sanitize_snippet(snippet: dict) -> dict:
 
     Args:
         snippet (dict): Snippet dictionary from YAML
+    
     Returns:
         dict: Sanitized snippet with only allowed fields
     """
@@ -88,8 +96,10 @@ def validate_snippets_list(data: dict) -> list:
 
     Args:
         data (dict): Parsed YAML data
+    
     Returns:
         list: Validated snippets list
+    
     Raises:
         ValueError: If validation fails
     """
@@ -117,10 +127,10 @@ class FileUtils:
         Searches for an images directory in the resource directory and
         working directory, in that order. Validates that all required
         image files are present before returning the path.
-
+        
         Returns:
             Path: The resolved images directory path.
-
+        
         Raises:
             FileNotFoundError: If no valid images directory containing all
                 required image files is found.
@@ -168,10 +178,10 @@ class FileUtils:
 
         Args:
             path (Path): The directory path to create.
-
+        
         Returns:
             None
-
+        
         Raises:
             Exception: If the directory cannot be created.
         """
@@ -195,11 +205,11 @@ class FileUtils:
 
         Args:
             path (Path): The path to the YAML file.
-
+        
         Returns:
             dict: The parsed YAML contents as a dictionary. Returns an empty
                 dictionary if loading fails.
-
+        
         Raises:
             ValueError: If file is too large
             TimeoutError: If parsing takes too long
@@ -253,10 +263,10 @@ class FileUtils:
         Args:
             path (Path): The destination YAML file path.
             data (dict): The dictionary to serialize and write.
-
+        
         Returns:
             None
-
+        
         Raises:
             Exception: If writing to the file fails.
         """
@@ -279,10 +289,10 @@ class FileUtils:
         Args:
             path (Path): The destination file path.
             snippets (list[dict]): A list of snippet dictionaries to export.
-
+        
         Returns:
             None
-
+        
         Raises:
             Exception: If exporting fails.
         """
@@ -316,10 +326,10 @@ class FileUtils:
 
         Args:
             path (Path): The source YAML file path.
-
+        
         Returns:
             list[dict]: A list of sanitized snippet dictionaries.
-
+        
         Raises:
             ValueError: If validation fails (size, format, field values)
             TypeError: If field types are invalid
@@ -364,7 +374,7 @@ class FileUtils:
         Args:
             parent (Any): The parent widget for dialog windows.
             db (Any): The database instance used to insert snippets.
-
+        
         Returns:
             int: The total number of snippets imported or updated.
         """
@@ -451,10 +461,10 @@ class FileUtils:
         Args:
             parent (Any): The parent widget for dialog windows.
             db (Any): The database instance used to retrieve snippets.
-
+        
         Returns:
             int: The number of snippets exported.
-
+        
         Raises:
             Exception: If exporting snippets fails.
         """
@@ -495,7 +505,7 @@ class FileUtils:
 
         Args:
             path (Path): The file path to check.
-
+        
         Returns:
             bool: True if the file exists and is a file, otherwise False.
         """
@@ -509,11 +519,11 @@ class FileUtils:
         Determines appropriate paths for application data, documents, logs,
         working directory, and resource directory depending on the runtime
         environment.
-
+        
         Returns:
             dict: A dictionary containing resolved Path objects for default
                 directories.
-
+        
         Raises:
             ValueError: If OS-specific directories cannot be determined.
         """
@@ -563,7 +573,7 @@ class FileUtils:
 
         Determines the directory of the executable when running as a bundled
         application, or the main entry point directory when running from source.
-
+        
         Returns:
             Path: The resolved application root directory.
         """
@@ -576,9 +586,79 @@ class FileUtils:
         return Path(main_file).resolve().parent
 
     @staticmethod
-    def _is_setting_leaf(d: dict) -> bool:
+    def is_setting_leaf(d: dict) -> bool:
         """True for settings leaf nodes that carry both 'value' and 'default' keys."""
         return "value" in d and "default" in d
+
+    # Settings schema validation - type-check setting values
+    # after merge and reset invalid ones to their defaults.
+
+    SETTING_TYPE_CHECKS = {
+        "string":  lambda v: isinstance(v, str),
+        "integer": lambda v: isinstance(v, (int, str)) and str(v).lstrip("-").isdigit(),
+        "boolean": lambda v: isinstance(v, bool),
+        "float":   lambda v: isinstance(v, (int, float)),
+    }
+
+    @staticmethod
+    def validate_setting_leaf(path: str, leaf: dict) -> bool:
+        """
+        Check that a settings leaf node's value matches its declared type.
+
+        Logs a warning and resets to the default value when a mismatch is
+        detected. Does NOT raise, preserving graceful-degradation behavior.
+
+        Args:
+            path (str): Dot-separated key path used for log messages.
+            leaf (dict): A settings leaf node with 'value', 'default', and
+                optionally 'type' keys.
+        
+        Returns:
+            bool: True if the value was valid (or no type declared), False if
+                it was reset to the default.
+        """
+        declared_type = leaf.get("type")
+        if not declared_type:
+            return True
+
+        checker = FileUtils.SETTING_TYPE_CHECKS.get(declared_type)
+        if checker is None:
+            return True  # Unknown type - skip
+
+        value = leaf.get("value")
+        if not checker(value):
+            logger.warning(
+                "Settings value at '%s' has type '%s' but value %r is invalid; "
+                "resetting to default %r.",
+                path,
+                declared_type,
+                value,
+                leaf.get("default"),
+            )
+            leaf["value"] = leaf["default"]
+            return False
+        return True
+
+    @staticmethod
+    def validate_merged_settings(merged: dict, path: str = "") -> None:
+        """
+        Recursively walk a merged settings dict and validate every leaf node.
+
+        Args:
+            merged (dict): The merged settings dictionary to validate.
+            path (str): Current dot-separated key path (used for log messages).
+        
+        Returns:
+            None
+        """
+        for key, val in merged.items():
+            current_path = f"{path}.{key}" if path else key
+            if not isinstance(val, dict):
+                continue
+            if FileUtils.is_setting_leaf(val):
+                FileUtils.validate_setting_leaf(current_path, val)
+            else:
+                FileUtils.validate_merged_settings(val, current_path)
 
     @staticmethod
     def merge_dict(default: dict, user: dict) -> dict:
@@ -597,7 +677,7 @@ class FileUtils:
         Args:
             default (dict): The default configuration dictionary.
             user (dict): The user configuration dictionary.
-
+        
         Returns:
             dict: Merged dictionary following default structure exactly.
         """
@@ -611,7 +691,7 @@ class FileUtils:
                 merged[key] = default_val
             elif isinstance(default_val, dict) and isinstance(user[key], dict):
                 user_val = user[key]
-                if FileUtils._is_setting_leaf(default_val):
+                if FileUtils.is_setting_leaf(default_val):
                     # Settings leaf: refresh all metadata from default, preserve only value
                     merged[key] = dict(default_val)
                     merged[key]["value"] = user_val.get("value", default_val["value"])
@@ -637,10 +717,10 @@ class FileUtils:
             default_dir (Path): Directory containing the default config.yaml.
             user_path (Path): Destination path for the user config file.
             parent (Any): Optional parent widget for error dialogs.
-
+        
         Returns:
             None
-
+        
         Raises:
             FileNotFoundError: If the default config file is missing.
             RuntimeError: If the config file cannot be created.
@@ -687,10 +767,10 @@ class FileUtils:
             default_dir (Path): Directory containing the default settings.yaml.
             user_path (Path): Destination path for the user settings file.
             parent (Any): Optional parent widget for error dialogs.
-
+        
         Returns:
             None
-
+        
         Raises:
             FileNotFoundError: If the default settings file is missing.
             RuntimeError: If the settings file cannot be created.
@@ -734,7 +814,7 @@ class FileUtils:
 
         Args:
             path (Path): The path to the database file.
-
+        
         Returns:
             None
         """
@@ -762,7 +842,7 @@ class FileUtils:
         Args:
             default_path (Path): Path to the default YAML file.
             user_path (Path): Path to the user YAML file.
-
+        
         Returns:
             dict: The merged configuration dictionary.
         """
@@ -777,6 +857,7 @@ class FileUtils:
             user_data = {}
 
         merged = FileUtils.merge_dict(default_data, user_data)
+        FileUtils.validate_merged_settings(merged)  # Type-check values after merge
 
         # Only write if file missing or structure changed
         if not user_path.exists() or merged != user_data:

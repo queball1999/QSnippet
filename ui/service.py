@@ -18,7 +18,7 @@ class SnippetService():
             config_path (str): Path to the snippets database file.
             settings_provider (Callable | None): Optional callback that
                 returns the latest settings dictionary.
-
+        
         Returns:
             None
         """
@@ -43,12 +43,41 @@ class SnippetService():
     def refresh(self) -> None:
         """
         Force a reload of snippets from the database.
-
+        
         Returns:
             None
         """
         logger.info("Refreshing snippets via SnippetService")
         self.expander.refresh_snippets()
+
+    def refresh_snippet(self, snippet_meta: dict) -> None:
+        """
+        Incrementally update a single trigger in the expander's in-memory
+        index without a full DB reload or buffer clear.
+
+        Args:
+            snippet_meta (dict): Snippet entry dict containing at minimum
+                'trigger' and 'id'.
+        
+        Returns:
+            None
+        """
+        logger.info("Incremental trigger refresh for id=%s", snippet_meta.get("id"))
+        self.expander.update_trigger_entry(snippet_meta)
+
+    def remove_snippet(self, snippet_id: int) -> None:
+        """
+        Incrementally remove a trigger from the expander's in-memory index
+        without a full DB reload or buffer clear.
+
+        Args:
+            snippet_id (int): The database ID of the deleted snippet.
+        
+        Returns:
+            None
+        """
+        logger.info("Incremental trigger removal for id=%s", snippet_id)
+        self.expander.remove_trigger_entry(snippet_id)
 
     def on_snippets_updated(self, new_snippets: list):
         """
@@ -56,7 +85,7 @@ class SnippetService():
 
         Args:
             new_snippets (list): The updated list of snippet definitions.
-
+        
         Returns:
             None
         """
@@ -69,7 +98,7 @@ class SnippetService():
 
         Sleeps until a stop request is received, then stops the snippet
         expander and exits.
-
+        
         Returns:
             None
         """
@@ -87,7 +116,7 @@ class SnippetService():
 
         Initializes the expander listener if not already running and
         spawns a daemon thread to monitor stop requests.
-
+        
         Returns:
             None
         """
@@ -113,7 +142,7 @@ class SnippetService():
         Stop the snippet service and wait for shutdown.
 
         Signals the monitor thread to stop and waits for it to join.
-
+        
         Returns:
             None
         """
@@ -135,7 +164,7 @@ class SnippetService():
     def shutdown(self) -> None:
         """
         Stop the service and release owned resources.
-
+        
         Returns:
             None
         """
@@ -146,7 +175,7 @@ class SnippetService():
     def pause(self) -> None:
         """
         Pause the snippet service temporarily.
-
+        
         Returns:
             None
         """
@@ -156,7 +185,7 @@ class SnippetService():
     def resume(self) -> None:
         """
         Resume the snippet service after being paused.
-
+        
         Returns:
             None
         """
@@ -166,7 +195,7 @@ class SnippetService():
     def active(self) -> bool:
         """
         Check whether the snippet service is currently active.
-
+        
         Returns:
             bool: True if the monitor thread is running and not signaled
                 to stop, otherwise False.

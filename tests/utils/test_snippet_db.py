@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 from pathlib import Path
 
-from utils.snippet_db import SnippetDB
+from utils.snippet_db import SnippetDB, validate_snippet_entry, DatabaseValidationError
 
 
 def test_db_initializes_and_seeds(temp_snippet_db_path):
@@ -289,6 +289,149 @@ def test_default_custom_placeholders_seeded(temp_snippet_db_path):
     for name in ["name", "location", "email", "phone"]:
         assert name in by_name
         assert by_name[name]["value"] == ""
+
+
+class TestValidateSnippetEntry:
+    """Unit tests for the validate_snippet_entry input validation function."""
+
+    _VALID = {
+        "enabled": True,
+        "label": "Test",
+        "trigger": "/hello",
+        "snippet": "Hello World",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "Tests",
+        "tags": "a,b",
+    }
+
+    def test_valid_entry_passes(self):
+        """Clean entry should raise no exception."""
+        validate_snippet_entry(dict(self._VALID))
+
+    def test_control_char_in_trigger(self):
+        """Null byte in trigger should raise DatabaseValidationError."""
+        entry = {**self._VALID, "trigger": "/hel\x00lo"}
+        with pytest.raises(DatabaseValidationError, match="trigger"):
+            validate_snippet_entry(entry)
+
+    def test_control_char_in_snippet(self):
+        """Unit separator (0x1f) in snippet should raise DatabaseValidationError."""
+        entry = {**self._VALID, "snippet": "bad\x1fvalue"}
+        with pytest.raises(DatabaseValidationError, match="snippet"):
+            validate_snippet_entry(entry)
+
+    def test_control_char_del_in_label(self):
+        """DEL character (0x7f) in label should raise DatabaseValidationError."""
+        entry = {**self._VALID, "label": "bad\x7flabel"}
+        with pytest.raises(DatabaseValidationError, match="label"):
+            validate_snippet_entry(entry)
+
+    def test_trigger_exceeds_max_length(self):
+        """Trigger longer than 255 characters should raise DatabaseValidationError."""
+        entry = {**self._VALID, "trigger": "/" + "a" * 255}
+        with pytest.raises(DatabaseValidationError, match="trigger"):
+            validate_snippet_entry(entry)
+
+    def test_snippet_exceeds_max_length(self):
+        """Snippet body longer than 1 MB should raise DatabaseValidationError."""
+        entry = {**self._VALID, "snippet": "x" * 1_000_001}
+        with pytest.raises(DatabaseValidationError, match="snippet"):
+            validate_snippet_entry(entry)
+
+    def test_non_string_fields_skipped(self):
+        """Integer and None values in text fields should not raise."""
+        entry = {**self._VALID, "folder": None, "tags": None}
+        validate_snippet_entry(entry)
+
+    def test_insert_rejects_control_char_trigger(self, temp_snippet_db_path):
+        """insert_snippet should propagate DatabaseValidationError for bad trigger."""
+        db = SnippetDB(temp_snippet_db_path)
+        entry = {**self._VALID, "trigger": "/bad\x01trigger"}
+        with pytest.raises(DatabaseValidationError):
+            db.insert_snippet(entry)
+
+
+class TestInsertSnippetAudit:
+    """Tests for insert_snippet behaviour introduced in security audit."""
+
+    _BASE = {
+        "enabled": True,
+        "label": "Audit Test",
+        "trigger": "/audit",
+        "snippet": "content",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    }
+
+    def test_new_insert_populates_entry_id(self, temp_snippet_db_path):
+        """entry['id'] should be set to the new row's lastrowid after a fresh insert."""
+        db = SnippetDB(temp_snippet_db_path)
+        entry = dict(self._BASE)
+        is_new = db.insert_snippet(entry)
+        assert is_new is True
+        assert isinstance(entry.get("id"), int)
+        assert entry["id"] > 0
+
+    def test_update_by_id_does_not_overwrite_entry_id(self, temp_snippet_db_path):
+        """ID-based update should return False and not alter entry['id']."""
+        db = SnippetDB(temp_snippet_db_path)
+        entry = dict(self._BASE)
+        db.insert_snippet(entry)
+        original_id = entry["id"]
+
+        updated = {**self._BASE, "id": original_id, "label": "Changed"}
+        is_new = db.insert_snippet(updated)
+        assert is_new is False
+        assert updated["id"] == original_id
+
+    def test_trigger_collision_update_returns_false(self, temp_snippet_db_path):
+        """Trigger-collision update (no id match) should return False."""
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet(dict(self._BASE))
+
+        collision = {**self._BASE, "label": "Collision"}
+        collision.pop("id", None)
+        is_new = db.insert_snippet(collision)
+        assert is_new is False
+
+
+class TestDeleteSnippet:
+    """Edge-case tests for delete_snippet."""
+
+    _BASE = {
+        "enabled": True,
+        "label": "To Delete",
+        "trigger": "/del-target",
+        "snippet": "bye",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    }
+
+    def test_delete_nonexistent_id_is_safe(self, temp_snippet_db_path):
+        """Deleting a non-existent id should not raise."""
+        db = SnippetDB(temp_snippet_db_path)
+        db.delete_snippet(999999)
+
+    def test_delete_removes_correct_snippet(self, temp_snippet_db_path):
+        """Delete should remove only the targeted snippet; others remain."""
+        db = SnippetDB(temp_snippet_db_path)
+        entry_a = dict(self._BASE)
+        entry_b = {**self._BASE, "trigger": "/del-keep", "label": "Keep Me"}
+
+        db.insert_snippet(entry_a)
+        db.insert_snippet(entry_b)
+
+        id_a = entry_a["id"]
+        db.delete_snippet(id_a)
+
+        triggers = [s["trigger"] for s in db.get_all_snippets()]
+        assert "/del-target" not in triggers
+        assert "/del-keep" in triggers
 
 
 def test_insert_snippet_works_without_unique_trigger_constraint(tmp_path):

@@ -159,6 +159,8 @@ class QSnippet(QMainWindow):
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)
         self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
+        self.editor.trigger_snippet_saved.connect(lambda entry: self.snippet_service.refresh_snippet(entry))
+        self.editor.trigger_snippet_deleted.connect(lambda sid: self.snippet_service.remove_snippet(sid))
         
         layout.addWidget(self.linux_notice)
         layout.addWidget(self.editor)

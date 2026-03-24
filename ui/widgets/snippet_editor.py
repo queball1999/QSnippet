@@ -47,7 +47,9 @@ class WidgetMouseFilter(QObject):
 
 
 class SnippetEditor(QWidget):
-    trigger_reload = Signal()
+    trigger_reload = Signal()                 # Full refresh (import, bulk ops, folder moves)
+    trigger_snippet_saved = Signal(object)    # incremental save - snippet entry dict
+    trigger_snippet_deleted = Signal(int)     # incremental delete - snippet id
 
     def __init__(self, config_path, main, parent=None):
         """
@@ -354,7 +356,7 @@ class SnippetEditor(QWidget):
 
             self.load_snippets()    # Reload snippets to reflect changes
             self.table.select_entry(entry)
-            self.trigger_reload.emit()  # Flag
+            self.trigger_snippet_saved.emit(entry)  # Incremental expander update
 
             # Here we could go home or stay on new form
             # Should make this a setting, for now go home
@@ -650,6 +652,7 @@ class SnippetEditor(QWidget):
         # Need to delete by ID
         self.main.snippet_db.delete_snippet(entry['id'])
         self.load_snippets()
+        self.trigger_snippet_deleted.emit(entry['id'])  # Incremental expander update
         self.navigate_home()
 
     def handle_rename_action(self):

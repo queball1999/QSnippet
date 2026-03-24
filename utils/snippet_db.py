@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import logging
 import random
@@ -31,6 +32,50 @@ class DatabaseValidationError(DatabaseError):
     """Raised when input validation fails"""
     pass
 
+
+# Input validation - reject control chars and enforce field length
+# limits before any data reaches the database.
+CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+FIELD_MAX_LENGTHS: Dict[str, int] = {
+    "trigger": 255,
+    "label":   500,
+    "folder":  500,
+    "tags":    1000,
+    "snippet": 1_000_000,  # 1 MB hard cap
+}
+
+
+def validate_snippet_entry(entry: Dict[str, Any]) -> None:
+    """
+    Validate snippet field content before any database write.
+
+    Checks each text field for control characters (0x00-0x1F, 0x7F) and
+    enforces per-field maximum lengths.
+
+    Args:
+        entry (Dict[str, Any]): Snippet data dict (same shape as insert_snippet expects).
+    
+    Raises:
+        DatabaseValidationError: If any field contains invalid content.
+    """
+    text_fields = ("trigger", "label", "snippet", "folder", "tags", "paste_style")
+    for field in text_fields:
+        value = entry.get(field)
+        if value is None or not isinstance(value, str):
+            continue
+
+        if CONTROL_CHAR_RE.search(value):
+            raise DatabaseValidationError(
+                f"Field '{field}' contains invalid control characters."
+            )
+
+        max_len = FIELD_MAX_LENGTHS.get(field)
+        if max_len and len(value) > max_len:
+            raise DatabaseValidationError(
+                f"Field '{field}' exceeds maximum length of {max_len} characters "
+                f"(got {len(value)})."
+            )
 
 
 class SnippetDB:
@@ -66,7 +111,7 @@ class SnippetDB:
 
         Args:
             db_path (Path): Path to the SQLite database file.
-
+        
         Returns:
             None
         """
@@ -92,7 +137,7 @@ class SnippetDB:
     def configure_connection(self) -> None:
         """
         Configure SQLite pragmas for safer concurrent local access.
-
+        
         Returns:
             None
         """
@@ -106,10 +151,10 @@ class SnippetDB:
     def ensure_open(self) -> None:
         """
         Ensure the database connection is still open.
-
+        
         Returns:
             None
-
+        
         Raises:
             RuntimeError: If the database connection has already been closed.
         """
@@ -123,7 +168,7 @@ class SnippetDB:
 
         Args:
             write (bool): When True, wrap the connection in a transaction.
-
+        
         Returns:
             sqlite3.Connection: The active SQLite connection.
         """
@@ -141,7 +186,7 @@ class SnippetDB:
 
         Args:
             row (sqlite3.Row | None): The row to normalize.
-
+        
         Returns:
             Dict[str, Any]: A normalized snippet dictionary.
         """
@@ -161,7 +206,7 @@ class SnippetDB:
 
         Args:
             value (str): The raw value to escape.
-
+        
         Returns:
             str: The escaped value.
         """
@@ -175,10 +220,10 @@ class SnippetDB:
     def create_table(self) -> None:
         """
         Create the snippets table if it does not exist.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If table creation fails.
         """
@@ -209,10 +254,10 @@ class SnippetDB:
 
         Includes basic indexes on commonly queried columns and a full-text
         search index (FTS5) for efficient searching across multiple fields.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If index creation fails.
         """
@@ -245,10 +290,10 @@ class SnippetDB:
     def seed_empty_db(self) -> None:
         """
         Seed the database with default snippets if it is empty.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If seeding fails.
         """
@@ -310,12 +355,13 @@ class SnippetDB:
 
         Args:
             entry (Dict[str, Any]): Snippet data to insert or update.
-
+        
         Returns:
             bool | None: True if a new snippet was created, False if updated,
                 or None if an error occurred.
         """
         logger.info("Inserting snippet into the database")
+        validate_snippet_entry(entry)  # Audit 1.5: validate before write
         logger.debug(
             "Snippet entry fields: id=%s trigger=%s folder=%s enabled=%s",
             entry.get("id"),
@@ -396,6 +442,7 @@ class SnippetDB:
                             VALUES (:enabled, :label, :trigger, :snippet, :paste_style, :return_press, :folder, :tags)
                         """, entry)
                         rows_changed = cur.rowcount
+                        entry["id"] = cur.lastrowid  # Audit 3.2: populate id for incremental expander update
                         logger.info(f"Insert complete for trigger '{trigger}'. Rows changed: {rows_changed}")
                         return True  # was new
 
@@ -410,10 +457,10 @@ class SnippetDB:
 
         Args:
             snippet_id (id): The identifier of the snippet to delete.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If deletion fails.
         """
@@ -432,10 +479,10 @@ class SnippetDB:
     def get_all_snippets(self) -> List[Dict[str, Any]]:
         """
         Retrieve all snippets from the database.
-
+        
         Returns:
             List[Dict[str, Any]]: A list of snippet dictionaries (empty list if none exist).
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -460,10 +507,10 @@ class SnippetDB:
 
         Args:
             snippet_id (int): The identifier used to query the snippet.
-
+        
         Returns:
             Dict[str, Any]: The snippet dictionary if found, or empty dict if not found.
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -499,10 +546,10 @@ class SnippetDB:
 
         Args:
             trigger (str): The trigger text to query.
-
+        
         Returns:
             Dict[str, Any]: The snippet dictionary if found, or empty dict if not found.
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -526,11 +573,11 @@ class SnippetDB:
     def get_enabled_trigger_index(self) -> List[Dict[str, Any]]:
         """
         Retrieve the index of enabled trigger.
-
+        
         Returns:
             List[Dict[str, Any]]: Trigger metadata used by the keyboard expander
                 (empty list if none exist).
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -564,11 +611,11 @@ class SnippetDB:
     def get_random_snippet(self) -> Dict[str, Any]:
         """
         Retrieve a random enabled snippet.
-
+        
         Returns:
             Dict[str, Any]: A randomly selected snippet dictionary,
                 or empty dictionary if none exist.
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -600,10 +647,10 @@ class SnippetDB:
         Args:
             old_folder (str): The current folder path (may be nested, e.g. "a/b").
             new_folder (str): The new folder path.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If renaming fails.
         """
@@ -637,10 +684,10 @@ class SnippetDB:
 
         Args:
             folder (str): The folder path to delete (may be nested, e.g. "a/b").
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If deletion fails.
         """
@@ -663,10 +710,10 @@ class SnippetDB:
     def get_all_folders(self) -> List[str]:
         """
         Retrieve all distinct folder names.
-
+        
         Returns:
             List[str]: A list of folder names (empty list if none exist).
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -693,10 +740,10 @@ class SnippetDB:
         Args:
             snippet_id (int): The identifier of the snippet.
             new_label (str): The new label for the snippet.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If renaming fails.
         """
@@ -721,10 +768,10 @@ class SnippetDB:
 
         Args:
             keyword (str): The search keyword.
-
+        
         Returns:
             List[Dict[str, Any]]: A list of matching snippets (empty list if none found).
-
+        
         Raises:
             DatabaseOperationError: If search fails.
         """
@@ -758,10 +805,10 @@ class SnippetDB:
         Retrieve all distinct tags across snippets.
 
         Tags are normalized to lowercase and split by comma.
-
+        
         Returns:
             list[str]: A sorted list of unique tags (empty list if none exist).
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -793,10 +840,10 @@ class SnippetDB:
 
         Args:
             tag (str): The tag to remove.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If deletion fails.
         """
@@ -831,10 +878,10 @@ class SnippetDB:
 
         Args:
             yaml_path (Path): The destination YAML file path.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If export fails.
         """
@@ -855,10 +902,10 @@ class SnippetDB:
 
         Args:
             yaml_path (Path): The source YAML file path.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If import fails.
         """
@@ -882,10 +929,10 @@ class SnippetDB:
     def create_custom_placeholders_table(self) -> None:
         """
         Create the custom_placeholders table if it does not exist.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If table creation fails.
         """
@@ -910,10 +957,10 @@ class SnippetDB:
         Ensure built-in editable custom placeholders exist.
 
         Inserts the defaults once and leaves any user-modified values intact.
-
+        
         Returns:
             None
-
+        
         Raises:
             DatabaseOperationError: If seeding fails.
         """
@@ -936,10 +983,10 @@ class SnippetDB:
     def get_all_custom_placeholders(self) -> List[Dict[str, Any]]:
         """
         Retrieve all user-defined custom placeholders.
-
+        
         Returns:
             list[dict]: A list of dicts with keys id, name, value, description.
-
+        
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -962,7 +1009,7 @@ class SnippetDB:
 
         Args:
             entry (dict): Dict with keys name, value, description.
-
+        
         Returns:
             bool: True on success, False on error.
         """
@@ -985,7 +1032,7 @@ class SnippetDB:
 
         Args:
             entry (dict): Dict with keys id, name, value, description.
-
+        
         Returns:
             bool: True on success, False on error.
         """
@@ -1008,7 +1055,7 @@ class SnippetDB:
 
         Args:
             placeholder_id (int): The id of the placeholder to delete.
-
+        
         Returns:
             bool: True on success, False on error.
         """
@@ -1026,7 +1073,7 @@ class SnippetDB:
     def close(self) -> None:
         """
         Close the database connection.
-
+        
         Returns:
             None
         """
@@ -1047,7 +1094,7 @@ class SnippetDB:
     def __enter__(self):
         """
         Enter a context manager scope for the database instance.
-
+        
         Returns:
             SnippetDB: The current database instance.
         """
@@ -1057,7 +1104,7 @@ class SnippetDB:
     def __exit__(self, exc_type, exc, exc_tb) -> None:
         """
         Exit a context manager scope and close the database connection.
-
+        
         Returns:
             None
         """
@@ -1066,7 +1113,7 @@ class SnippetDB:
     def __del__(self) -> None:
         """
         Best-effort cleanup for the SQLite connection.
-
+        
         Returns:
             None
         """
