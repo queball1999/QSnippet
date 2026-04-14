@@ -28,8 +28,8 @@ class SnippetExpander:
             snippets_db (SnippetDB): The snippet database instance.
             parent (Any): The parent object.
             settings_provider (Callable | None): Optional callback that
-                returns the latest settings dictionary.
-        
+            returns the latest settings dictionary.
+
         Returns:
             None
         """
@@ -118,7 +118,7 @@ class SnippetExpander:
         self.clear_buffer()
         logger.info("SnippetExpander reloaded snippets from DB")
 
-    # Incremental trigger-map updates - update or remove a
+    # Incremental trigger-map updates   update or remove a
     # single trigger in memory without a DB round-trip or
     # keyboard buffer clear.
 
@@ -678,37 +678,44 @@ class SnippetExpander:
         t = threading.Thread(target=copy_and_paste, daemon=True)
         t.start()
 
-    def expand_keystrokes(self, snippet) -> None:
+    def expand_keystrokes(self, snippet: str, return_press: bool = False) -> None:
         """
-        Expand a snippet by simulating keystrokes.
+        Expand a snippet by simulating keystrokes (non-blocking).
 
-        Types the snippet text character by character, handling
-        newline characters appropriately.
+        Spawns a background thread to type the snippet character by
+        character so the pynput listener thread is not held during
+        expansion. The background thread re-enables event processing
+        (self.disabled) when done.
 
         Args:
             snippet (str): The snippet text to insert.
-        
+            return_press (bool): Whether to simulate an Enter key press after typing.
+
         Returns:
             None
         """
-        logger.debug("Expanding snippet via keystrokes")
+        logger.debug("Expanding snippet via keystrokes (async)")
 
-        self.disabled = True    # Disable service temporarily
-        try:
-            # Simulate keystrokes for each character in the snippet
-            for ch in snippet:
-                if ch == "\n":
+        def type_snippet() -> None:
+            try:
+                for ch in snippet:
+                    if ch == "\n":
+                        self.controller.press(self.keyboard.Key.enter)
+                        self.controller.release(self.keyboard.Key.enter)
+                    else:
+                        self.controller.press(ch)
+                        self.controller.release(ch)
+                if return_press:
                     self.controller.press(self.keyboard.Key.enter)
                     self.controller.release(self.keyboard.Key.enter)
-                else:
-                    self.controller.press(ch)
-                    self.controller.release(ch)
-        except Exception:
-            logger.exception("Error occurred while expanding keystrokes")
-        finally:
-            # Re-enable listener
-            # Always re-enable to avoid errors
-            self.disabled = False
+            except Exception:
+                logger.exception("Error occurred while expanding keystrokes")
+            finally:
+                logger.debug("Keystroke expand complete; re-enabling listener")
+                self.disabled = False
+
+        t = threading.Thread(target=type_snippet, daemon=True)
+        t.start()
 
     def expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool) -> None:
         """
@@ -760,18 +767,12 @@ class SnippetExpander:
 
         if str(paste_style).lower() == "clipboard":
             # expand_clipboard runs on a background thread and owns the
-            # self.disabled lifecycle - it re-enables when the paste is done.
+            # self.disabled lifecycle   it re-enables when the paste is done.
             self.expand_clipboard(snippet, return_press=return_press)
         else:
-            try:
-                self.expand_keystrokes(snippet)
-
-                if return_press:
-                    self.controller.press(self.keyboard.Key.enter)
-                    self.controller.release(self.keyboard.Key.enter)
-            finally:
-                logger.debug("Restarting listener")
-                self.disabled = False
+            # expand_keystrokes runs on a background thread and owns the
+            # self.disabled lifecycle   it re-enables when typing is done.
+            self.expand_keystrokes(snippet, return_press=return_press)
 
     def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
         """
@@ -796,7 +797,7 @@ class SnippetExpander:
             logger.warning("Max snippet recursion depth reached.")
             return text
 
-        # --- Dynamic placeholders ---
+        # --    Dynamic placeholders ---
         now = datetime.datetime.now()
 
         # Greeting detection
@@ -832,11 +833,11 @@ class SnippetExpander:
         for key, val in replacements.items():
             text = text.replace(key, val)
 
-        # --- User-defined custom placeholders ---
+        # --    User-defined custom placeholders ---
         for ph in self.custom_placeholders:
             text = text.replace(f"{{{ph['name']}}}", ph["value"])
 
-        # --- Nested snippets ---
+        # --    Nested snippets ---
         nested_pattern = re.compile(r"\{\W(.+?)\}")
         matches = list(nested_pattern.finditer(text))
 
@@ -867,7 +868,7 @@ class SnippetExpander:
                 # replacement = f"{{/{trigger}}}"
 
                 # Catch missing embed snippet. Fixing Issue #23
-                replacement = f"[Error - Could not locate snippet: {trigger}]"
+                replacement = f"[Error  Could not locate snippet: {trigger}]"
 
             result.append(replacement)
             last_idx = match.end()
@@ -875,7 +876,7 @@ class SnippetExpander:
         result.append(text[last_idx:])
         return "".join(result)
 
-    # ---- Start/Stop Functions -----
+    # ---   Start/Stop Functions -----
 
     def start(self) -> None:
         """

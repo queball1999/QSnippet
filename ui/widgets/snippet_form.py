@@ -40,6 +40,10 @@ class SnippetForm(QWidget):
         self.mode = mode # Options: new or edit
         self.special_chars_regex = r"^\W\w{1,255}$"
 
+        # Tag list cache - avoid DB query on every snippet click
+        self.tags_filled = False
+        self.cached_tags = []
+
         self.define_text()
         self.initUI()
         self.applyStyles()
@@ -404,15 +408,29 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         Populate the tags input from the database.
 
-        Clears existing items and adds all available tags.
+        Clears existing items and adds all available tags. Uses a cached
+        list to avoid a DB query on every snippet click; the cache is
+        invalidated by invalidate_caches() whenever tags may have changed.
 
         Returns:
             None
         """
-        tags = self.main.snippet_db.get_all_tags()
-        self.tags_input.clear() # clear and repopulate
-        if tags:
-            self.tags_input.addItems(tags)
+        if not self.tags_filled:
+            tags = self.main.snippet_db.get_all_tags()
+            self.cached_tags = tags or []
+            self.tags_filled = True
+        self.tags_input.clear()
+        if self.cached_tags:
+            self.tags_input.addItems(self.cached_tags)
+
+    def invalidate_caches(self):
+        """
+        Mark cached tag list as stale so the next populate call re-queries the DB.
+
+        Returns:
+            None
+        """
+        self.tags_filled = False
 
     def on_tags_text_edited(self, text: str):
         """
@@ -558,7 +576,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         Returns:
             None
         """
-        
+        self.intellisense_popup.clear()
+
         # Fill with placeholders + sub-snippets
         self.completions = [
             "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",

@@ -172,7 +172,7 @@ class QSnippet(QMainWindow):
         # If skipped, we load later when opening UI.
         if self.parent.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
             logger.debug("Showing UI at startup")
-            self.show()
+            QTimer.singleShot(0, self.show)
 
     def init_menubar(self) -> None:
         """
@@ -879,7 +879,7 @@ class QSnippet(QMainWindow):
             None
         """
         logger.info("Showing main window")
-        self.show()
+        QTimer.singleShot(0, self.show)
         QTimer.singleShot(500, self.parent.check_notices)
 
     def exit(self) -> None:

@@ -30,7 +30,7 @@ class SettingsToast(QLabel):
         """ Show the toast for a specified duration in milliseconds """
         self.adjustSize()
         self._reposition()
-        self.show()
+        QTimer.singleShot(0, self.show)
         self.raise_()
 
         self._hide_timer.start(duration_ms)

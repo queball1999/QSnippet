@@ -86,7 +86,8 @@ class SnippetEditor(QWidget):
         self.pre_search_expanded = None
 
         self.initUI()
-        self.load_snippets()
+        # Lazy load the snippets; loads as soon as UI is fully rendered
+        QTimer.singleShot(0, self.load_snippets)
 
     def initUI(self):
         """
@@ -357,6 +358,7 @@ class SnippetEditor(QWidget):
             self.load_snippets()    # Reload snippets to reflect changes
             self.table.select_entry(entry)
             self.trigger_snippet_saved.emit(entry)  # Incremental expander update
+            self.form.invalidate_caches()  # Tags may have changed
 
             # Here we could go home or stay on new form
             # Should make this a setting, for now go home
@@ -481,6 +483,7 @@ class SnippetEditor(QWidget):
             return
         self.main.snippet_db.rename_folder(old, new)
         self.load_snippets()
+        self.form.invalidate_caches()  # Folder list has changed
         self.main.message_box.info(f'Renamed folder "{old}" to "{new}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item=None, *_):
@@ -535,6 +538,7 @@ class SnippetEditor(QWidget):
         
         self.main.snippet_db.delete_folder(name)
         self.load_snippets()
+        self.form.invalidate_caches()  # Folder list has changed
 
     def on_folder_moved(self, old_path: str, new_path: str):
         """
@@ -653,6 +657,7 @@ class SnippetEditor(QWidget):
         self.main.snippet_db.delete_snippet(entry['id'])
         self.load_snippets()
         self.trigger_snippet_deleted.emit(entry['id'])  # Incremental expander update
+        self.form.invalidate_caches()  # Tags may have changed
         self.navigate_home()
 
     def handle_rename_action(self):
@@ -814,7 +819,6 @@ class SnippetEditor(QWidget):
         self.home_widget.applyStyles()
         self.form.applyStyles()
         self.update()
-        self.main.app.processEvents()
 
     def update_stylesheet(self):
         """
