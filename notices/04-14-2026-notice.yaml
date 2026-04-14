@@ -1,0 +1,28 @@
+id: "notice-2026-04-14"
+title: "April 14, 2026"
+message: |
+  A batch of stability fixes, new import/export tooling, and Linux packaging improvements are now available.
+
+  **New Features**
+    - Added an import/export wizard dialog for guided snippet import and export.
+    - Improved single application instance detection to prevent duplicate launches.
+
+  **Fixes**
+    - Fixed Shiboken NoneType conversion errors that could crash the application on startup.
+    - Fixed the Select All button behavior in the snippet list.
+    - Resolved snippet merge conflicts (issue #35).
+    - Fixed `/var/log/QSnippet` directory permissions on Linux so all users can write logs (issue #38).
+    - Resolved SyntaxWarnings surfaced at startup.
+    - Addressed multiple general application stability issues.
+
+  **Performance**
+    - Improved UI responsiveness and overall application performance.
+
+  **Packaging**
+    - Windows portable release is now distributed as a `.zip` archive for easier extraction.
+    - Fixed version number injection into the InnoSetup installer script.
+
+  **CI/CD**
+    - Updated workflow action versions across all pipelines.
+    - Fixed import/export exclusion from the default CI test command to prevent runner errors.
+    - Corrected non-ASCII characters in version strings that broke certain build steps.
