@@ -1,4 +1,9 @@
 #!/bin/bash
 set -e
 
+# Create system log directory with sticky+world-writable permissions.
+# Mode 1777 lets every user create files but prevents deleting others' files.
+mkdir -p /var/log/QSnippet
+chmod 1777 /var/log/QSnippet
+
 echo "QSnippet installed successfully."

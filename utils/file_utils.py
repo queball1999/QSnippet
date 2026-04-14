@@ -544,7 +544,7 @@ class FileUtils:
             else:
                 app_data = Path(os.getenv("XDG_DATA_HOME", user_home / ".local" / "share")) / "QSnippet"
                 documents = user_home / "Documents" / "QSnippet"
-                log_dir = app_data / "logs"
+                log_dir = Path("/var/log/QSnippet")
 
             # Detect runtime working directory
             if hasattr(sys, "_MEIPASS"):

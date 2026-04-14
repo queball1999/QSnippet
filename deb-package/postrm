@@ -1,5 +1,10 @@
 #!/bin/bash
 set -e
 
-# Remove user data and logs
+# Remove log files
+if [ "$1" = "purge" ]; then
+    rm -rf /var/log/QSnippet
+fi
+
+# Remove user data
 rm -rf ~/.local/share/QSnippet
