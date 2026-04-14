@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v5
@@ -65,7 +65,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          find . -type f \( -name "*.exe" -o -name "*.deb" \) -print0 | xargs -0 sha256sum > SHA256SUMS.txt
+          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" \) -print0 | xargs -0 sha256sum > SHA256SUMS.txt
 
       - name: Sign artifacts
         run: |
@@ -74,14 +74,14 @@ jobs:
               --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
               --detach-sign SHA256SUMS.txt
 
-          find . -type f \( -name "*.exe" -o -name "*.deb" \) -print0 | while IFS= read -r -d '' file; do
+          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" \) -print0 | while IFS= read -r -d '' file; do
             gpg --batch --yes --pinentry-mode loopback \
                 --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
                 --detach-sign "$file"
           done
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.6.1
+        uses: softprops/action-gh-release@v3.6.1
         with:
           tag_name: ${{ github.ref_name }}
           name: QSnippet ${{ github.ref_name }}
