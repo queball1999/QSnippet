@@ -1,6 +1,7 @@
 # Default Settings Configuration
 general:
   startup_behavior:
+    description: Control how the application behaves on system startup.
     start_at_boot:
       type: bool
       value: true
@@ -14,6 +15,7 @@ general:
       description: Display the user interface when the application starts.
 
   extra_features:
+    description: Optional features and fun extras that can be toggled on or off.
     easter_eggs_enabled:
       type: bool
       value: true
@@ -21,6 +23,7 @@ general:
       description: Enable or disable easter eggs within the application.
 
   table_behavior:
+    description: Configure how the snippet table and folder views behave.
     expand_folders_on_load:
       type: bool
       value: false
@@ -34,6 +37,7 @@ general:
       description: Automatically expand all folder views when a search is performed.
 
   clipboard_behavior:
+    description: Control how and when clipboard contents are cleared after copying a snippet.
     clipboard_timeout:
       type: string
       value: "30"

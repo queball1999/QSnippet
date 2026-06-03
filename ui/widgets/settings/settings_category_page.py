@@ -62,17 +62,24 @@ class SettingsCategoryPage(QWidget):
             if not isinstance(meta, dict):
                 continue
 
+            # Skip metadata keys injected by normalize_settings
+            if key == "description":
+                continue
+
             # Skip if element is hidden
             if meta.get("hidden", False):
                 continue
 
             # Sub-category
             if "value" not in meta:
-                card = SettingsSubCategoryCard(title=title, key=key)
+                description = meta.get("description", "")
+                if isinstance(description, dict):
+                    description = description.get("value", "")
+                card = SettingsSubCategoryCard(title=title, key=key, description=description)
                 card.clicked.connect(self.open_subcategory)
                 layout.addWidget(card)
 
-                self.search_targets[key] = [(card, title.lower())]
+                self.search_targets[key] = [(card, f"{title} {description}".lower())]
                 continue
 
             # Leaf Settings

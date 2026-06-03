@@ -16,10 +16,14 @@ class SettingsCard(QWidget):
         root.setSpacing(0)
         root.setContentsMargins(16, 14, 16, 14)
 
+        title_label = QLabel(title)
+        title_label.setObjectName("SettingsCardTitle")
+        title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        control.setMinimumWidth(100)
+
         header = QHBoxLayout()
-        header.addWidget(QLabel(title))
-        header.setObjectName("SettingsCardTitle")
-        header.addStretch()
+        header.addWidget(title_label, 1)
         if reset_btn:
             header.addWidget(reset_btn, alignment=Qt.AlignRight | Qt.AlignVCenter)
         header.addWidget(control, alignment=Qt.AlignRight | Qt.AlignVCenter)

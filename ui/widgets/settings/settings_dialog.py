@@ -89,6 +89,7 @@ class SettingsDialog(QDialog):
 
         # Search dropdown
         self.search_results = QListWidget(self)
+        self.search_results.setObjectName("SearchResultsList")
         self.search_results.setWindowFlags(
             Qt.FramelessWindowHint | Qt.Tool
         )
@@ -462,6 +463,10 @@ class SettingsDialog(QDialog):
             font-size: 18px;
         }
 
+        QListWidget#SearchResultsList {
+            font-size: 13px;
+        }
+
         QListWidget::item {
             padding: 10px 12px;
             border-radius: 6px;
@@ -502,6 +507,7 @@ class SettingsDialog(QDialog):
 
         QLabel#SettingsCardDescription {
             font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
         }
 
         SettingsSubCategoryCard {
