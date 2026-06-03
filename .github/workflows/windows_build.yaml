@@ -40,7 +40,7 @@ jobs:
         shell: powershell
 
       - name: Build Windows installer (Inno Setup)
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         with:
           path: QSnippet.iss
           options: /O+
