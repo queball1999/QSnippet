@@ -392,11 +392,15 @@ class SnippetTable(QTreeView):
 
         if isinstance(data, dict) and data.get("_type") == "folder":
             # Clicked on a folder; show folder context menu
-            menu = FolderContextMenu(item, self)
+            proxy_idx0 = proxy_idx.sibling(proxy_idx.row(), 0)
+            is_expanded = self.isExpanded(proxy_idx0)
+            menu = FolderContextMenu(item, is_expanded, self)
             menu.addItemRequested.connect(self.addSnippet.emit)
             menu.addFolderRequested.connect(self.addFolder.emit)
             menu.renameRequested.connect(self.renameFolder.emit)
             menu.deleteRequested.connect(self.deleteFolder.emit)
+            menu.expandRequested.connect(lambda: self.setExpanded(proxy_idx0, True))
+            menu.collapseRequested.connect(lambda: self.setExpanded(proxy_idx0, False))
         else:
             # Clicked on a snippet; show snippet context menu
             menu = SnippetContextMenu(data, self)
