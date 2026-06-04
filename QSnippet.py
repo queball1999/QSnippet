@@ -95,10 +95,7 @@ class main():
         Returns:
             None
         """
-        self.REQUIRED_IMAGE_FILES = [
-            "QSnippet.ico",
-            "QSnippet.icns",
-        ]
+        self.REQUIRED_IMAGE_FILES = []
 
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
@@ -483,18 +480,35 @@ class main():
 
     def fix_image_paths(self) -> None:
         """
-        Update image paths to use the resolved images directory.
+        Update image paths to use the resolved images and icons directories.
 
-        Prefixes configured image filenames with the absolute images path.
+        Prefixes configured image filenames with the absolute images or icons path,
+        depending on whether the file is an icon or regular image.
 
         Returns:
             None
         """
+        icon_names = {"QSnippet.ico", "QSnippet.icns"}
+        icon_prefixes = ("icon_",)
+
+        # Get icons path
+        icons_path = FileUtils.resolve_icons_path(self) if hasattr(self, 'working_dir') else None
+
         for image in self.images:
             old_val = self.images[image]
-            self.images[image] = os.path.join(self.images_path, old_val)
-            
+
+            # Determine if this is an icon file
+            is_icon = (old_val in icon_names or
+                      any(old_val.startswith(prefix) for prefix in icon_prefixes))
+
+            if is_icon and icons_path:
+                self.images[image] = os.path.join(str(icons_path), old_val)
+            else:
+                self.images[image] = os.path.join(self.images_path, old_val)
+
         logger.debug(f"Images Path: {self.images_path}")
+        if icons_path:
+            logger.debug(f"Icons Path: {icons_path}")
 
     def scale_width(self, original_width, screen_geometry) -> int:
         """
@@ -841,7 +855,7 @@ if __name__ == '__main__':
         # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon("images/QSnippet.ico")) # fallback location
+        msg.setWindowIcon(QIcon("assets/icons/QSnippet.ico")) # fallback location
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()

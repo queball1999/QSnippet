@@ -379,6 +379,7 @@ QLineEdit {{
     color: {c['text']};
     border: 1px solid {c['border']};
     border-radius: {r6}px;
+    padding: {p8}px;
     selection-background-color: {c['selected']};
 }}
 QLineEdit:focus {{
@@ -473,18 +474,18 @@ QCheckBox::indicator:unchecked:hover {{
 QCheckBox::indicator:checked {{
     background-color: {c['accent']};
     border: none;
-    image: url(images/icons/checkbox-checked-light.svg);
+    image: url(assets/icons/checkbox-checked-light.svg);
     padding: 2px;
 }}
 QCheckBox::indicator:checked:hover {{
     background-color: {c['accent']};
     border: none;
-    image: url(images/icons/checkbox-checked-light.svg);
+    image: url(assets/icons/checkbox-checked-light.svg);
 }}
 QCheckBox::indicator:checked:pressed {{
     background-color: {c['accent']};
     border: none;
-    image: url(images/icons/checkbox-checked-light.svg);
+    image: url(assets/icons/checkbox-checked-light.svg);
 }}
 QCheckBox::indicator:disabled {{
     background-color: {c['input']};

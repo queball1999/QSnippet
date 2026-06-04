@@ -2,7 +2,7 @@
 
   <p style="font-size: 24px; font-weight: 700;">QSnippet</p>
 
-  <img src="images/icon_128x128.png">
+  <img src="assets/icons/icon_128x128.png">
 
     
   <p>
@@ -63,13 +63,13 @@ If you prefer to build and run QSnippet from source, see the [Development Notes]
 ## Screenshots
 
 Demo
-<img src="images/QSnippet_demo.gif" alt="Demo of QSnippet" style="align:center;"/>
+<img src="assets/videos/QSnippet_demo.gif" alt="Demo of QSnippet" style="align:center;"/>
 
 Homepage
-<img src="images/homepage.png" alt="Photo of QSnippet" style="align:center;"/>
+<img src="assets/images/homepage.png" alt="Photo of QSnippet" style="align:center;"/>
 
 Snippet Form
-<img src="images/snippet_form.png" alt="Photo of QSnippet" style="align:center;"/>
+<img src="assets/images/snippet_form.png" alt="Photo of QSnippet" style="align:center;"/>
 
 ## Development Notes
 

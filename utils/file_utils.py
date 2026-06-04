@@ -122,22 +122,22 @@ def validate_snippets_list(data: dict) -> list:
 class FileUtils:
     def resolve_images_path(self) -> Path:
         """
-        Resolve and return the valid images directory path.
+        Resolve and return the valid assets/images directory path.
 
-        Searches for an images directory in the resource directory and
+        Searches for an assets/images directory in the resource directory and
         working directory, in that order. Validates that all required
         image files are present before returning the path.
-        
+
         Returns:
-            Path: The resolved images directory path.
-        
+            Path: The resolved assets/images directory path.
+
         Raises:
-            FileNotFoundError: If no valid images directory containing all
+            FileNotFoundError: If no valid assets/images directory containing all
                 required image files is found.
         """
         candidates = [
-            Path(self.resource_dir) / "images",
-            Path(self.working_dir) / "images",
+            Path(self.resource_dir) / "assets" / "images",
+            Path(self.working_dir) / "assets" / "images",
         ]
 
         for path in candidates:
@@ -154,17 +154,45 @@ class FileUtils:
                 return path
 
             logger.warning(
-                "Images directory found but missing files in %s: %s",
+                "Assets/images directory found but missing files in %s: %s",
                 path,
                 ", ".join(missing),
             )
 
         raise FileNotFoundError(
-            "No valid images directory found. "
+            "No valid assets/images directory found. "
             "Checked resource_dir and working_dir."
             "\n\n"
             f"Location: {path}"
             ""
+        )
+
+    def resolve_icons_path(self) -> Path:
+        """
+        Resolve and return the valid assets/icons directory path.
+
+        Searches for an assets/icons directory in the resource directory and
+        working directory, in that order.
+
+        Returns:
+            Path: The resolved assets/icons directory path.
+
+        Raises:
+            FileNotFoundError: If no valid assets/icons directory is found.
+        """
+        candidates = [
+            Path(self.resource_dir) / "assets" / "icons",
+            Path(self.working_dir) / "assets" / "icons",
+        ]
+
+        for path in candidates:
+            if path.exists() and path.is_dir():
+                logger.info(f"Using icons directory: {path}")
+                return path
+
+        raise FileNotFoundError(
+            "No valid assets/icons directory found. "
+            "Checked resource_dir and working_dir."
         )
 
     # Utility class for common file and directory operations.
