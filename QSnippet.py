@@ -75,6 +75,7 @@ class main():
         self.check_sys_requirements()  # Check system requirements
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
+        self.start_accent_color_monitor()
 
         # Check if we need to show notices
         # Default to True if setting missing
@@ -326,8 +327,9 @@ class main():
         """
         Handle updates to the settings file.
 
-        Refreshes the stored settings, re-flattens attributes, and updates
-        startup registration behavior when changes are detected.
+        Refreshes the stored settings, re-flattens attributes, updates
+        startup registration behavior, and reapplies the current theme and
+        UI scale.
 
         Args:
             config (dict): The updated settings dictionary.
@@ -339,39 +341,145 @@ class main():
 
         if config:
             self.settings = config
-            self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
+            self.flatten_yaml(items=self.settings)
             self.handle_start_up_reg()
+            self.scale_ui_cfg()  # recomputes fonts and reapplies theme/scale
 
     def scale_ui_cfg(self):
-        """ 
-        Reassigns the size attributes with scaled versions. 
-        Needs more work but this will do for now 05/07/25
         """
-        # Scale Accordingly
-        self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
-        self.dimensions_buttons = self.scale_dict_sizes(size_dict=self.dimensions_buttons, screen_geometry=self.screen_geometry)
-        self.dimensions_windows = self.scale_dict_sizes(size_dict=self.dimensions_windows, screen_geometry=self.screen_geometry)
-        
-        # Buttons
-        self.mini_button_size = self.QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
-        self.small_button_size = self.QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
-        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
-        self.large_button_size = self.QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
-        
-        # Font Sizes
-        self.small_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
-        self.small_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"], self.QFont.Bold)
-        self.medium_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
-        self.medium_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], self.QFont.Bold)
-        self.large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
-        self.large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"], self.QFont.Bold)
-        self.extra_large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
-        self.extra_large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], self.QFont.Bold)
-        self.humongous_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
-        self.humongous_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], self.QFont.Bold)
+        Recompute all scaled UI attributes from the original config values.
 
-        # Widget Sizes
-        self.small_toggle_size = self.QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
+        Safe to call multiple times — always reads from the unscaled originals
+        stored in self.fonts["sizes"] and self.dimensions[*] so that repeated
+        calls (e.g. after a settings change) do not compound the scaling.
+        """
+        # --- resolve user-configured scale (default 100 %) ---
+        appearance = self.settings.get("appearance", {})
+        ui_scale_val = appearance.get("ui_scale", {})
+        if isinstance(ui_scale_val, dict):
+            ui_scale_val = ui_scale_val.get("value", "100")
+        user_scale = max(0.5, int(ui_scale_val) / 100.0)
+
+        # --- screen ratio (height vs reference 1080 p) ---
+        screen_ratio = self.screen_geometry.height() / self.REFERENCE_HEIGHT
+        total_font_scale = screen_ratio * user_scale
+
+        # Font sizes — always from original config, never from a previous call
+        orig_font_sizes = self.fonts["sizes"]
+        self.fonts_sizes = {
+            name: max(6, round(size * total_font_scale))
+            for name, size in orig_font_sizes.items()
+        }
+
+        # Button / window / toggle sizes — always from original config
+        self.dimensions_buttons = self.scale_dict_sizes(
+            size_dict=self.dimensions["buttons"], screen_geometry=self.screen_geometry
+        )
+        self.dimensions_windows = self.scale_dict_sizes(
+            size_dict=self.dimensions["windows"], screen_geometry=self.screen_geometry
+        )
+        self.dimensions_toggles = self.scale_dict_sizes(
+            size_dict=self.dimensions["toggles"], screen_geometry=self.screen_geometry
+        )
+
+        # QSize objects for buttons
+        self.mini_button_size   = self.QSize(self.dimensions_buttons["mini"]["width"],   self.dimensions_buttons["mini"]["height"])
+        self.small_button_size  = self.QSize(self.dimensions_buttons["small"]["width"],  self.dimensions_buttons["small"]["height"])
+        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
+        self.large_button_size  = self.QSize(self.dimensions_buttons["large"]["width"],  self.dimensions_buttons["large"]["height"])
+        self.small_toggle_size  = self.QSize(self.dimensions_toggles["small"]["width"],  self.dimensions_toggles["small"]["height"])
+
+        # QFont objects (user-scale applied on top of screen scale)
+        pf = self.fonts["primary_font"]
+        self.small_font_size           = self.QFont(pf, self.fonts_sizes["small"])
+        self.small_font_size_bold      = self.QFont(pf, self.fonts_sizes["small"],       self.QFont.Bold)
+        self.medium_font_size          = self.QFont(pf, self.fonts_sizes["medium"])
+        self.medium_font_size_bold     = self.QFont(pf, self.fonts_sizes["medium"],      self.QFont.Bold)
+        self.large_font_size           = self.QFont(pf, self.fonts_sizes["large"])
+        self.large_font_size_bold      = self.QFont(pf, self.fonts_sizes["large"],       self.QFont.Bold)
+        self.extra_large_font_size     = self.QFont(pf, self.fonts_sizes["extra_large"])
+        self.extra_large_font_size_bold= self.QFont(pf, self.fonts_sizes["extra_large"], self.QFont.Bold)
+        self.humongous_font_size       = self.QFont(pf, self.fonts_sizes["humongous"])
+        self.humongous_font_size_bold  = self.QFont(pf, self.fonts_sizes["humongous"],   self.QFont.Bold)
+
+        # Apply theme + scale to QApplication stylesheet
+        self._apply_theme()
+
+    def start_accent_color_monitor(self) -> None:
+        """Start a timer to monitor system accent color changes."""
+        # Only monitor if theme is "system" or accent is "system"
+        appearance = self.settings.get("appearance", {})
+        theme_val = appearance.get("theme", {})
+        if isinstance(theme_val, dict):
+            theme_val = theme_val.get("value", "system")
+
+        accent_val = appearance.get("accent_color", {})
+        if isinstance(accent_val, dict):
+            accent_val = accent_val.get("value", "system")
+
+        # Only monitor if using system theme/accent
+        if theme_val == "system" or accent_val == "system":
+            self._last_accent_color = None
+            timer = self.QTimer()
+            timer.timeout.connect(self._check_accent_color_changed)
+            timer.start(2000)  # Check every 2 seconds
+            self.accent_color_monitor = timer
+            logger.debug("System accent color monitor started")
+
+    def _check_accent_color_changed(self) -> None:
+        """Check if system accent color has changed and reapply theme if it has."""
+        from ui.theme_manager import ThemeManager
+
+        # Only check if we have a theme manager
+        if not hasattr(self, "theme_manager") or self.theme_manager is None:
+            return
+
+        # Get current system accent color
+        tm = self.theme_manager
+        is_dark = tm.is_dark
+        current_accent = tm.get_system_accent(is_dark)
+
+        # If color changed, reapply theme
+        if self._last_accent_color is not None and current_accent != self._last_accent_color:
+            logger.info(f"System accent color changed from {self._last_accent_color} to {current_accent}")
+            self._apply_theme()
+
+        self._last_accent_color = current_accent
+
+    def _apply_theme(self) -> None:
+        """Create (or reuse) the ThemeManager and apply the current theme + scale."""
+        from ui.theme_manager import ThemeManager
+
+        appearance = self.settings.get("appearance", {})
+
+        def _val(key, default):
+            v = appearance.get(key, {})
+            return v.get("value", default) if isinstance(v, dict) else default
+
+        theme_val  = _val("theme",        "system")
+        scale_pct  = max(50, int(_val("ui_scale",     100)))
+        accent_col = _val("accent_color", "system")
+
+        if not hasattr(self, "theme_manager") or self.theme_manager is None:
+            self.theme_manager = ThemeManager(self.app)
+
+        resolved  = self.theme_manager.resolve_theme(theme_val)
+        prev_theme = self.theme_manager.theme_name  # theme from the last apply()
+
+        if resolved not in ("dark", "light"):
+            # Pink / Nord: always use their own built-in accent
+            accent_col = "system"
+        elif theme_val == "system" or (prev_theme not in ("dark", "light") and prev_theme):
+            # "System" theme explicitly selected, or switching back from pink/nord:
+            # revert accent to system color and persist the change.
+            accent_col = "system"
+            acc_node = appearance.get("accent_color")
+            if isinstance(acc_node, dict) and acc_node.get("value") != "system":
+                acc_node["value"] = "system"
+                from utils import FileUtils
+                FileUtils.write_yaml(self.settings_file, self.settings)
+
+        self.theme_manager.apply(theme_val, scale_pct, accent_col)
 
     def fix_image_paths(self) -> None:
         """

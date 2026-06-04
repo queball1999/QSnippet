@@ -50,7 +50,7 @@ class SettingsCategoryPage(QWidget):
         self.header_layout = QHBoxLayout()
         self.header_layout.setContentsMargins(0, 0, 0, 0)
         self.header_layout.setSpacing(0)
-        self._build_breadcrumb(self.header_layout)
+        self.build_breadcrumb(self.header_layout)
         self.header_layout.addStretch()
 
         layout.addLayout(self.header_layout)
@@ -104,7 +104,7 @@ class SettingsCategoryPage(QWidget):
 
         layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Expanding))
 
-    def _build_breadcrumb(self, layout: QHBoxLayout):
+    def build_breadcrumb(self, layout: QHBoxLayout):
         """
         Build clickable breadcrumb labels from self.path.
         Each ancestor is clickable and navigates back to that depth.
@@ -217,17 +217,29 @@ class SettingsCategoryPage(QWidget):
         if default is None:
             return
 
-        # Update the control widget (this triggers the change signal automatically)
-        self._set_control_value(control, meta, default)
+        # Update the control widget
+        self.set_control_value(control, meta, default)
         reset_btn.setVisible(False)
 
-    def _set_control_value(self, control: QWidget, meta: dict, value):
+        # Emit the change so settings are persisted and theme is re-applied if needed
+        self.emit_change(key, default)
+
+    def set_control_value(self, control: QWidget, meta: dict, value):
         """ Programmatically set a control widget's value. """
-        typ = meta.get("type")
+        from ui.widgets.color_picker_widget import ColorPickerWidget
+        typ     = meta.get("type", "string")
+        element = (meta.get("element") or "").lower()
 
         control.blockSignals(True)
 
-        if typ == "bool" and isinstance(control, QAnimatedSwitch):
+        # Color picker
+        if element == "colorpicker" and isinstance(control, ColorPickerWidget):
+            control.set_value(str(value))
+            control.blockSignals(False)
+            return
+
+        # Bool toggle
+        if typ in ("bool", "boolean") and isinstance(control, QAnimatedSwitch):
             control.setChecked(bool(value))
             control.blockSignals(False)
             return
@@ -237,13 +249,17 @@ class SettingsCategoryPage(QWidget):
             control.blockSignals(False)
             return
 
-        if typ == "int":
-            # Container widget with slider + label
+        # Integer slider container
+        if typ in ("int", "integer"):
             slider = control.findChild(QSlider)
             if slider:
                 slider.blockSignals(True)
                 slider.setValue(int(value))
                 slider.blockSignals(False)
+                # Also sync the value label sitting next to the slider
+                lbl = control.findChild(QLabel)
+                if lbl:
+                    lbl.setText(str(int(value)))
             control.blockSignals(False)
             return
 
@@ -267,7 +283,7 @@ class SettingsCategoryPage(QWidget):
             if meta.get("value") == meta.get("default"):
                 continue
 
-            self._set_control_value(control, meta, meta["default"])
+            self.set_control_value(control, meta, meta["default"])
             reset_btn.setVisible(False)
             changed = True
 
@@ -286,7 +302,7 @@ class SettingsCategoryPage(QWidget):
         if control and hasattr(self.dialog, "approve_setting_change"):
             approved = self.dialog.approve_setting_change(full_path, old_value, value)
             if not approved:
-                self._set_control_value(control, meta, old_value)
+                self.set_control_value(control, meta, old_value)
                 return
 
         self.pending_values[key] = value
@@ -312,16 +328,30 @@ class SettingsCategoryPage(QWidget):
 
     def create_widget(self, key, meta):
         """ Create a control widget based on metadata. """
-        value = meta.get("value")
+        value   = meta.get("value")
         options = meta.get("options")
-        type = meta.get("type")
+        typ     = meta.get("type", "string")
+        element = (meta.get("element") or "").lower()
 
-        if type == "bool":
-            w = QAnimatedSwitch()
+        # --- Color picker ---
+        if element == "colorpicker":
+            from ui.widgets.color_picker_widget import ColorPickerWidget
+            w = ColorPickerWidget(str(value) if value is not None else "system")
+            w.setMinimumWidth(160)
+            w.colorChanged.connect(lambda v: self.emit_change(key, v))
+            return w
+
+        # --- Bool toggle ---
+        if typ in ("bool", "boolean"):
+            from ui.theme_manager import ThemeManager
+            tm = ThemeManager.instance()
+            accent = tm.get_colors()["accent"] if tm else "#4fa3ff"
+            w = QAnimatedSwitch(checked_color=accent)
             w.setChecked(bool(value))
             w.stateChanged.connect(lambda v: self.emit_change(key, v))
             return w
 
+        # --- Options → combobox ---
         if options:
             w = QComboBox()
             w.addItems([str(o) for o in options])
@@ -330,33 +360,42 @@ class SettingsCategoryPage(QWidget):
             w.currentTextChanged.connect(lambda v: self.emit_change(key, v))
             return w
 
-        if type == "int":
-            container = QWidget()
-            row = QHBoxLayout(container)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(8)
+        # --- Integer (slider or fallback line-edit) ---
+        if typ in ("int", "integer"):
+            if element == "slider":
+                container = QWidget()
+                container.setStyleSheet("background-color: transparent;")
+                row = QHBoxLayout(container)
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(8)
 
-            slider = QSlider(Qt.Horizontal)
-            slider.setMinimum(meta.get("min", 0))
-            slider.setMaximum(meta.get("max", 100))
-            slider.setValue(int(value))
+                slider = QSlider(Qt.Horizontal)
+                slider.setMinimum(meta.get("min", 0))
+                slider.setMaximum(meta.get("max", 100))
+                slider.setValue(int(value))
+                slider.setMinimumWidth(120)
 
-            value_label = QLabel(str(value))
-            value_label.setFixedWidth(40)
-            value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                value_label = QLabel(str(value))
+                value_label.setFixedWidth(36)
+                value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-            slider.valueChanged.connect(
-                lambda v: (
-                    value_label.setText(str(v)),
-                    self.emit_change(key, v)
+                slider.valueChanged.connect(
+                    lambda v: (
+                        value_label.setText(str(v)),
+                        self.emit_change(key, v),
+                    )
                 )
-            )
 
-            row.addWidget(slider, 1)
-            row.addWidget(value_label)
+                row.addWidget(slider, 1)
+                row.addWidget(value_label)
+                return container
 
-            return container
+            # Default: line-edit for integers
+            w = QLineEdit(str(value))
+            w.textChanged.connect(lambda v: self.emit_change(key, v))
+            return w
 
+        # --- Fallback: plain text ---
         w = QLineEdit(str(value))
         w.textChanged.connect(lambda v: self.emit_change(key, v))
         return w

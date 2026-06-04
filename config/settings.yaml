@@ -1,4 +1,32 @@
 # Default Settings Configuration
+appearance:
+  description: Visual appearance and layout settings.
+  theme:
+    type: string
+    value: "system"
+    default: "system"
+    options:
+      - "system"
+      - "dark"
+      - "light"
+      - "nord"
+      - "pink"
+    description: Color theme. "System" automatically follows your OS light/dark preference.
+  ui_scale:
+    type: integer
+    element: slider
+    value: 100
+    default: 100
+    min: 75
+    max: 150
+    description: Scales all text in the application. Changes take effect immediately.
+  accent_color:
+    type: string
+    element: colorpicker
+    value: "system"
+    default: "system"
+    description: Accent color for selections and highlights. Click the swatch to customise.
+
 general:
   startup_behavior:
     description: Control how the application behaves on system startup.

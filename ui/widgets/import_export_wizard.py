@@ -194,13 +194,13 @@ class ImportExportWizard(QDialog):
         self.table.setRowCount(len(self.snippets))
 
         for row_idx, snippet in enumerate(self.snippets):
-            # Checkbox column
-            checkbox_item = QTableWidgetItem()
-            checkbox_item.setFlags(checkbox_item.flags() | Qt.ItemIsUserCheckable)
-            checkbox_item.setCheckState(Qt.Checked)
-            # Store snippet data on checkbox item
-            checkbox_item.setData(Qt.UserRole, snippet)
-            self.table.setItem(row_idx, 0, checkbox_item)
+            # Checkbox column - use QCheckBox widget for proper styling
+            checkbox = QCheckBox()
+            checkbox.setChecked(True)
+            checkbox.stateChanged.connect(self.update_selection_count)
+            # Store snippet data on checkbox widget
+            checkbox.snippet = snippet
+            self.table.setCellWidget(row_idx, 0, checkbox)
 
             # Label
             label_item = QTableWidgetItem(snippet.get("label", ""))
@@ -243,11 +243,13 @@ class ImportExportWizard(QDialog):
         self.table.blockSignals(True)
 
         # Use checkbox's actual check state instead of signal parameter
-        check_state = self.select_all_checkbox.checkState()
+        is_checked = self.select_all_checkbox.isChecked()
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item:
-                item.setCheckState(check_state)
+            checkbox = self.table.cellWidget(row, 0)
+            if checkbox and isinstance(checkbox, QCheckBox):
+                checkbox.blockSignals(True)
+                checkbox.setChecked(is_checked)
+                checkbox.blockSignals(False)
 
         # Re-enable signals and update count
         self.table.blockSignals(False)
@@ -257,10 +259,9 @@ class ImportExportWizard(QDialog):
         """Return list of checked snippet dicts."""
         selected = []
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.checkState() == Qt.Checked:
-                snippet = item.data(Qt.UserRole)
-                selected.append(snippet)
+            checkbox = self.table.cellWidget(row, 0)
+            if checkbox and isinstance(checkbox, QCheckBox) and checkbox.isChecked():
+                selected.append(checkbox.snippet)
         return selected
 
     def _update_count_only(self) -> None:

@@ -261,15 +261,14 @@ class QAnimatedSwitch(QWidget):
         """
         self.toggle_button.setWidth(width)
        
-    def setCheckedColor(self) -> None:
-        """
-        Set the checked color of the toggle.
-
-        Returns:
-            None
-        """
-        #FIXME: Needs work
-        pass
+    def update_accent(self, color: str) -> None:
+        """Update the toggle's checked color to match the current theme accent."""
+        from PySide6.QtGui import QColor, QBrush
+        self.checked_color = color
+        self.toggle_button._bar_checked_brush    = QBrush(QColor(color).lighter())
+        self.toggle_button._handle_checked_brush = QBrush(QColor(color))
+        self.toggle_button.repaint()
+        self.repaint()
 
     def applyStyles(self):
         """

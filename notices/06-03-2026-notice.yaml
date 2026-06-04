@@ -1,0 +1,26 @@
+id: "notice-2026-06-03"
+title: "June 3, 2026"
+message: |
+  Introducing comprehensive theming and color customization! QSnippet now includes a unified theme management system and color picker widget for enhanced visual customization.
+
+  **Theming & Customization**
+    - Added theme manager system for centralized theme handling ([issue #39](https://github.com/queball1999/QSnippet/issues/39)).
+    - Introduced color picker widget for intuitive color selection in settings.
+    - Enhanced settings dialog with improved visual organization through settings categories and cards.
+    - Settings now support animated switches for better UI feedback.
+
+  **UI Improvements**
+    - Refactored settings system with organized category pages for better discoverability.
+    - Added animated switch widget for cleaner toggle controls.
+    - Enhanced settings cards for improved visual hierarchy.
+    - Improved snippet form styling and layout.
+    - Updated menu bar and toolbar menu for consistency.
+
+  **Configuration**
+    - Expanded configuration system to support theme preferences.
+    - Added settings schema updates to accommodate new customization options.
+
+  **Developer**
+    - Created modular theme manager architecture for future extensibility.
+    - Improved widget component organization.
+    - Enhanced code structure for settings management.

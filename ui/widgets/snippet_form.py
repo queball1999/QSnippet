@@ -107,8 +107,23 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.instructions = QLabel(self.instructions_text)
         self.instructions.setWordWrap(True)
         self.instructions.setFont(self.main.small_font_size)
-        self.instructions.setFixedHeight(self.instructions.sizeHint().height())
-        self.instructions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+
+        instruction_height = self.instructions.sizeHint().height()
+        instructions_threshold = 90
+
+        if instruction_height > instructions_threshold:
+            from PySide6.QtWidgets import QScrollArea, QFrame
+            scroll = QScrollArea()
+            scroll.setWidget(self.instructions)
+            scroll.setWidgetResizable(True)
+            scroll.setFixedHeight(min(instruction_height, 150))
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.instructions_widget = scroll
+        else:
+            self.instructions.setFixedHeight(instruction_height)
+            self.instructions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.instructions_widget = self.instructions
 
          # Enabled Switch
         start_state = "on" if self.mode == "new" else "off" # set state based on mode
@@ -222,15 +237,19 @@ Snippets come in handy for text you enter often or for standard messages you sen
         # Buttons
         btn_layout = QHBoxLayout()
         self.new_btn = QPushButton('New')
+        self.new_btn.setObjectName("SnippetFormBtn")
         self.new_btn.setFixedSize(self.main.small_button_size)
 
         self.save_btn = QPushButton('Save')
+        self.save_btn.setObjectName("SnippetFormBtn")
         self.save_btn.setFixedSize(self.main.small_button_size)
 
         self.delete_btn = QPushButton('Delete')
+        self.delete_btn.setObjectName("SnippetFormBtn")
         self.delete_btn.setFixedSize(self.main.small_button_size)
 
         self.cancel_btn = QPushButton('Cancel') # Maybe rename home?
+        self.cancel_btn.setObjectName("SnippetFormBtn")
         self.cancel_btn.setFixedSize(self.main.small_button_size)
 
         btn_layout.addWidget(self.new_btn)
@@ -262,7 +281,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         
 
         layout.addWidget(self.form_title, 0, 0, 1, 3, Qt.AlignLeft)
-        layout.addWidget(self.instructions, 1, 0, 1, 3, Qt.AlignLeft)
+        layout.addWidget(self.instructions_widget, 1, 0, 1, 3, Qt.AlignLeft)
         layout.addWidget(self.enabled_switch, 2, 0, 1, 1, Qt.AlignLeft)
         layout.addLayout(first_row, 3, 0, 1, 3)
         layout.addLayout(second_row, 4, 0, 1, 3)
@@ -785,7 +804,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.setStyleSheet("""
             QPushButton {
                 padding: 8px;
-            } 
+            }
 
             QComboBox {
                 padding: 8px;

@@ -235,6 +235,47 @@ class MenuBar(QMenuBar):
         about_act.triggered.connect(self.showAppInfo.emit)
         help_menu.addAction(about_act)
 
+        # Collect all icon-bearing actions and apply initial tint
+        self.collect_icon_actions()
+        self.update_icons()
+        self.connect_theme()
+
+    # ----- ICON THEMING -----
+
+    def collect_icon_actions(self):
+        """Walk every menu recursively and store actions that carry an icon."""
+        self.icon_sources: dict[QAction, QIcon] = {}
+
+        def walk(menu):
+            for action in menu.actions():
+                if action.isSeparator():
+                    continue
+                if not action.icon().isNull():
+                    self.icon_sources[action] = action.icon()
+                sub = action.menu()
+                if sub:
+                    walk(sub)
+
+        for top in self.actions():
+            sub = top.menu()
+            if sub:
+                walk(sub)
+
+    def connect_theme(self):
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.instance()
+        if tm:
+            tm.themeChanged.connect(self.update_icons)
+
+    def update_icons(self):
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.instance()
+        if tm is None:
+            return
+        color = tm.icon_color()
+        for action, orig_icon in self.icon_sources.items():
+            action.setIcon(tm.recolor_icon(orig_icon, color))
+
     # ----- PLACEHOLDER MENU -----
 
     def build_custom_placeholder_menu_static(self):

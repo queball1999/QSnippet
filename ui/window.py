@@ -821,7 +821,8 @@ class QSnippet(QMainWindow):
         Save current settings to file.
 
         Updates the in-memory settings reference and writes the settings
-        to the settings YAML file.
+        to the settings YAML file. Re-applies theme if appearance settings
+        (theme, ui_scale, accent_color) have changed.
 
         Args:
             settings (dict): The updated settings dictionary to persist.
@@ -831,6 +832,15 @@ class QSnippet(QMainWindow):
         """
         logger.info("Saving settings to file")
 
+        old_settings = self.parent.settings
+        old_theme = old_settings.get("appearance", {}).get("theme", {}).get("value", "system")
+        old_scale = old_settings.get("appearance", {}).get("ui_scale", {}).get("value", 100)
+        old_accent = old_settings.get("appearance", {}).get("accent_color", {}).get("value", "system")
+
+        new_theme = settings.get("appearance", {}).get("theme", {}).get("value", "system")
+        new_scale = settings.get("appearance", {}).get("ui_scale", {}).get("value", 100)
+        new_accent = settings.get("appearance", {}).get("accent_color", {}).get("value", "system")
+
         # Update parent reference in memory
         self.parent.settings = settings
 
@@ -838,6 +848,10 @@ class QSnippet(QMainWindow):
             self.parent.settings_file,
             self.parent.settings,
         )
+
+        # Re-apply theme if appearance settings changed
+        if old_theme != new_theme or old_scale != new_scale or old_accent != new_accent:
+            self.parent._apply_theme()
 
         # Refresh the tray settings
         self.tray.contextMenu().refresh()

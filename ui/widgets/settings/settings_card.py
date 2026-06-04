@@ -9,7 +9,6 @@ class SettingsCard(QWidget):
         self.title_text = title
         self.setObjectName("SettingsCard")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setMaximumHeight(75)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         root = QVBoxLayout(self)
@@ -23,6 +22,7 @@ class SettingsCard(QWidget):
         control.setMinimumWidth(100)
 
         header = QHBoxLayout()
+        header.setSpacing(8)
         header.addWidget(title_label, 1)
         if reset_btn:
             header.addWidget(reset_btn, alignment=Qt.AlignRight | Qt.AlignVCenter)

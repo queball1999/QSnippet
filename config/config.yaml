@@ -1,6 +1,6 @@
 # Default Config
 program_name: QSnippet
-version: "0.0.6"
+version: "0.0.7-dev"
 log_level: ERROR
 
 support_info:
@@ -64,8 +64,8 @@ dimensions:
       height: 25
       radius: 8
     small:
-      width: 125
-      height: 35
+      width: 160
+      height: 45
       radius: 8
     medium:
       width: 200

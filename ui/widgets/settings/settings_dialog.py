@@ -57,12 +57,13 @@ class SettingsDialog(QDialog):
         self.initUI()
         self.build_search_index()
 
+
     def initUI(self):
         root = QHBoxLayout(self)
 
         # Left
         left = QVBoxLayout()
-        left.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        left.setContentsMargins(0, 0, 0, 0)
         left_container = QWidget()
         left_container.setLayout(left)
         left_container.setFixedWidth(260)
@@ -77,8 +78,7 @@ class SettingsDialog(QDialog):
         self.list.setFocusPolicy(Qt.NoFocus)
 
         left.addWidget(self.search)
-        left.addWidget(self.list)
-        left.addStretch()
+        left.addWidget(self.list, 1)   # stretch=1 fills all remaining vertical space
 
         self.restore_defaults_btn = QPushButton("Restore Defaults")
         self.restore_defaults_btn.setObjectName("RestoreDefaultsBtn")
@@ -107,8 +107,6 @@ class SettingsDialog(QDialog):
         self.list.itemClicked.connect(self.on_sidebar_changed)
         self.list.setCurrentRow(0)
 
-        self.update_stylesheet()
-        
         # Set up Ctrl+F keyboard shortcut to focus search bar
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
 
@@ -445,116 +443,3 @@ class SettingsDialog(QDialog):
             self.stack.setCurrentIndex(row)
 
 
-    def update_stylesheet(self):
-        """ Update the dialog's stylesheet. """
-        
-        self.setStyleSheet("""
-        QComboBox {
-            padding: 8px 12px;
-        }
-                           
-        QLineEdit {
-            padding: 8px;
-        }
-
-        QListWidget {
-            background: transparent;
-            border: none;
-            font-size: 18px;
-        }
-
-        QListWidget#SearchResultsList {
-            font-size: 13px;
-        }
-
-        QListWidget::item {
-            padding: 10px 12px;
-            border-radius: 6px;
-        }
-
-        QListWidget::item:selected {
-            background-color: rgba(79, 163, 255, 0.15);
-        }
-
-        QLabel#SettingsHeader {
-            font-size: 26px;
-            font-weight: 600;
-            padding-bottom: 10px;
-        }
-
-        QLabel#SettingsLabel {
-            font-size: 14px;
-        }
-                           
-        QLabel#SettingsHeader[highlighted="true"] {
-            color: rgba(79, 163, 255, 0.15);
-        }
-
-        QLabel#SettingsLabel[highlighted="true"] {
-            background-color: rgba(79, 163, 255, 0.15);
-            border-radius: 4px;
-            padding: 2px 4px;
-        }
-                           
-        SettingsCard {
-            border-radius: 8px;
-        }
-
-        QLabel#SettingsCardTitle {
-            font-size: 15px;
-            font-weight: 600;
-        }
-
-        QLabel#SettingsCardDescription {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-
-        SettingsSubCategoryCard {
-            border-radius: 8px;
-        }
-
-        SettingsSubCategoryCard:hover {
-            background-color: rgba(79, 163, 255, 0.15);
-        }
-                           
-        SettingsCard[highlighted="true"],
-        SettingsSubCategoryCard[highlighted="true"] {
-            background-color: rgba(79, 163, 255, 0.18);
-        }
-
-        QLabel#SettingsChevron {
-            font-size: 20px;
-            color: rgba(255, 255, 255, 0.4);
-        }
-
-        QPushButton#SettingsResetBtn {
-            background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 12px;
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.6);
-            padding: 0px;
-        }
-
-        QPushButton#SettingsResetBtn:hover {
-            background-color: rgba(79, 163, 255, 0.2);
-            border-color: rgba(79, 163, 255, 0.5);
-            color: rgba(79, 163, 255, 1.0);
-        }
-
-        QPushButton#RestoreDefaultsBtn {
-            background: transparent;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.6);
-        }
-
-        QPushButton#RestoreDefaultsBtn:hover {
-            background-color: rgba(228, 75, 75, 0.15);
-            border-color: rgba(228, 75, 75, 0.5);
-            color: rgba(228, 75, 75, 1.0);
-        }
-        """)

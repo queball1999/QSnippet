@@ -4,58 +4,48 @@ from PySide6.QtGui import QIcon, QAction
 
 class ToolbarMenu(QToolBar):
     """
-    ToolbarMenu is the main toolbar for the application, providing quick access 
+    ToolbarMenu is the main toolbar for the application, providing quick access
     to common actions such as creating, saving, and deleting snippets.
+
+    Icons are tinted at construction time and whenever the active theme changes
+    so they remain visible in both dark and light modes.
     """
+
     def __init__(self, parent=None):
-        """
-        Initialize the ToolbarMenu with standard toolbar actions.
-
-        Args:
-            parent (QWidget): Optional parent widget.
-
-        Returns:
-            None
-        """
         super().__init__("Main Toolbar", parent)
         self.parent = parent
+        self.icon_sources: dict[QAction, QIcon] = {}
         self.init_actions()
+        self.update_icons()
+        self.connect_theme()
 
     def init_actions(self):
-        """
-        Initialize all toolbar actions with icons and tooltips.
-
-        Creates and adds actions for home, new snippet, save, and delete operations
-        with appropriate icons and keyboard shortcuts.
-
-        Returns:
-            None
-        """
         self.editor = self.parent.editor
 
-        home_icon = QIcon.fromTheme("go-home")
-        home_action = QAction(home_icon, "Home", self)
-        home_action.setToolTip("Home")
-        home_action.triggered.connect(self.editor.show_home_widget)
-        self.addAction(home_action)
+        self.make_action("go-home",       "Home",           self.editor.show_home_widget)
+        self.make_action("document-new",  "New Snippet",    self.editor.show_new_form)
+        self.make_action("document-save", "Save Snippet",   self.editor.on_save)
+        self.make_action("edit-delete",   "Delete Snippet", self.editor.on_delete)
 
-        # New Snippet
-        new_icon = QIcon.fromTheme("document-new")
-        new_action = QAction(new_icon, "New Snippet", self)
-        new_action.setToolTip("New Snippet (Ctrl+N)")
-        new_action.triggered.connect(self.editor.show_new_form)
-        self.addAction(new_action)
+    def make_action(self, theme_name: str, label: str, slot) -> QAction:
+        icon   = QIcon.fromTheme(theme_name)
+        action = QAction(label, self)
+        action.triggered.connect(slot)
+        self.addAction(action)
+        self.icon_sources[action] = icon   # keep original for re-tinting
+        return action
 
-        # Save Snippet
-        save_icon = QIcon.fromTheme("document-save")
-        save_action = QAction(save_icon, "Save Snippet", self)
-        save_action.setToolTip("Save Snippet (Ctrl+S)")
-        save_action.triggered.connect(self.editor.on_save)
-        self.addAction(save_action)
+    def connect_theme(self):
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.instance()
+        if tm:
+            tm.themeChanged.connect(self.update_icons)
 
-        # Delete Snippet
-        del_icon = QIcon.fromTheme("edit-delete")
-        delete_action = QAction(del_icon, "Delete Snippet", self)
-        delete_action.setToolTip("Delete Snippet (Del)")
-        delete_action.triggered.connect(self.editor.on_delete)
-        self.addAction(delete_action)
+    def update_icons(self):
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.instance()
+        if tm is None:
+            return
+        color = tm.icon_color()
+        for action, orig_icon in self.icon_sources.items():
+            action.setIcon(tm.recolor_icon(orig_icon, color))
