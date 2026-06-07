@@ -318,7 +318,26 @@ class main():
         self.loader.settingsChanged.connect(self.on_settings_updated)
         self.settings = self.loader.settings
         self.flatten_yaml(items=self.settings)
+        self.populate_available_fonts()
         self.handle_start_up_reg()
+
+    def populate_available_fonts(self) -> None:
+        """
+        Populate the available system fonts in the font_family setting.
+
+        Detects all available system fonts and adds them as options to the
+        font_family setting in appearance.advanced.
+        """
+        try:
+            available_fonts = FileUtils.get_system_fonts()
+
+            # Add options to the font_family setting
+            if "appearance" in self.settings and "advanced" in self.settings["appearance"]:
+                if "font_family" in self.settings["appearance"]["advanced"]:
+                    self.settings["appearance"]["advanced"]["font_family"]["options"] = available_fonts
+                    logger.debug(f"Populated {len(available_fonts)} system fonts")
+        except Exception as e:
+            logger.warning(f"Could not populate system fonts: {e}")
 
     def on_settings_updated(self, config) -> None:
         """
@@ -344,11 +363,11 @@ class main():
 
     def scale_ui_cfg(self):
         """
-        Recompute all scaled UI attributes from the original config values.
+        Recompute all scaled UI attributes from the original settings values.
 
-        Safe to call multiple times — always reads from the unscaled originals
-        stored in self.fonts["sizes"] and self.dimensions[*] so that repeated
-        calls (e.g. after a settings change) do not compound the scaling.
+        Safe to call multiple times - always reads from the unscaled originals
+        stored in settings so that repeated calls (e.g. after a settings change)
+        do not compound the scaling.
         """
         # --- resolve user-configured scale (default 100 %) ---
         appearance = self.settings.get("appearance", {})
@@ -361,33 +380,75 @@ class main():
         screen_ratio = self.screen_geometry.height() / self.REFERENCE_HEIGHT
         total_font_scale = screen_ratio * user_scale
 
-        # Font sizes — always from original config, never from a previous call
-        orig_font_sizes = self.fonts["sizes"]
+        # --- read fonts and button sizes from settings (advanced appearance) ---
+        advanced = appearance.get("advanced", {})
+
+        # Font family
+        pf = advanced.get("font_family", {})
+        if isinstance(pf, dict):
+            pf = pf.get("value", "Inter")
+
+        # Font sizes - always from original settings, never from a previous call
+        font_sizes_setting = advanced.get("font_sizes", {})
+        orig_font_sizes = {}
+        for size_name in ["small", "medium", "large", "extra_large", "humongous"]:
+            size_dict = font_sizes_setting.get(size_name, {})
+            if isinstance(size_dict, dict):
+                orig_font_sizes[size_name] = size_dict.get("value", 12)
+            else:
+                orig_font_sizes[size_name] = 12
+
         self.fonts_sizes = {
             name: max(6, round(size * total_font_scale))
             for name, size in orig_font_sizes.items()
         }
 
-        # Button / window / toggle sizes — always from original config
-        self.dimensions_buttons = self.scale_dict_sizes(
-            size_dict=self.dimensions["buttons"], screen_geometry=self.screen_geometry
-        )
-        self.dimensions_windows = self.scale_dict_sizes(
-            size_dict=self.dimensions["windows"], screen_geometry=self.screen_geometry
-        )
+        # Button padding from settings (raw, unscaled — theme manager scales via QSS)
+        button_padding_setting = advanced.get("button_padding", {})
+        bpx_dict = button_padding_setting.get("x", {})
+        bpy_dict = button_padding_setting.get("y", {})
+        self.button_padding_x_raw = bpx_dict.get("value", 8) if isinstance(bpx_dict, dict) else 8
+        self.button_padding_y_raw = bpy_dict.get("value", 6) if isinstance(bpy_dict, dict) else 6
+
+        # Toggle sizes - always from original settings
+        toggle_sizes_setting = advanced.get("toggle_sizes", {})
+        orig_toggle_sizes = {}
+        for toggle_type in ["small"]:
+            toggle_dict = toggle_sizes_setting.get(toggle_type, {})
+            if isinstance(toggle_dict, dict):
+                orig_toggle_sizes[toggle_type] = {
+                    "width": toggle_dict.get("width", {}).get("value", 60) if isinstance(toggle_dict.get("width"), dict) else 60,
+                    "height": toggle_dict.get("height", {}).get("value", 45) if isinstance(toggle_dict.get("height"), dict) else 45,
+                }
+            else:
+                orig_toggle_sizes[toggle_type] = {"width": 60, "height": 45}
+
+        # Scale toggle sizes
         self.dimensions_toggles = self.scale_dict_sizes(
-            size_dict=self.dimensions["toggles"], screen_geometry=self.screen_geometry
+            size_dict=orig_toggle_sizes, screen_geometry=self.screen_geometry
         )
 
-        # QSize objects for buttons
-        self.mini_button_size   = self.QSize(self.dimensions_buttons["mini"]["width"],   self.dimensions_buttons["mini"]["height"])
-        self.small_button_size  = self.QSize(self.dimensions_buttons["small"]["width"],  self.dimensions_buttons["small"]["height"])
-        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
-        self.large_button_size  = self.QSize(self.dimensions_buttons["large"]["width"],  self.dimensions_buttons["large"]["height"])
+        # Window dimensions (from settings.advanced, scaled by screen ratio)
+        window_sizes_setting = advanced.get("window_sizes", {})
+        orig_window_sizes = {}
+        for window_type in ["main"]:
+            window_dict = window_sizes_setting.get(window_type, {})
+            if isinstance(window_dict, dict):
+                orig_window_sizes[window_type] = {
+                    "width": window_dict.get("width", {}).get("value", 1200) if isinstance(window_dict.get("width"), dict) else 1200,
+                    "height": window_dict.get("height", {}).get("value", 800) if isinstance(window_dict.get("height"), dict) else 800,
+                }
+            else:
+                orig_window_sizes[window_type] = {"width": 1200, "height": 800}
+
+        self.dimensions_windows = self.scale_dict_sizes(
+            size_dict=orig_window_sizes, screen_geometry=self.screen_geometry
+        )
+
+        # QSize object for toggle
         self.small_toggle_size  = self.QSize(self.dimensions_toggles["small"]["width"],  self.dimensions_toggles["small"]["height"])
 
         # QFont objects (user-scale applied on top of screen scale)
-        pf = self.fonts["primary_font"]
         self.small_font_size           = self.QFont(pf, self.fonts_sizes["small"])
         self.small_font_size_bold      = self.QFont(pf, self.fonts_sizes["small"],       self.QFont.Bold)
         self.medium_font_size          = self.QFont(pf, self.fonts_sizes["medium"])
@@ -400,7 +461,46 @@ class main():
         self.humongous_font_size_bold  = self.QFont(pf, self.fonts_sizes["humongous"],   self.QFont.Bold)
 
         # Apply theme + scale to QApplication stylesheet
-        self._apply_theme()
+        self.apply_theme()
+
+    def apply_fonts_to_all_widgets(self) -> None:
+        """Apply the current medium font to every applicable widget in the app."""
+        try:
+            from PySide6.QtWidgets import (
+                QWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
+                QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
+                QHeaderView
+            )
+
+            font = self.medium_font_size
+
+            # Set the app-level font so widgets that rely on inheritance
+            # (status bar, group box titles, tab bars, etc.) also pick up
+            # the new font family even though we don't walk their trees explicitly.
+            self.app.setFont(font)
+
+            _applicable = (
+                QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
+                QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
+            )
+
+            def _apply_to_tree(root):
+                for child in root.findChildren(QWidget):
+                    if isinstance(child, _applicable):
+                        child.setFont(font)
+                        if isinstance(child, QComboBox) and child.lineEdit():
+                            child.lineEdit().setFont(font)
+                    # Sweep every header view directly - covers QTreeView, QTableView,
+                    # QTreeWidget, QTableWidget, and any other view that uses a header
+                    if isinstance(child, QHeaderView):
+                        child.setFont(font)
+                        child.viewport().update()
+
+            for top in self.app.topLevelWidgets():
+                _apply_to_tree(top)
+
+        except Exception as e:
+            logger.debug(f"Error applying fonts to all widgets: {e}")
 
     def start_accent_color_monitor(self) -> None:
         """Start a timer to monitor system accent color changes."""
@@ -439,11 +539,11 @@ class main():
         # If color changed, reapply theme
         if self._last_accent_color is not None and current_accent != self._last_accent_color:
             logger.info(f"System accent color changed from {self._last_accent_color} to {current_accent}")
-            self._apply_theme()
+            self.apply_theme()
 
         self._last_accent_color = current_accent
 
-    def _apply_theme(self) -> None:
+    def apply_theme(self) -> None:
         """Create (or reuse) the ThemeManager and apply the current theme + scale."""
         from ui.theme_manager import ThemeManager
 
@@ -476,7 +576,9 @@ class main():
                 from utils import FileUtils
                 FileUtils.write_yaml(self.settings_file, self.settings)
 
-        self.theme_manager.apply(theme_val, scale_pct, accent_col)
+        btn_pad_x = getattr(self, 'button_padding_x_raw', 8)
+        btn_pad_y = getattr(self, 'button_padding_y_raw', 6)
+        self.theme_manager.apply(theme_val, scale_pct, accent_col, btn_pad_x, btn_pad_y)
 
     def fix_image_paths(self) -> None:
         """

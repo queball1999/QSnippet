@@ -1,13 +1,25 @@
 from PySide6.QtWidgets import (
     QWidget, QLabel, QLineEdit, QComboBox, QSlider,
     QScrollArea, QVBoxLayout, QSpacerItem, QSizePolicy,
-    QHBoxLayout, QPushButton, QFrame
+    QHBoxLayout, QPushButton, QFrame, QStyledItemDelegate
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QPainter
 
 from ui.widgets import QAnimatedSwitch
 from .settings_card import SettingsCard
 from .settings_subcategory_card import SettingsSubCategoryCard
+
+
+class FontItemDelegate(QStyledItemDelegate):
+    """Renders each font name in its own font."""
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        font_name = index.data(Qt.DisplayRole)
+        if font_name:
+            font = QFont(font_name, 10)
+            option.font = font
+        super().paint(painter, option, index)
 
 
 class SettingsCategoryPage(QWidget):
@@ -29,15 +41,57 @@ class SettingsCategoryPage(QWidget):
         # Adding save debounce
         self._emit_timers: dict[str, QTimer] = {}
         self.pending_values: dict[str, object] = {}
+        self._breadcrumb_labels: list[QLabel] = []
 
         self.initUI()
+
+    def get_main_app(self):
+        """Get reference to main QSnippet app instance."""
+        try:
+            # dialog.parent() = QSnippet window (Qt method on SettingsDialog)
+            # window.parent  = Python attribute on QSnippet = main() app instance
+            window = self.dialog.parent()
+            return getattr(window, 'parent', None)
+        except Exception:
+            pass
+        return None
+
+    def apply_widget_font(self, widget: QWidget, font_size: str = "medium"):
+        """Apply appropriate font to a widget based on type."""
+        if not widget:
+            return
+
+        app = self.get_main_app()
+        if not app:
+            return
+
+        font_attr = f"{font_size}_font_size"
+        if hasattr(app, font_attr):
+            font = getattr(app, font_attr)
+            widget.setFont(font)
+
+    def apply_breadcrumb_font(self, label: QLabel):
+        """Apply breadcrumb font: bold and one size smaller than previous extra-large."""
+        app = self.get_main_app()
+        if not app:
+            return
+
+        if hasattr(app, "large_font_size_bold"):
+            label.setFont(getattr(app, "large_font_size_bold"))
+            return
+
+        # Fallback when bold variant is unavailable
+        if hasattr(app, "large_font_size"):
+            font = getattr(app, "large_font_size")
+            font.setBold(True)
+            label.setFont(font)
 
     def initUI(self):
         outer = QVBoxLayout(self)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)    # Remove border
+        #scroll.setFrameShape(QFrame.NoFrame)    # Remove border
         outer.addWidget(scroll)
 
         body = QWidget()
@@ -111,6 +165,7 @@ class SettingsCategoryPage(QWidget):
         The current (last) segment is non-clickable.
         """
         depth = len(self.path)
+        self._breadcrumb_labels.clear()
 
         for i, segment in enumerate(self.path):
             is_last = (i == depth - 1)
@@ -118,6 +173,8 @@ class SettingsCategoryPage(QWidget):
 
             label = QLabel(title)
             label.setObjectName("SettingsHeader")
+            self.apply_breadcrumb_font(label)
+            self._breadcrumb_labels.append(label)
 
             if not is_last:
                 # Clickable ancestor - pops back to this depth
@@ -130,7 +187,15 @@ class SettingsCategoryPage(QWidget):
             if not is_last:
                 separator = QLabel(" › ")
                 separator.setObjectName("SettingsHeader")
+                self.apply_breadcrumb_font(separator)
+                self._breadcrumb_labels.append(separator)
                 layout.addWidget(separator)
+
+    def refresh_breadcrumb_fonts(self):
+        """Re-apply current breadcrumb fonts, including already-rendered root labels."""
+        for label in self._breadcrumb_labels:
+            if label is not None:
+                self.apply_breadcrumb_font(label)
 
     # ----- SEARCH -----
 
@@ -338,6 +403,7 @@ class SettingsCategoryPage(QWidget):
             from ui.widgets.color_picker_widget import ColorPickerWidget
             w = ColorPickerWidget(str(value) if value is not None else "system")
             w.setMinimumWidth(160)
+            self.apply_widget_font(w)
             w.colorChanged.connect(lambda v: self.emit_change(key, v))
             return w
 
@@ -357,10 +423,16 @@ class SettingsCategoryPage(QWidget):
             w.addItems([str(o) for o in options])
             w.setCurrentText(str(value))
             w.setMinimumWidth(100)
+
+            # Apply font-specific rendering for font_family
+            if key == "font_family":
+                w.setItemDelegate(FontItemDelegate())
+
+            self.apply_widget_font(w)
             w.currentTextChanged.connect(lambda v: self.emit_change(key, v))
             return w
 
-        # --- Integer (slider or fallback line-edit) ---
+        # --- Integer (slider, spinbox, or fallback line-edit) ---
         if typ in ("int", "integer"):
             if element == "slider":
                 container = QWidget()
@@ -378,6 +450,7 @@ class SettingsCategoryPage(QWidget):
                 value_label = QLabel(str(value))
                 value_label.setFixedWidth(36)
                 value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.apply_widget_font(value_label)
 
                 slider.valueChanged.connect(
                     lambda v: (
@@ -390,12 +463,27 @@ class SettingsCategoryPage(QWidget):
                 row.addWidget(value_label)
                 return container
 
+            if element == "spinbox":
+                from PySide6.QtWidgets import QSpinBox
+                spinbox = QSpinBox()
+                spinbox.setMinimum(meta.get("min", 0))
+                spinbox.setMaximum(meta.get("max", 100))
+                spinbox.setValue(int(value))
+                spinbox.setMinimumWidth(80)
+                spinbox.setSingleStep(1)
+                spinbox.setFocusPolicy(Qt.StrongFocus)
+                self.apply_widget_font(spinbox)
+                spinbox.valueChanged.connect(lambda v: self.emit_change(key, v))
+                return spinbox
+
             # Default: line-edit for integers
             w = QLineEdit(str(value))
+            self.apply_widget_font(w)
             w.textChanged.connect(lambda v: self.emit_change(key, v))
             return w
 
         # --- Fallback: plain text ---
         w = QLineEdit(str(value))
+        self.apply_widget_font(w)
         w.textChanged.connect(lambda v: self.emit_change(key, v))
         return w

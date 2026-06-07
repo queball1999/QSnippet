@@ -10,16 +10,6 @@ class SettingsToast(QLabel):
         self.setObjectName("SettingsToast")
         self.setAlignment(Qt.AlignCenter)
 
-        self.setStyleSheet("""
-            QLabel#SettingsToast {
-                background-color: #00cc6a;
-                color: white;
-                padding: 8px 14px;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-        """)
-
         self.hide()
 
         self._hide_timer = QTimer(self)
@@ -34,6 +24,16 @@ class SettingsToast(QLabel):
         self.raise_()
 
         self._hide_timer.start(duration_ms)
+
+    def applyStyles(self):
+        """Update font from the parent settings dialog's app instance."""
+        try:
+            main_app = getattr(self.parentWidget().parent(), 'parent', None)
+            if main_app and hasattr(main_app, 'medium_font_size'):
+                self.setFont(main_app.medium_font_size)
+                self.adjustSize()
+        except Exception:
+            pass
 
     def _reposition(self):
         """ Move the toast to the top-right corner of the parent """

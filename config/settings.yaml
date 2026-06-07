@@ -27,6 +27,118 @@ appearance:
     default: "system"
     description: Accent color for selections and highlights. Click the swatch to customise.
 
+  advanced:
+    description: Advanced font and spacing customization.
+    font_family:
+      type: string
+      element: dropdown
+      value: "Inter"
+      default: "Inter"
+      options: []
+      description: Primary font family used throughout the application.
+
+    font_sizes:
+      description: Base font sizes (before UI scaling is applied).
+      small:
+        type: integer
+        element: spinbox
+        value: 10
+        default: 10
+        min: 6
+        max: 14
+        description: Small font size.
+      medium:
+        type: integer
+        element: spinbox
+        value: 12
+        default: 12
+        min: 8
+        max: 16
+        description: Medium font size.
+      large:
+        type: integer
+        element: spinbox
+        value: 16
+        default: 16
+        min: 12
+        max: 20
+        description: Large font size.
+      extra_large:
+        type: integer
+        element: spinbox
+        value: 18
+        default: 18
+        min: 14
+        max: 22
+        description: Extra large font size.
+      humongous:
+        type: integer
+        element: spinbox
+        value: 26
+        default: 26
+        min: 22
+        max: 30
+        description: Humongous font size.
+
+    button_padding:
+      description: Button padding applied inside buttons (before UI scaling).
+      x:
+        type: integer
+        element: spinbox
+        value: 8
+        default: 8
+        min: 0
+        max: 40
+        description: Horizontal (left/right) padding in pixels.
+      y:
+        type: integer
+        element: spinbox
+        value: 6
+        default: 6
+        min: 0
+        max: 40
+        description: Vertical (top/bottom) padding in pixels.
+
+    toggle_sizes:
+      description: Base toggle/switch dimensions (before screen scaling).
+      small:
+        width:
+          type: integer
+          element: spinbox
+          value: 60
+          default: 60
+          min: 40
+          max: 120
+          description: Small toggle width.
+        height:
+          type: integer
+          element: spinbox
+          value: 45
+          default: 45
+          min: 25
+          max: 75
+          description: Small toggle height.
+
+    window_sizes:
+      description: Main window dimensions (before screen scaling).
+      main:
+        width:
+          type: integer
+          element: spinbox
+          value: 1200
+          default: 1200
+          min: 800
+          max: 2560
+          description: Main window width.
+        height:
+          type: integer
+          element: spinbox
+          value: 800
+          default: 800
+          min: 600
+          max: 1440
+          description: Main window height.
+
 general:
   startup_behavior:
     description: Control how the application behaves on system startup.

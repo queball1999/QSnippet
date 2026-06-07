@@ -105,19 +105,25 @@ class SnippetEditor(QWidget):
 
         # Search bar and filters
         self.search_bar = QLineEdit(clearButtonEnabled=True)
+        self.search_bar.setObjectName("SearchBar")
         self.search_bar.setPlaceholderText("Search all the things...")
+        self.search_bar.setMinimumWidth(100)
         self.search_bar.textChanged.connect(self.on_search_text_changed)
         # This line must go here to ensure we initalize search first
         self.search_timer.timeout.connect(self.run_search)
 
         self.filter_dropdown = QComboBox()
+        self.filter_dropdown.setObjectName("FilterDropdown")
         self.filter_dropdown.addItem("All Snippets")
         self.filter_dropdown.addItem("Enabled Only")
         self.filter_dropdown.addItem("Disabled Only")
+        self.filter_dropdown.setMinimumWidth(100)
+        self.filter_dropdown.setMaximumWidth(150)
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
         arrow = "↓" if not self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
         self.toggle_collapse_button = QPushButton(arrow)
+        self.toggle_collapse_button.setObjectName("ToggleCollapseBtn")
         self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
         self.toggle_collapse_button.setFixedSize(30, 40)
         self.toggle_collapse_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -173,8 +179,8 @@ class SnippetEditor(QWidget):
         vlay.addWidget(self.splitter)
         self.setLayout(vlay)
 
-        # apply theme
-        self.update_stylesheet()
+        # apply theme and fonts
+        self.applyStyles()
 
         # Set up Ctrl+F keyboard shortcut to focus search bar
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
@@ -808,40 +814,18 @@ class SnippetEditor(QWidget):
 
     def applyStyles(self):
         """
-        Apply updated styles to child widgets and refresh the UI.
-
-        Calls style update methods on contained widgets and processes
-        pending application events.
+        Apply font and size styling to search controls and all child widgets.
 
         Returns:
             None
         """
+        self.search_bar.setFont(self.main.medium_font_size)
+        self.filter_dropdown.setFont(self.main.medium_font_size)
+        
         self.home_widget.applyStyles()
         self.form.applyStyles()
+        self.table.applyStyles()
         self.update()
-
-    def update_stylesheet(self):
-        """
-        Update the widget stylesheet.
-
-        Applies styling rules for buttons, combo boxes, and line edits.
-
-        Returns:
-            None
-        """
-        self.setStyleSheet(""" 
-            QPushButton {
-                padding: 8px;
-            } 
-
-            QComboBox {
-                padding: 8px;
-            }
-
-            QLineEdit {
-                padding: 8px;
-            }
-        """)
 
     def showStatus(self, msg=""):
         """
@@ -896,3 +880,4 @@ class SnippetEditor(QWidget):
         """
         self.parent.statusBar().showMessage(f"Service status: Running")
         self.parent.snippet_service.resume()
+

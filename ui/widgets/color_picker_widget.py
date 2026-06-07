@@ -107,11 +107,15 @@ class ColorPickerWidget(QWidget):
         else:
             self.label.setText(self._value)
 
+    def applyStyles(self) -> None:
+        """Swatch styling is dynamic via refresh(); this satisfies the standard interface."""
+        pass
+
     def open_picker(self) -> None:
         from PySide6.QtWidgets import QColorDialog, QDialogButtonBox
         from PySide6.QtGui import QColor
 
-        # If on pink/nord, the accent is fixed — nothing to pick
+        # If on pink/nord, the accent is fixed - nothing to pick
         try:
             from ui.theme_manager import ThemeManager
             tm = ThemeManager.instance()

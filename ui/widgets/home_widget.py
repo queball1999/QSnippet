@@ -34,9 +34,9 @@ class HomeWidget(QWidget):
 
         # Easter Egg
         # If user clicks the logo 5 times in 5 seconds, show snail image
-        self._icon_clicks = []
-        self._EASTER_WINDOW = 5000  # ms
-        self._EASTER_COUNT = 5
+        self.icon_clicks = []
+        self.EASTER_WINDOW = 5000  # ms
+        self.EASTER_COUNT = 5
         
         self.initUI()
         self.applyStyles()
@@ -57,14 +57,17 @@ class HomeWidget(QWidget):
 
         # Welcome Hearer w/ Logo
         self.welcome_label = QLabel("Welcome to QSnippets")
+        self.welcome_label.setObjectName("WelcomeLabel")
         second_label_text = (
             "Give your snippets a try below. "
             "It looks like you may want to create one to test here!"
         )
         self.second_label = QLabel(second_label_text)
+        self.second_label.setObjectName("SecondLabel")
 
         self.pixmap = QPixmap(self.main.images["icon_64"])
         self.program_logo = QLabel()
+        self.program_logo.setObjectName("ProgramLogo")
         self.program_logo.setPixmap(self.pixmap)
 
         if self.main.settings["general"]["extra_features"]["easter_eggs_enabled"].get("value", True):
@@ -72,6 +75,7 @@ class HomeWidget(QWidget):
             self.program_logo.mousePressEvent = self.on_icon_clicked
 
         self.test_entry = QTextEdit()
+        self.test_entry.setObjectName("TestEntry")
 
         third_label_text = (
             "Your triggers insert snippets where you are typing and work with any app on your computer. "
@@ -82,14 +86,16 @@ class HomeWidget(QWidget):
             "Snippets come in handy for text you enter often or for standard messages you send regularly."
         )
         self.third_label = QLabel(third_label_text)
+        self.third_label.setObjectName("ThirdLabel")
         self.third_label.setToolTip(third_label_tooltip)
         self.third_label.setWordWrap(True)
-        
+
         self.create_row = QHBoxLayout()
         self.create_label = QLabel("Go ahead and create a new snippet now")
+        self.create_label.setObjectName("CreateLabel")
 
         self.create_button = QPushButton("New Snippet")
-        self.create_button.setFixedSize(self.main.small_button_size)
+        self.create_button.setObjectName("CreateButton")
         self.create_button.pressed.connect(self.new_snippet.emit)
 
         self.create_row.addWidget(self.create_label)
@@ -118,14 +124,14 @@ class HomeWidget(QWidget):
             None
         """
         now = QDateTime.currentMSecsSinceEpoch()
-        self._icon_clicks.append(now)
+        self.icon_clicks.append(now)
 
         # Keep only clicks in the last 5 seconds
-        cutoff = now - self._EASTER_WINDOW
-        self._icon_clicks = [t for t in self._icon_clicks if t >= cutoff]
+        cutoff = now - self.EASTER_WINDOW
+        self.icon_clicks = [t for t in self.icon_clicks if t >= cutoff]
 
-        if len(self._icon_clicks) >= self._EASTER_COUNT:
-            self._icon_clicks.clear()
+        if len(self.icon_clicks) >= self.EASTER_COUNT:
+            self.icon_clicks.clear()
             self.show_snail()
 
     def show_snail(self) -> None:
@@ -156,34 +162,18 @@ class HomeWidget(QWidget):
         Returns:
             None
         """
-        self.welcome_label.setFont(self.main.extra_large_font_size)
-        self.second_label.setFont(self.main.small_font_size)
-        self.third_label.setFont(self.main.small_font_size)
-        self.create_label.setFont(self.main.small_font_size)
-        self.test_entry.setFont(self.main.small_font_size)
+        self.welcome_label.setFont(self.main.humongous_font_size)
+        self.second_label.setFont(self.main.medium_font_size)
+        self.third_label.setFont(self.main.medium_font_size)
+        self.create_label.setFont(self.main.medium_font_size)
+        self.test_entry.setFont(self.main.medium_font_size)
 
         # Button Styling
-        self.create_button.setFont(self.main.small_font_size)
-        self.create_button.setFixedSize(self.main.small_button_size)
-
-        # StyleSheet
-        self.update_stylesheet()
+        self.create_button.setFont(self.main.medium_font_size)
 
         self.layout().invalidate()
         self.update()
 
-    def update_stylesheet(self) -> None:
-        """
-        Update the widget stylesheet.
-
-        Returns:
-            None
-        """
-        self.setStyleSheet(f"""
-            QPushButton {{
-                padding: 5px
-            }}""")
-        
     def set_random_snippet(self) -> None:
         """
         Display a random snippet trigger in the instructional label.

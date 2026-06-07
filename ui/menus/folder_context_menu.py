@@ -18,9 +18,9 @@ class FolderContextMenu(QMenu):
         super().__init__(parent)
         self.folder_item = folder_item
         self.is_expanded = is_expanded
-        self._build()
+        self.build()
 
-    def _build(self):
+    def build(self):
         if self.is_expanded:
             self.addAction("Collapse Folder", self.collapseRequested.emit)
         else:
@@ -44,3 +44,4 @@ class FolderContextMenu(QMenu):
             "Delete Folder",
             lambda: self.deleteRequested.emit(self.folder_item)
         )
+

@@ -59,6 +59,7 @@ class NoticeCarouselDialog(QDialog):
 
         self.initUI()
         self.load_notice()
+        self.applyStyles()
 
     def initUI(self) -> None:
         """
@@ -71,25 +72,29 @@ class NoticeCarouselDialog(QDialog):
             None
         """
         self.top_label = QLabel("What’s new in QSnippet")
-        self.top_label.setStyleSheet("font-weight: bold; font-size: 18px;")
+        self.top_label.setObjectName("NoticeTopLabel")
 
         self.title_label = QLabel()
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.title_label.setObjectName("NoticeTitleLabel")
 
         self.body = QTextBrowser()
+        self.body.setObjectName("NoticeBody")
         self.body.setOpenExternalLinks(True)
         self.body.setAlignment(Qt.AlignCenter)
         self.body.setFrameShape(QTextBrowser.NoFrame)
 
         # Navigation
         self.prev_btn = QPushButton("<")
+        self.prev_btn.setObjectName("PrevBtn")
         self.prev_btn.setFixedWidth(50)
         self.next_btn = QPushButton(">")
+        self.next_btn.setObjectName("NextBtn")
         self.next_btn.setFixedWidth(50)
         self.prev_btn.clicked.connect(self.prev_notice)
         self.next_btn.clicked.connect(self.next_notice)
 
         self.pagination_label = QLabel("0 / 0")
+        self.pagination_label.setObjectName("PaginationLabel")
 
         nav_layout = QHBoxLayout()
         nav_layout.addStretch()
@@ -100,8 +105,10 @@ class NoticeCarouselDialog(QDialog):
 
         # Footer
         self.disable_checkbox = QCheckBox("Do not show again")
+        self.disable_checkbox.setObjectName("DisableCheckbox")
 
         self.close_btn = QPushButton("Close")
+        self.close_btn.setObjectName("CloseBtn")
         self.close_btn.clicked.connect(self.accept)
 
         footer_layout = QHBoxLayout()
@@ -183,6 +190,28 @@ class NoticeCarouselDialog(QDialog):
         """
         self.disable_future = self.disable_checkbox.isChecked()
         super().reject()
+
+    def applyStyles(self) -> None:
+        """Apply scaled fonts from the parent app instance to all widgets."""
+        try:
+            main_app = getattr(self.parent, 'parent', None) if self.parent else None
+            if not main_app or not hasattr(main_app, 'medium_font_size'):
+                return
+            font = main_app.medium_font_size
+            self.setFont(font)
+            top_font = getattr(main_app, 'large_font_size_bold', getattr(main_app, 'large_font_size', font))
+            title_font = getattr(main_app, 'medium_font_size_bold', getattr(main_app, 'large_font_size', font))
+            self.top_label.setFont(top_font)
+            self.title_label.setFont(title_font)
+            for child in self.findChildren(QLabel):
+                if child not in (self.top_label, self.title_label):
+                    child.setFont(font)
+            for child in self.findChildren(QPushButton):
+                child.setFont(font)
+            for child in self.findChildren(QCheckBox):
+                child.setFont(font)
+        except Exception:
+            pass
 
     @staticmethod
     def parse_notice_dt(stem: str, path: Path) -> datetime:

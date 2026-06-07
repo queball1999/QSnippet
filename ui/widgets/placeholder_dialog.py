@@ -200,7 +200,7 @@ class PlaceholderDialog(QDialog):
         root.addWidget(right_widget, 1)
 
         self.set_editor_enabled(False)
-        self.apply_styles()
+        self.applyStyles()
 
     def set_value_placeholder_hint(self, placeholder_name: str | None = None):
         """Set context-aware hint text for the replacement value field."""
@@ -208,34 +208,6 @@ class PlaceholderDialog(QDialog):
         self.value_input.setPlaceholderText(
             f"Text that will replace {token} when a snippet is expanded..."
         )
-
-    def apply_styles(self):
-        self.setStyleSheet("""
-            QLabel#PanelTitle {
-                font-size: 14px;
-                font-weight: bold;
-                padding-bottom: 4px;
-            }
-            QLabel#FieldLabel {
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QLabel#FieldHint {
-                font-size: 11px;
-                color: #666;
-            }
-            QLabel#ErrorLabel {
-                font-size: 11px;
-                color: #e81123;
-            }
-            QLabel#SystemNotice {
-                font-size: 11px;
-                color: #5a5a5a;
-                background: #f0f0f0;
-                border-radius: 4px;
-                padding: 6px;
-            }
-        """)
 
     # Data loading
 
@@ -301,7 +273,7 @@ class PlaceholderDialog(QDialog):
             # Show system placeholder info (read-only)
             ph = next((p for p in SYSTEM_PLACEHOLDERS if p["name"] == name), None)
             value_preview = ph["value"] if ph else ""
-            self.editor_title.setText(f"{{{name}}}")
+            self.editor_title.setText(f"Placeholder: {{{name}}}")
             self.set_value_placeholder_hint(name)
             self.system_notice.show()
             self.name_input.setText(name)
@@ -314,7 +286,7 @@ class PlaceholderDialog(QDialog):
             ph_list = self.snippet_db.get_all_custom_placeholders()
             ph = next((p for p in ph_list if p["id"] == self.selected_row_id), None)
             value = ph["value"] if ph else ""
-            self.editor_title.setText(f"{{{name}}}")
+            self.editor_title.setText(f"Placeholder: {{{name}}}")
             self.set_value_placeholder_hint(name)
             self.system_notice.hide()
             self.name_input.setText(name)
@@ -458,3 +430,51 @@ class PlaceholderDialog(QDialog):
             if item and item.text() == name:
                 self.table.selectRow(row)
                 return
+
+    def applyStyles(self):
+        """Apply fonts from main app to all widgets."""
+        try:
+            # self.parent() = QSnippet window (Qt method)
+            # .parent = Python attribute on the window pointing to the main() app instance
+            main_app = getattr(self.parent(), 'parent', None)
+
+            if not main_app or not hasattr(main_app, 'medium_font_size'):
+                return
+
+            font = main_app.medium_font_size
+            self.setFont(font)
+
+            title_font = getattr(main_app, "large_font_size_bold", getattr(main_app, "large_font_size", font))
+            field_label_font = getattr(main_app, "large_font_size", font)
+            small_font = getattr(main_app, "small_font_size", font)
+
+            # Apply to all label, input, and button widgets
+            for child in self.findChildren(QLabel):
+                if child.objectName() == "PanelTitle":
+                    child.setFont(title_font)
+                elif child.objectName() == "FieldLabel":
+                    child.setFont(field_label_font)
+                elif child.objectName() in ("FieldHint", "ErrorLabel", "SystemNotice"):
+                    child.setFont(small_font)
+                else:
+                    child.setFont(font)
+            for child in self.findChildren(QLineEdit):
+                child.setFont(font)
+            for child in self.findChildren(QTextEdit):
+                child.setFont(font)
+            for child in self.findChildren(QPushButton):
+                child.setFont(font)
+            if hasattr(self, 'table') and self.table:
+                self.table.setFont(font)
+                self._apply_header_font(self.table.horizontalHeader(), font)
+        except Exception:
+            pass
+
+    def _apply_header_font(self, header, font):
+        """Set font on a QHeaderView and force a visual repaint."""
+        if not header:
+            return
+        header.setFont(font)
+        header.viewport().update()
+        header.update()
+

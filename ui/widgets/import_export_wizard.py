@@ -60,6 +60,7 @@ class ImportExportWizard(QDialog):
         else:
             self.load_for_export()
 
+        self.applyStyles()
         logger.debug(f"ImportExportWizard initialized in {mode} mode")
 
     def build_ui(self) -> None:
@@ -69,15 +70,12 @@ class ImportExportWizard(QDialog):
         root.setSpacing(8)
 
         # Title
-        title_label = QLabel(
+        self.title_label = QLabel(
             "Select Snippets to Import" if self.mode == "import"
             else "Select Snippets to Export"
         )
-        title_font = title_label.font()
-        title_font.setPointSize(11)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        root.addWidget(title_label)
+        self.title_label.setObjectName("ImportExportTitle")
+        root.addWidget(self.title_label)
 
         # Select all checkbox + count label
         checkbox_row = QHBoxLayout()
@@ -87,6 +85,7 @@ class ImportExportWizard(QDialog):
         checkbox_row.addWidget(self.select_all_checkbox)
 
         self.count_label = QLabel("0 / 0 selected")
+        self.count_label.setObjectName("CountLabel")
         self.count_label.setStyleSheet("color: gray; margin-left: 12px;")
         checkbox_row.addWidget(self.count_label)
         checkbox_row.addStretch()
@@ -132,11 +131,13 @@ class ImportExportWizard(QDialog):
         button_layout.addStretch()
 
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("CancelBtn")
         self.cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(self.cancel_button)
 
         action_text = "Import" if self.mode == "import" else "Export"
         self.action_button = QPushButton(action_text)
+        self.action_button.setObjectName("ActionBtn")
         self.action_button.clicked.connect(self.on_confirm)
         button_layout.addWidget(self.action_button)
 
@@ -369,3 +370,39 @@ class ImportExportWizard(QDialog):
                 "Export Error",
                 f"Failed to export snippets:\n{e}"
             )
+
+    def applyStyles(self):
+        """Apply fonts from main app to all widgets."""
+        try:
+            main_app = getattr(self.parent(), 'parent', None)
+
+            if not main_app or not hasattr(main_app, 'medium_font_size'):
+                return
+
+            font = main_app.medium_font_size
+            title_font = getattr(main_app, 'large_font_size_bold', getattr(main_app, 'large_font_size', font))
+            self.setFont(font)
+
+            if hasattr(self, 'title_label') and self.title_label:
+                self.title_label.setFont(title_font)
+            for child in self.findChildren(QLabel):
+                if child is not getattr(self, 'title_label', None):
+                    child.setFont(font)
+            for child in self.findChildren(QPushButton):
+                child.setFont(font)
+            for child in self.findChildren(QCheckBox):
+                child.setFont(font)
+            if hasattr(self, 'table') and self.table:
+                self.table.setFont(font)
+                self._apply_header_font(self.table.horizontalHeader(), font)
+        except Exception:
+            pass
+
+    def _apply_header_font(self, header, font):
+        """Set font on a QHeaderView and force a visual repaint."""
+        if not header:
+            return
+        header.setFont(font)
+        header.viewport().update()
+        header.update()
+

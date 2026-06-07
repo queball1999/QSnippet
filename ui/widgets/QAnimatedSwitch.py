@@ -10,7 +10,7 @@ class QAnimatedSwitch(QWidget):
                  objectName: str = '',
                  on_text: str = '', 
                  off_text: str = '', 
-                 checked_color: str = '#9C0000',
+                 checked_color: str = None,
                  background_color: str = '',
                  text_position: str = 'right',
                  text_font: QFont = QFont("Arial", 10),
@@ -39,7 +39,14 @@ class QAnimatedSwitch(QWidget):
             None
         """
         super().__init__(parent)
-        self.objectName = objectName
+        if checked_color is None:
+            try:
+                from ui.theme_manager import ThemeManager, THEMES
+                tm = ThemeManager.instance()
+                checked_color = THEMES.get(tm._theme_name, {}).get("accent", "#9C0000") if tm else "#9C0000"
+            except Exception:
+                checked_color = "#9C0000"
+        self.setObjectName(objectName)
         self.on_text = on_text
         self.off_text = off_text
         self.checked_color = checked_color
@@ -288,7 +295,13 @@ class QAnimatedSwitch(QWidget):
         if self.background_color:
             self.setStyleSheet('QWidget {background-color: ' + self.background_color + '}')
 
-        # Need to be able to update checked color
+        try:
+            from ui.theme_manager import ThemeManager
+            tm = ThemeManager.instance()
+            if tm:
+                self.update_accent(tm.get_colors()["accent"])
+        except Exception:
+            pass
 
         self.layout().invalidate()
         self.update()

@@ -87,13 +87,3 @@ class TrayMenu(QMenu):
         self.launch_action.blockSignals(False)
         self.showui_action.blockSignals(False)
 
-    def update_stylesheet(self):
-        """
-        Apply the CSS stylesheet to tray menu components.
-
-        Updates styling rules for the tray menu and its items.
-
-        Returns:
-            None
-        """
-        #self.setStyleSheet(f""" """)

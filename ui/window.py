@@ -832,15 +832,6 @@ class QSnippet(QMainWindow):
         """
         logger.info("Saving settings to file")
 
-        old_settings = self.parent.settings
-        old_theme = old_settings.get("appearance", {}).get("theme", {}).get("value", "system")
-        old_scale = old_settings.get("appearance", {}).get("ui_scale", {}).get("value", 100)
-        old_accent = old_settings.get("appearance", {}).get("accent_color", {}).get("value", "system")
-
-        new_theme = settings.get("appearance", {}).get("theme", {}).get("value", "system")
-        new_scale = settings.get("appearance", {}).get("ui_scale", {}).get("value", 100)
-        new_accent = settings.get("appearance", {}).get("accent_color", {}).get("value", "system")
-
         # Update parent reference in memory
         self.parent.settings = settings
 
@@ -849,12 +840,51 @@ class QSnippet(QMainWindow):
             self.parent.settings,
         )
 
-        # Re-apply theme if appearance settings changed
-        if old_theme != new_theme or old_scale != new_scale or old_accent != new_accent:
-            self.parent._apply_theme()
+        # Recompute and re-apply style/font surfaces after any settings save.
+        # Settings are edited in-place in the dialog, so old/new comparison here
+        # is unreliable. Keep this path deterministic and always refresh.
+        self.refresh_font_display()
 
         # Refresh the tray settings
         self.tray.contextMenu().refresh()
+
+    def refresh_font_display(self) -> None:
+        """
+        Full refresh of every font-dependent widget after an advanced-appearance change.
+
+        Call this whenever font family, font size, or button sizes change while the
+        app is running.  safe to call multiple times.
+        """
+        # Recompute QFont objects and re-apply QSS/theme
+        self.parent.scale_ui_cfg()
+
+        # Propagate new family to every widget that hasn't had setFont() called
+        # explicitly - this covers status bars, group boxes, tab bars, etc.
+        self.parent.apply_fonts_to_all_widgets()
+
+        # Size-specific overrides (non-medium widgets)
+        self.editor.applyStyles()
+
+        if hasattr(self, 'settings_dialog') and self.settings_dialog and self.settings_dialog.isVisible():
+            self.settings_dialog.applyStyles()
+
+        if hasattr(self, 'placeholder_dialog') and self.placeholder_dialog and self.placeholder_dialog.isVisible():
+            self.placeholder_dialog.applyStyles()
+
+        self.app.processEvents()
+
+    def refresh_theme_display(self) -> None:
+        """Re-apply theme/scale/accent after a live change to those settings."""
+        self.parent.apply_theme()
+        # apply_theme → force_repaint calls applyStyles on all widgets, but the
+        # generic sweep and dialog-specific refreshes still need to run.
+        self.parent.apply_fonts_to_all_widgets()
+        self.editor.applyStyles()
+        if hasattr(self, 'settings_dialog') and self.settings_dialog and self.settings_dialog.isVisible():
+            self.settings_dialog.applyStyles()
+        if hasattr(self, 'placeholder_dialog') and self.placeholder_dialog and self.placeholder_dialog.isVisible():
+            self.placeholder_dialog.applyStyles()
+        self.app.processEvents()
 
     def unset_skip_reg(self):
         """

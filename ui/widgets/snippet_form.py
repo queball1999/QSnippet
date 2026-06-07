@@ -102,14 +102,16 @@ Snippets come in handy for text you enter often or for standard messages you sen
         
         # Header & Instructions
         self.form_title = QLabel("Snippet Details")
-        self.form_title.setFont(self.main.large_font_size)
+        self.form_title.setObjectName("FormTitle")
+        self.form_title.setFont(self.main.large_font_size_bold)
 
         self.instructions = QLabel(self.instructions_text)
+        self.instructions.setObjectName("FormInstructions")
         self.instructions.setWordWrap(True)
-        self.instructions.setFont(self.main.small_font_size)
+        self.instructions.setFont(self.main.medium_font_size)
 
         instruction_height = self.instructions.sizeHint().height()
-        instructions_threshold = 90
+        instructions_threshold = 100
 
         if instruction_height > instructions_threshold:
             from PySide6.QtWidgets import QScrollArea, QFrame
@@ -122,7 +124,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.instructions_widget = scroll
         else:
             self.instructions.setFixedHeight(instruction_height)
-            self.instructions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+            self.instructions.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
             self.instructions_widget = self.instructions
 
          # Enabled Switch
@@ -158,16 +160,20 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         # Form fields
         self.new_label = QLabel("Name<span style='color:red'>*</span>")
+        self.new_label.setObjectName("NameLabel")
         self.new_label.setToolTip("Name or description of your snippet.")
 
         self.new_input = QLineEdit(text="New Snippet", clearButtonEnabled=True)
+        self.new_input.setObjectName("NameInput")
         self.new_input.setPlaceholderText("New Snippet")
         self.new_input.setToolTip("Name or description of your snippet.")
 
         self.trigger_label = QLabel("Trigger<span style='color:red'>*</span>")
+        self.trigger_label.setObjectName("TriggerLabel")
         self.trigger_label.setToolTip(self.trigger_tooltip)
 
         self.trigger_input = QLineEdit(clearButtonEnabled=True)
+        self.trigger_input.setObjectName("TriggerInput")
         self.trigger_input.setToolTip(self.trigger_tooltip)
         self.trigger_input.setPlaceholderText("/do")
 
@@ -176,6 +182,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         self.folder_input = QComboBox()
         self.folder_input.setEditable(True)
+        self.folder_input.setObjectName("FolderInput")
         self.folder_input.setToolTip("Folder which your snippet is organized in.")
         self.folder_input.setInsertPolicy(QComboBox.NoInsert)
         self.folder_input.setCompleter(None)  # Disable auto-fill; we manage filtering ourselves
@@ -197,6 +204,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.tags_label.setToolTip("Comma-separated tags to help organize and search snippets.")
 
         self.tags_input = CheckableComboBox()
+        self.tags_input.setObjectName("TagsInput")
         self.tags_input.setToolTip("Comma-separated tags to help organize and search snippets.")
         self.tags_input.setMinimumWidth(250)
         self.tags_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -212,13 +220,16 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         # Snippet Input
         self.snippet_label = QLabel("Snippet<span style='color:red'>*</span>")
+        self.snippet_label.setObjectName("SnippetLabel")
         self.snippet_label.setToolTip(self.snippet_tooltip)
 
         self.snippet_input = QTextEdit(self)
+        self.snippet_input.setObjectName("SnippetInput")
         self.snippet_input.setToolTip(self.snippet_tooltip)
         self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type { to insert placeholders...")
         self.snippet_input.setFocusPolicy(Qt.StrongFocus)
         self.snippet_input.installEventFilter(self)
+        self.snippet_input.setMinimumHeight(100)
 
         # Popup list (looks like intellisense)
         self.intellisense_popup = QListWidget(self)
@@ -238,19 +249,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
         btn_layout = QHBoxLayout()
         self.new_btn = QPushButton('New')
         self.new_btn.setObjectName("SnippetFormBtn")
-        self.new_btn.setFixedSize(self.main.small_button_size)
 
         self.save_btn = QPushButton('Save')
         self.save_btn.setObjectName("SnippetFormBtn")
-        self.save_btn.setFixedSize(self.main.small_button_size)
 
         self.delete_btn = QPushButton('Delete')
         self.delete_btn.setObjectName("SnippetFormBtn")
-        self.delete_btn.setFixedSize(self.main.small_button_size)
 
         self.cancel_btn = QPushButton('Cancel') # Maybe rename home?
         self.cancel_btn.setObjectName("SnippetFormBtn")
-        self.cancel_btn.setFixedSize(self.main.small_button_size)
 
         btn_layout.addWidget(self.new_btn)
         btn_layout.addWidget(self.save_btn)
@@ -281,7 +288,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         
 
         layout.addWidget(self.form_title, 0, 0, 1, 3, Qt.AlignLeft)
-        layout.addWidget(self.instructions_widget, 1, 0, 1, 3, Qt.AlignLeft)
+        layout.addWidget(self.instructions_widget, 1, 0, 1, 3)
         layout.addWidget(self.enabled_switch, 2, 0, 1, 1, Qt.AlignLeft)
         layout.addLayout(first_row, 3, 0, 1, 3)
         layout.addLayout(second_row, 4, 0, 1, 3)
@@ -301,6 +308,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.setTabOrder(self.new_btn, self.save_btn)
         self.setTabOrder(self.save_btn, self.delete_btn)
         self.setTabOrder(self.delete_btn, self.cancel_btn)
+
+        QTimer.singleShot(0, self.applyStyles)  # Ensure styles are applied after full initialization
 
     def clear_form(self):
         """
@@ -737,6 +746,20 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.intellisense_popup.hide()
 
     # ----- Styling Functions -----
+    def apply_tags_font(self):
+        self.tags_label.setFont(self.main.medium_font_size)
+        self.tags_input.setFont(self.main.medium_font_size)
+        line_edit = self.tags_input.lineEdit()
+        if line_edit:
+            line_edit.setFont(self.main.medium_font_size)
+
+    def apply_folder_font(self):
+            self.folder_label.setFont(self.main.medium_font_size)
+            self.folder_input.setFont(self.main.medium_font_size)
+            line_edit = self.folder_input.lineEdit()
+            if line_edit:
+                line_edit.setFont(self.main.medium_font_size)
+
     def applyStyles(self):
         """
         Apply all styling properties to the form and its widgets.
@@ -748,73 +771,39 @@ Snippets come in handy for text you enter often or for standard messages you sen
             None
         """
         # Font Sizing
-        self.form_title.setFont(self.main.large_font_size)
-        self.instructions.setFont(self.main.small_font_size)
-        self.folder_label.setFont(self.main.small_font_size)
-        self.folder_input.setFont(self.main.small_font_size)
-        self.new_label.setFont(self.main.small_font_size)
-        self.new_input.setFont(self.main.small_font_size)
-        self.tags_label.setFont(self.main.small_font_size)
-        self.tags_input.setFont(self.main.small_font_size)
-        self.trigger_label.setFont(self.main.small_font_size)
-        self.trigger_input.setFont(self.main.small_font_size)
-        self.snippet_label.setFont(self.main.small_font_size)
-        self.snippet_input.setFont(self.main.small_font_size)
-        self.intellisense_popup.setFont(self.main.small_font_size)
+        self.form_title.setFont(self.main.large_font_size_bold)
+        self.instructions.setFont(self.main.medium_font_size)
+        QTimer.singleShot(0, self.apply_folder_font)
+        self.new_label.setFont(self.main.medium_font_size)
+        self.new_input.setFont(self.main.medium_font_size)
+        QTimer.singleShot(0, self.apply_tags_font)
+        self.trigger_label.setFont(self.main.medium_font_size)
+        self.trigger_input.setFont(self.main.medium_font_size)
+        self.snippet_label.setFont(self.main.medium_font_size)
+        self.snippet_input.setFont(self.main.medium_font_size)
+        self.intellisense_popup.setFont(self.main.medium_font_size)
         
-        self.new_btn.setFont(self.main.small_font_size)
-        self.save_btn.setFont(self.main.small_font_size)
-        self.delete_btn.setFont(self.main.small_font_size)
-        self.cancel_btn.setFont(self.main.small_font_size)
-
-        # Button Sizing
-        self.new_btn.setFixedSize(self.main.small_button_size)
-        self.save_btn.setFixedSize(self.main.small_button_size)
-        self.delete_btn.setFixedSize(self.main.small_button_size)
-        self.cancel_btn.setFixedSize(self.main.small_button_size)
+        self.new_btn.setFont(self.main.medium_font_size)
+        self.save_btn.setFont(self.main.medium_font_size)
+        self.delete_btn.setFont(self.main.medium_font_size)
+        self.cancel_btn.setFont(self.main.medium_font_size)
 
         # Widget Styling
         self.enabled_switch.text_font = self.main.medium_font_size
         self.enabled_switch.toggle_size = self.main.small_toggle_size
         self.enabled_switch.applyStyles()
 
-        self.return_switch.text_font = self.main.small_font_size
+        self.return_switch.text_font = self.main.medium_font_size
         self.return_switch.toggle_size = self.main.small_toggle_size
         self.return_switch.applyStyles()
 
-        self.style_switch.text_font = self.main.small_font_size
+        self.style_switch.text_font = self.main.medium_font_size
         self.style_switch.toggle_size = self.main.small_toggle_size
         self.style_switch.applyStyles()
 
-        # StyleSheet
-        self.update_stylesheet()
-
         self.layout().invalidate()
         self.update()
-    
-    def update_stylesheet(self):
-        """
-        Apply the CSS stylesheet to form components.
 
-        Sets padding and styling rules for buttons, combo boxes, and text inputs.
-
-        Returns:
-            None
-        """
-        self.setStyleSheet("""
-            QPushButton {
-                padding: 8px;
-            }
-
-            QComboBox {
-                padding: 8px;
-            }
-
-            QLineEdit {
-                padding: 8px;
-            }
-        """)
-    
     # ----- Event Handlers -----
     def eventFilter(self, obj, event):
         """
@@ -897,3 +886,4 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.populate_tags_input()
         # Reload popup list. Fixing Issue #24
         self.fill_intellisense_popup_list()
+

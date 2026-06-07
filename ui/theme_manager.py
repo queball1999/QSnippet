@@ -1,5 +1,6 @@
 import logging
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +90,13 @@ THEMES: dict[str, dict[str, str]] = {
         "panel":           "#ffffff",
         "card":            "rgba(233, 30, 140, 0.05)",
         "card_hover":      "rgba(233, 30, 140, 0.09)",
-        "input":           "#fff5fa",
-        "hover":           "#fff5fa",
+        "input":           "#ffffff",
+        "hover":           "#f8dae9",
         "text":            "#5c1a3a",
         "text_muted":      "rgba(92, 26, 58, 0.55)",
-        "accent":          "#e91e8c",
+        "accent":          "#f752ad",
         "accent_hover":    "rgba(233, 30, 140, 0.12)",
-        "border_focus":    "#e91e8c",
+        "border_focus":    "#f752ad",
         "selected":        "#fff5fa",
         "highlight":       "rgba(233, 30, 140, 0.1)",
         "danger":          "#c62828",
@@ -149,14 +150,16 @@ class ThemeManager(QObject):
 
     # Public API
 
-    def apply(self, theme_name: str, scale_pct: int = 100, accent_color: str = "system") -> None:
+    def apply(self, theme_name: str, scale_pct: int = 100, accent_color: str = "system", btn_pad_x: int = 8, btn_pad_y: int = 6) -> None:
         """Resolve theme name, build QSS, and set it on QApplication."""
         resolved = self.resolve_theme(theme_name)
         self._theme_name = resolved
         self._scale_pct  = scale_pct
+        self._btn_pad_x  = btn_pad_x
+        self._btn_pad_y  = btn_pad_y
 
         colors = self.resolve_colors(resolved, accent_color)
-        qss    = self.build_qss(colors, scale_pct)
+        qss    = self.build_qss(colors, scale_pct, btn_pad_x, btn_pad_y)
         self.app.setStyleSheet(qss)
         self.apply_font_scale(scale_pct)
         self.force_repaint()
@@ -213,9 +216,19 @@ class ThemeManager(QObject):
         """Push the new accent color into every live QAnimatedSwitch."""
         try:
             from ui.widgets import QAnimatedSwitch
-            for w in self.app.allWidgets():
-                if isinstance(w, QAnimatedSwitch):
-                    w.update_accent(accent)
+            try:
+                from shiboken6 import isValid as is_valid
+            except Exception:
+                is_valid = None
+
+            for w in list(self.app.allWidgets()):
+                try:
+                    if is_valid and not is_valid(w):
+                        continue
+                    if isinstance(w, QAnimatedSwitch):
+                        w.update_accent(accent)
+                except RuntimeError:
+                    continue
         except Exception as e:
             logger.warning("Switch accent update failed: %s", e)
 
@@ -314,15 +327,42 @@ class ThemeManager(QObject):
         setFont() calls (e.g. SnippetTable) pick up the new scaled QFont objects.
         """
         style = self.app.style()
-        for w in self.app.allWidgets():
-            style.unpolish(w)
-            style.polish(w)
-            w.update()
-            if hasattr(w, "applyStyles"):
+        try:
+            from shiboken6 import isValid as is_valid
+        except Exception:
+            is_valid = None
+
+        # Snapshot widgets up front so object churn during repaint does not
+        # invalidate the iterator while we are traversing it.
+        for w in list(self.app.allWidgets()):
+            if w is None:
+                continue
+
+            try:
+                if is_valid and not is_valid(w):
+                    continue
+                style.unpolish(w)
+                style.polish(w)
+                w.update()
+            except RuntimeError:
+                # Wrapper exists but the underlying C++ QObject was deleted.
+                continue
+            except Exception:
+                continue
+
+            for hook_name in ("applyStyles", "refresh_fonts"):
                 try:
-                    w.applyStyles()
-                except Exception:
-                    pass
+                    hook = getattr(w, hook_name, None)
+                except RuntimeError:
+                    continue
+
+                if callable(hook):
+                    try:
+                        hook()
+                    except RuntimeError:
+                        continue
+                    except Exception:
+                        pass
 
     # Font scale
     def apply_font_scale(self, scale_pct: int) -> None:
@@ -334,7 +374,8 @@ class ThemeManager(QObject):
         self.app.setFont(font)
 
     # QSS generation
-    def build_qss(self, c: dict, scale: int) -> str:
+    def build_qss(self, c: dict, scale: int, btn_pad_x: int = 8, btn_pad_y: int = 6) -> str:
+        arrow_variant = "white" if self.is_dark else "dark"
         s   = scale / 100.0
         r4  = max(2, round(4  * s))
         r6  = max(3, round(6  * s))
@@ -345,6 +386,8 @@ class ThemeManager(QObject):
         p8  = max(4, round(8  * s))
         p10 = max(5, round(10 * s))
         p12 = max(6, round(12 * s))
+        bp_x = max(0, round(btn_pad_x * s))
+        bp_y = max(0, round(btn_pad_y * s))
 
         return f"""
 /* Base */
@@ -398,9 +441,47 @@ QSpinBox {{
     color: {c['text']};
     border: 1px solid {c['border']};
     border-radius: {r4}px;
+    padding-right: 2px;
 }}
 QSpinBox:focus {{
     border-color: {c['border_focus']};
+}}
+QSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
+    background-color: {c['input']};
+    border-left: 1px solid {c['border']};
+}}
+QSpinBox::up-button:hover {{
+    background-color: {c['hover']};
+}}
+QSpinBox::up-button:pressed {{
+    background-color: {c['selected']};
+}}
+QSpinBox::up-arrow {{
+    image: url(assets/icons/spinbox-arrow-up-{arrow_variant}.svg);
+    width: 7px;
+    height: 7px;
+}}
+QSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
+    background-color: {c['input']};
+    border-left: 1px solid {c['border']};
+    border-top: 1px solid {c['border']};
+}}
+QSpinBox::down-button:hover {{
+    background-color: {c['hover']};
+}}
+QSpinBox::down-button:pressed {{
+    background-color: {c['selected']};
+}}
+QSpinBox::down-arrow {{
+    image: url(assets/icons/spinbox-arrow-down-{arrow_variant}.svg);
+    width: 7px;
+    height: 7px;
 }}
 
 /* ComboBox */
@@ -410,7 +491,7 @@ QComboBox {{
     border: 1px solid {c['border']};
     border-radius: {r6}px;
     selection-background-color: {c['selected']};
-    padding: {p4}px {p6}px;
+    padding: {p8}px {p6}px;
 }}
 QComboBox:focus {{
     border-color: {c['border_focus']};
@@ -435,8 +516,8 @@ QPushButton {{
     border: 1px solid {c['border']};
     border-radius: {r6}px;
     min-width: 20px;
-    min-height: 12px;
-    padding: {p4}px {p8}px;
+    min-height: 15px;
+    padding: {bp_y}px {bp_x}px;
 }}
 QPushButton:hover {{
     background-color: {c['hover']};
@@ -496,7 +577,8 @@ QCheckBox::indicator:disabled {{
 QTreeView {{
     background-color: {c['window']};
     color: {c['text']};
-    border: none;
+    border: 1px solid {c['border']};
+    border-radius: {r8}px;
     outline: none;
     alternate-background-color: {c['window']};
 }}
@@ -509,7 +591,7 @@ QTreeView::item:hover {{
 }}
 
 QHeaderView::section {{
-    background-color: {c['window']};
+    background-color: {c['hover']};
     color: {c['text']};
     border: none;
     border-bottom: 1px solid {c['border']};
@@ -555,9 +637,6 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background: {c['scrollbar_hover']};
 }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-    height: 0;
-}}
 QScrollBar:horizontal {{
     background: transparent;
     height: 8px;
@@ -571,8 +650,21 @@ QScrollBar::handle:horizontal {{
 QScrollBar::handle:horizontal:hover {{
     background: {c['scrollbar_hover']};
 }}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal,
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {{
+    background: transparent;
+    border: none;
     width: 0;
+}}
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical,
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {{
+    background: transparent;
+    border: none;
+    height: 0;
 }}
 
 /* Menus */
@@ -714,32 +806,17 @@ QPushButton#RestoreDefaultsBtn:hover {{
 /* Settings Dialog */
 QListWidget {{
     border: none;
-    font-size: {round(18 * s)}px;
-}}
-QListWidget#SearchResultsList {{
-    font-size: {round(13 * s)}px;
 }}
 QListWidget::item {{
     padding: {p10}px {p12}px;
     border-radius: 6px;
 }}
 QLabel#SettingsHeader {{
-    font-size: {round(26 * s)}px;
-    font-weight: 600;
+    font-weight: 700;
     padding-bottom: {p10}px;
 }}
-QLabel#SettingsLabel {{
-    font-size: {round(14 * s)}px;
-}}
 QLabel#SettingsCardTitle {{
-    font-size: {round(15 * s)}px;
     font-weight: 600;
-}}
-QLabel#SettingsCardDescription {{
-    font-size: {round(12 * s)}px;
-}}
-QLabel#SettingsChevron {{
-    font-size: {round(20 * s)}px;
 }}
 SettingsCard {{
     border-radius: 8px;
@@ -755,12 +832,47 @@ QPushButton#SettingsResetBtn {{
     max-width: 24px;
     max-height: 24px;
     border-radius: 12px;
-    font-size: {round(14 * s)}px;
     padding: 0px;
 }}
 QPushButton#RestoreDefaultsBtn {{
     border-radius: 6px;
     padding: 8px 12px;
-    font-size: {round(13 * s)}px;
+}}
+
+/* Placeholder dialog */
+QLabel#PanelTitle {{
+    font-weight: bold;
+    padding-bottom: {p4}px;
+}}
+QLabel#FieldLabel {{
+    font-weight: bold;
+}}
+QLabel#FieldHint {{
+    color: {c['text_muted']};
+}}
+QLabel#ErrorLabel {{
+    color: {c['danger']};
+}}
+QLabel#SystemNotice {{
+    color: {c['text_muted']};
+    background-color: {c['panel']};
+    border-radius: {r4}px;
+    padding: {p6}px;
+}}
+
+/* Notice carousel */
+QLabel#NoticeTopLabel {{
+    font-weight: bold;
+}}
+QLabel#NoticeTitleLabel {{
+    font-weight: bold;
+}}
+
+/* Settings toast */
+QLabel#SettingsToast {{
+    background-color: {c['accent']};
+    color: white;
+    padding: {p8}px {p12}px;
+    border-radius: {r6}px;
 }}
 """

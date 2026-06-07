@@ -399,3 +399,4 @@ class MenuBar(QMenuBar):
         # Fallback
         elif hasattr(widget, "insert"):
             widget.insert(token)
+

@@ -18,6 +18,7 @@ class SettingsCard(QWidget):
         title_label = QLabel(title)
         title_label.setObjectName("SettingsCardTitle")
         title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.apply_font_to_label(title_label, "small")
 
         control.setMinimumWidth(100)
 
@@ -31,6 +32,26 @@ class SettingsCard(QWidget):
         desc = QLabel(description.strip())
         desc.setObjectName("SettingsCardDescription")
         desc.setWordWrap(True)
+        self.apply_font_to_label(desc, "small")
 
         root.addLayout(header)
         root.addWidget(desc)
+
+    def apply_font_to_label(self, label: QLabel, font_size: str):
+        """Apply font to label from main app if available."""
+        try:
+            # Navigate to main app: card -> page/subcategory -> dialog -> window -> app
+            widget = self.parent()
+            while widget and not hasattr(widget, 'parent'):
+                widget = widget.parent()
+
+            if widget and hasattr(widget, 'parent'):
+                window = widget.parent()
+                if hasattr(window, 'parent'):
+                    app = window.parent()
+                    font_attr = f"{font_size}_font_size"
+                    if hasattr(app, font_attr):
+                        font = getattr(app, font_attr)
+                        label.setFont(font)
+        except Exception:
+            pass

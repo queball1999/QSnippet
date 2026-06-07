@@ -48,12 +48,13 @@ class SnippetTable(QTreeView):
         logger.info("Initializing SnippetTable")
 
         super().__init__(parent)
+        self.setObjectName("SnippetTable")
         self.main = main
         self.parent = parent
         self.entries = []
 
         # Set Font Size
-        self.setFont(self.main.small_font_size)
+        self.setFont(self.main.medium_font_size)
 
         # Base model
         self.model = QStandardItemModel()
@@ -107,7 +108,7 @@ class SnippetTable(QTreeView):
 
         try:
             header = self.header()
-            header.setFont(QFont("Arial", 12, QFont.Bold))
+            header.setFont(self.main.small_font_size_bold)
 
             # Allow user resizing
             header.setSectionResizeMode(QHeaderView.Interactive)
@@ -835,38 +836,33 @@ class SnippetTable(QTreeView):
 
     def applyStyles(self):
         """
-        Apply styling properties to the table and its widgets.
-
-        Sets fonts, sizes, and updates the stylesheet for consistent appearance
-        with the rest of the application.
+        Apply font and size styling to the table, header, and all items.
 
         Returns:
             None
         """
         logger.debug("Applying SnippetTable styles")
 
-        # Font Sizing
-        self.setFont(self.main.small_font_size)
+        try:
+            self.setFont(self.main.medium_font_size)
 
-        # Button Sizing
+            h = self.header()
+            if h:
+                h.setFont(self.main.medium_font_size)
+                h.viewport().update()
 
-        # Widget Styling
+            def set_item_font(item):
+                item.setFont(self.main.medium_font_size)
+                for i in range(item.rowCount()):
+                    set_item_font(item.child(i))
 
-        # StyleSheet
-        # self.update_stylesheet()
+            source_model = self.model if hasattr(self, "model") else None
+            if source_model:
+                for i in range(source_model.rowCount()):
+                    root_item = source_model.item(i, 0)
+                    if root_item:
+                        set_item_font(root_item)
 
-        self.layout().invalidate()
-        self.update()
-
-    def update_stylesheet(self):
-        """
-        Apply the CSS stylesheet to table components.
-
-        Updates styling rules for the tree view and its related widgets.
-
-        Returns:
-            None
-        """
-        self.setStyleSheet(""" 
-
-        """)
+            self.viewport().update()
+        except Exception:
+            pass

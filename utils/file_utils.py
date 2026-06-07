@@ -896,3 +896,37 @@ class FileUtils:
             logger.debug("User YAML already up to date: %s", user_path)
 
         return merged
+
+    @staticmethod
+    def get_system_fonts(limit: int = None) -> list[str]:
+        """
+        Detect available system fonts.
+
+        Args:
+            limit: Maximum number of fonts to return. None for all.
+
+        Returns:
+            Sorted list of available font family names.
+        """
+        try:
+            from PySide6.QtGui import QFontDatabase
+            db = QFontDatabase()
+            fonts = sorted(set(db.families()))
+
+            # Filter out some system fonts that are not suitable for UI
+            exclude_patterns = [
+                "@", "Symbol", "Webdings", "Wingdings",
+                "[GNOME", "[KDE", "[Monotype",  # System metadata fonts
+            ]
+            filtered = [f for f in fonts if not any(p in f for p in exclude_patterns)]
+
+            if limit:
+                filtered = filtered[:limit]
+
+            logger.debug(f"Detected {len(filtered)} system fonts")
+            return filtered
+
+        except Exception as e:
+            logger.warning(f"Could not detect system fonts: {e}")
+            # Fallback to common fonts
+            return ["Inter", "Arial", "Helvetica", "Segoe UI", "Courier New"]

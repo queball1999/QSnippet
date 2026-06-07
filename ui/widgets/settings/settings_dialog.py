@@ -56,6 +56,7 @@ class SettingsDialog(QDialog):
 
         self.initUI()
         self.build_search_index()
+        self.applyStyles()
 
 
     def initUI(self):
@@ -69,11 +70,13 @@ class SettingsDialog(QDialog):
         left_container.setFixedWidth(260)
 
         self.search = QLineEdit(clearButtonEnabled=True)
+        self.search.setObjectName("SettingsSearch")
         self.search.setFixedWidth(220)
         self.search.setPlaceholderText("Find a setting")
         self.search.textChanged.connect(self.on_search_text_changed)
 
         self.list = QListWidget()
+        self.list.setObjectName("SettingsSidebar")
         self.list.setFixedWidth(220)
         self.list.setFocusPolicy(Qt.NoFocus)
 
@@ -282,6 +285,12 @@ class SettingsDialog(QDialog):
         self.stack.addWidget(page)
         self.stack.setCurrentWidget(page)
 
+        # Newly created sub-pages do not pass through the dialog-wide refresh
+        # done at startup, so apply the same font-role mapping immediately.
+        self._refresh_widget_fonts(page)
+        if hasattr(page, "refresh_breadcrumb_fonts"):
+            page.refresh_breadcrumb_fonts()
+
     def pop_page(self):
         """ Remove the current page and go back to the previous one. """
         if not self._nav_stack:
@@ -387,6 +396,25 @@ class SettingsDialog(QDialog):
             self.save_callback(self.settings)
             self.toast.show_toast()
 
+            # Trigger immediate UI refresh for appearance changes.
+            # NOTE: settings_dialog.settings and window.parent.settings are the SAME
+            # dict reference, so save_settings()'s old != new comparisons are always
+            # False (both sides read the already-mutated dict).  We must drive the
+            # refresh from here instead.
+            if path and path[0] == "appearance":
+                try:
+                    window = self.parent()
+                    if path[1:2] == ["advanced"]:
+                        # Font family / sizes / button sizes changed
+                        if hasattr(window, 'refresh_font_display'):
+                            window.refresh_font_display()
+                    else:
+                        # Theme, ui_scale, or accent_color changed
+                        if hasattr(window, 'refresh_theme_display'):
+                            window.refresh_theme_display()
+                except Exception:
+                    pass
+
     def reset_all_settings(self):
         """ Reset all settings to their default values after user confirmation. """
         msg = QMessageBox(self)
@@ -405,6 +433,14 @@ class SettingsDialog(QDialog):
         # Save the reset settings
         if callable(self.save_callback):
             self.save_callback(self.settings)
+
+        # Full refresh: theme + fonts may have changed
+        try:
+            window = self.parent()
+            if hasattr(window, 'refresh_font_display'):
+                window.refresh_font_display()
+        except Exception:
+            pass
 
         # Rebuild all root pages to reflect the new values
         self._rebuild_pages()
@@ -441,5 +477,81 @@ class SettingsDialog(QDialog):
         if row < self.list.count():
             self.list.setCurrentRow(row)
             self.stack.setCurrentIndex(row)
+
+    def applyStyles(self):
+        """Apply fonts from main app to all widgets."""
+        try:
+            font = self._get_medium_font()
+            self.setFont(font)
+
+            if hasattr(self, 'search') and self.search:
+                self.search.setFont(font)
+            if hasattr(self, 'list') and self.list:
+                self.list.setFont(font)
+            if hasattr(self, 'restore_defaults_btn') and self.restore_defaults_btn:
+                self.restore_defaults_btn.setFont(font)
+            if hasattr(self, 'search_results') and self.search_results:
+                self.search_results.setFont(font)
+
+            for i in range(self.stack.count()):
+                page = self.stack.widget(i)
+                self.apply_font_to_widget_tree(page, font)
+                if hasattr(page, "refresh_breadcrumb_fonts"):
+                    page.refresh_breadcrumb_fonts()
+        except Exception:
+            pass
+
+    def apply_font_to_widget_tree(self, widget, font):
+        """Recursively apply font to all widgets in tree, using size variants by role."""
+        from PySide6.QtWidgets import (
+            QWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton
+        )
+
+        try:
+            main_app = getattr(self.parent(), 'parent', None)
+
+            def _font_for(w):
+                if main_app:
+                    name = w.objectName()
+                    if name == "SettingsHeader":
+                        return getattr(main_app, 'large_font_size_bold', getattr(main_app, 'large_font_size', font))
+                    if name == "SettingsChevron":
+                        return getattr(main_app, 'large_font_size', font)
+                    if name == "SettingsCardTitle":
+                        return getattr(main_app, 'medium_font_size_bold', font)
+                    if name == "SettingsCardDescription":
+                        return getattr(main_app, 'small_font_size', font)
+                return font
+
+            _applicable = (QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton)
+
+            if isinstance(widget, _applicable):
+                widget.setFont(_font_for(widget))
+                if isinstance(widget, QComboBox) and widget.lineEdit():
+                    widget.lineEdit().setFont(_font_for(widget))
+
+            # findChildren with a tuple of types crashes PySide6; use QWidget + isinstance
+            for child in widget.findChildren(QWidget):
+                if isinstance(child, _applicable):
+                    child.setFont(_font_for(child))
+                    if isinstance(child, QComboBox) and child.lineEdit():
+                        child.lineEdit().setFont(_font_for(child))
+        except Exception:
+            pass
+
+    def _refresh_widget_fonts(self, widget):
+        """Recursively update fonts on widget and all children."""
+        try:
+            self.apply_font_to_widget_tree(widget, self._get_medium_font())
+        except Exception:
+            pass
+
+    def _get_medium_font(self):
+        """Return the current medium font from the main app, or a fallback."""
+        from PySide6.QtGui import QFont
+        app = getattr(self.parent(), 'parent', None)
+        if app and hasattr(app, 'medium_font_size'):
+            return app.medium_font_size
+        return QFont()
 
 
