@@ -839,6 +839,31 @@ QPushButton#RestoreDefaultsBtn {{
     padding: 8px 12px;
 }}
 
+/* Snippet popout dialog */
+QLabel#PopoutSnippetName {{
+    font-weight: 700;
+}}
+QLabel#PopoutLabel {{
+    color: {c['text_muted']};
+}}
+
+/* Snippet popout button */
+QPushButton#PopoutBtn {{
+    background: transparent;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
+}}
+QPushButton#PopoutBtn:hover {{
+    background-color: {c['hover']};
+    border-radius: {r4}px;
+}}
+QPushButton#PopoutBtn:pressed {{
+    background-color: {c['selected']};
+    border-radius: {r4}px;
+}}
+
 /* Placeholder dialog */
 QLabel#PanelTitle {{
     font-weight: bold;

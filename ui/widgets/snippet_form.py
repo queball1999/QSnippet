@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
     QPushButton, QHBoxLayout, QComboBox, QSizePolicy,
     QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Signal, Qt, QEvent, QTimer
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import Signal, Qt, QEvent, QTimer, QSize
+from PySide6.QtGui import QTextCursor, QIcon
 from .QAnimatedSwitch import QAnimatedSwitch
 from .CheckableComboBox import CheckableComboBox
 
@@ -223,6 +223,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_label.setObjectName("SnippetLabel")
         self.snippet_label.setToolTip(self.snippet_tooltip)
 
+        self.popout_btn = QPushButton()
+        self.popout_btn.setObjectName("PopoutBtn")
+        self.popout_btn.setToolTip("Open in pop-out editor")
+        self.popout_btn.setFixedSize(26, 26)
+        self.popout_btn.clicked.connect(self.open_popout)
+        self._popout_dialog = None
+
         self.snippet_input = QTextEdit(self)
         self.snippet_input.setObjectName("SnippetInput")
         self.snippet_input.setToolTip(self.snippet_tooltip)
@@ -292,7 +299,12 @@ Snippets come in handy for text you enter often or for standard messages you sen
         layout.addWidget(self.enabled_switch, 2, 0, 1, 1, Qt.AlignLeft)
         layout.addLayout(first_row, 3, 0, 1, 3)
         layout.addLayout(second_row, 4, 0, 1, 3)
-        layout.addWidget(self.snippet_label, 5, 0, 1, 3, Qt.AlignLeft)
+        snippet_header = QHBoxLayout()
+        snippet_header.setContentsMargins(0, 0, 0, 0)
+        snippet_header.addWidget(self.snippet_label, alignment=Qt.AlignVCenter)
+        snippet_header.addStretch()
+        snippet_header.addWidget(self.popout_btn, alignment=Qt.AlignVCenter)
+        layout.addLayout(snippet_header, 5, 0, 1, 3)
         layout.addWidget(self.snippet_input, 6, 0, 1, 3)
         layout.addWidget(self.return_switch, 7, 0, 1, 1, Qt.AlignLeft)
         layout.addWidget(self.style_switch, 7, 1, 1, 1, Qt.AlignLeft)
@@ -801,8 +813,37 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.style_switch.toggle_size = self.main.small_toggle_size
         self.style_switch.applyStyles()
 
+        try:
+            from ui.theme_manager import ThemeManager
+            tm = ThemeManager.instance()
+            icon = QIcon("assets/icons/new-window.svg")
+            if tm:
+                icon = tm.recolor_icon(icon, tm.icon_color())
+            self.popout_btn.setIcon(icon)
+            self.popout_btn.setIconSize(QSize(14, 14))
+        except Exception:
+            pass
+
         self.layout().invalidate()
         self.update()
+
+    # ----- Popout Editor -----
+    def open_popout(self) -> None:
+        if self._popout_dialog and not self._popout_dialog.isHidden():
+            self._popout_dialog.raise_()
+            self._popout_dialog.activateWindow()
+            return
+        from .snippet_popout_dialog import SnippetPopoutDialog
+        self._popout_dialog = SnippetPopoutDialog(
+            snippet_text=self.snippet_input.toPlainText(),
+            snippet_name=self.new_input.text().strip(),
+            parent=self.window()
+        )
+        self._popout_dialog.snippetApplied.connect(self.on_popout_applied)
+        self._popout_dialog.show()
+
+    def on_popout_applied(self, text: str) -> None:
+        self.snippet_input.setPlainText(text)
 
     # ----- Event Handlers -----
     def eventFilter(self, obj, event):
