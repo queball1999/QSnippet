@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from utils.file_utils import FileUtils, validate_snippet_fields
+from utils.file_utils import FileUtils, validate_snippet_fields, parse_and_validate_snippets
 
 
 # Basic filesystem helpers
@@ -233,7 +233,7 @@ class TestMergeDict:
         assert "foo" not in result             # old top-level entry removed
         assert result["category"]["foo"] == 42  # new path uses default value
 
-    def test_setting_leaf_value_preserved(self):
+    def test_settingleaf_value_preserved(self):
         default = {
             "start_at_boot": {
                 "type": "bool", "value": True, "default": True,
@@ -249,7 +249,7 @@ class TestMergeDict:
         result = FileUtils.merge_dict(default, user)
         assert result["start_at_boot"]["value"] is False
 
-    def test_setting_leaf_metadata_refreshed(self):
+    def test_settingleaf_metadata_refreshed(self):
         default = {
             "start_at_boot": {
                 "type": "bool", "value": True, "default": True,
@@ -277,33 +277,33 @@ class TestMergeDict:
 class TestSettingsValidation:
     """Tests for validate_setting_leaf and validate_merged_settings."""
 
-    def _leaf(self, type_, value, default):
+    def leaf(self, type_, value, default):
         return {"type": type_, "value": value, "default": default}
 
-    def test_valid_string_leaf_returns_true(self):
+    def test_valid_stringleaf_returns_true(self):
         """String value for type='string' should return True and leave value unchanged."""
-        leaf = self._leaf("string", "hello", "world")
+        leaf = self.leaf("string", "hello", "world")
         assert FileUtils.validate_setting_leaf("key", leaf) is True
         assert leaf["value"] == "hello"
 
-    def test_valid_boolean_leaf_returns_true(self):
+    def test_valid_booleanleaf_returns_true(self):
         """Bool value for type='boolean' should return True."""
-        leaf = self._leaf("boolean", True, False)
+        leaf = self.leaf("boolean", True, False)
         assert FileUtils.validate_setting_leaf("key", leaf) is True
 
-    def test_valid_integer_leaf_returns_true(self):
+    def test_valid_integerleaf_returns_true(self):
         """Integer value for type='integer' should return True."""
-        leaf = self._leaf("integer", 42, 0)
+        leaf = self.leaf("integer", 42, 0)
         assert FileUtils.validate_setting_leaf("key", leaf) is True
 
-    def test_valid_float_leaf_returns_true(self):
+    def test_valid_floatleaf_returns_true(self):
         """Float value for type='float' should return True."""
-        leaf = self._leaf("float", 3.14, 0.0)
+        leaf = self.leaf("float", 3.14, 0.0)
         assert FileUtils.validate_setting_leaf("key", leaf) is True
 
     def test_invalid_type_resets_to_default(self):
         """Wrong type value should return False and reset leaf value to default."""
-        leaf = self._leaf("boolean", "yes", False)
+        leaf = self.leaf("boolean", "yes", False)
         result = FileUtils.validate_setting_leaf("key", leaf)
         assert result is False
         assert leaf["value"] is False
@@ -316,10 +316,10 @@ class TestSettingsValidation:
 
     def test_unknown_type_returns_true(self):
         """Unrecognised type string should return True (skip validation)."""
-        leaf = self._leaf("custom", object(), None)
+        leaf = self.leaf("custom", object(), None)
         assert FileUtils.validate_setting_leaf("key", leaf) is True
 
-    def test_validate_merged_settings_fixes_nested_leaf(self):
+    def test_validate_merged_settings_fixes_nestedleaf(self):
         """A bad value nested inside a settings dict should be reset to its default."""
         merged = {
             "general": {
@@ -402,3 +402,60 @@ class TestValidateSnippetFieldsControlChars:
     def test_clean_snippet_passes(self):
         """Snippet with no control characters should raise no exception."""
         validate_snippet_fields(dict(self._VALID))
+
+
+class TestParseAndValidateSnippets:
+    """Tests for parse_and_validate_snippets() — in-memory validation path used after decryption."""
+
+    _VALID = {
+        "label": "Test",
+        "trigger": "/test",
+        "snippet": "hello",
+    }
+
+    def test_valid_snippets_returned(self):
+        data = {"snippets": [dict(self._VALID)]}
+        result = parse_and_validate_snippets(data)
+        assert len(result) == 1
+        assert result[0]["trigger"] == "/test"
+
+    def test_private_fields_stripped(self):
+        snippet = {**self._VALID, "_was_encrypted": True, "_vault_locked": True}
+        data = {"snippets": [snippet]}
+        result = parse_and_validate_snippets(data)
+        assert "_was_encrypted" not in result[0]
+        assert "_vault_locked" not in result[0]
+
+    def test_id_field_stripped(self):
+        snippet = {**self._VALID, "id": 42}
+        data = {"snippets": [snippet]}
+        result = parse_and_validate_snippets(data)
+        assert "id" not in result[0]
+
+    def test_missing_required_field_raises_value_error(self):
+        data = {"snippets": [{"label": "X", "trigger": "/x"}]}  # no snippet field
+        with pytest.raises(ValueError, match="Snippet #1"):
+            parse_and_validate_snippets(data)
+
+    def test_empty_snippets_list_returns_empty(self):
+        assert parse_and_validate_snippets({"snippets": []}) == []
+
+    def test_not_a_list_raises(self):
+        with pytest.raises((ValueError, TypeError)):
+            parse_and_validate_snippets({"snippets": "not-a-list"})
+
+    def test_multiple_snippets_all_validated(self):
+        snippets = [
+            {**self._VALID, "trigger": f"/{i}"} for i in range(3)
+        ]
+        data = {"snippets": snippets}
+        result = parse_and_validate_snippets(data)
+        assert len(result) == 3
+
+    def test_second_snippet_error_reports_correct_index(self):
+        snippets = [
+            dict(self._VALID),
+            {"label": "Bad"},  # missing trigger and snippet
+        ]
+        with pytest.raises((ValueError, TypeError), match="Snippet #2"):
+            parse_and_validate_snippets({"snippets": snippets})

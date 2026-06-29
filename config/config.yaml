@@ -7,6 +7,12 @@ support_info:
   email: admin@quynnbell.com
   site: https://qsnippet.com
 
+vault:
+  salt: ""
+  verifier: ""
+  unlock_on_launch: false
+  auto_lock_minutes: 15
+
 images:
   icon_128: "icon_128x128.png"
   icon_64: "icon_64x64.png"

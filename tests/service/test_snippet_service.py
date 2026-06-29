@@ -55,7 +55,7 @@ def test_service_initializes(service, mock_expander, mock_db):
     """Service should initialize with expander and db."""
     assert service.snippet_db is mock_db
     assert service.expander is mock_expander
-    assert service._thread is None
+    assert service.thread is None
     assert service.active() is False
 
 
@@ -68,8 +68,8 @@ def test_start_starts_expander_and_thread(service, mock_expander):
     # Allow thread to spin up
     time.sleep(0.05)
 
-    assert service._thread is not None
-    assert service._thread.is_alive()
+    assert service.thread is not None
+    assert service.thread.is_alive()
     assert service.active() is True
 
 

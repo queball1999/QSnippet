@@ -82,8 +82,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.return_tooltip = """After inserting your snippet, do you need to press return or enter?"""
 
         self.paste_style_tooltip = """QSnippet supports 2 ways to paste your snippet: 
-    • Paste From Clipboard – copies the text to your system clipboard and pastes it in one go.
-    • Simulate Typing – simulates typing each character (useful in apps or fields that block direct clipboard pastes)."""
+    • Paste From Clipboard - copies the text to your system clipboard and pastes it in one go.
+    • Simulate Typing - simulates typing each character (useful in apps or fields that block direct clipboard pastes)."""
 
     def initUI(self):
         """
@@ -228,7 +228,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.popout_btn.setToolTip("Open in pop-out editor")
         self.popout_btn.setFixedSize(26, 26)
         self.popout_btn.clicked.connect(self.open_popout)
-        self._popout_dialog = None
+        self.popout_dialog = None
 
         self.snippet_input = QTextEdit(self)
         self.snippet_input.setObjectName("SnippetInput")
@@ -335,6 +335,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         self.folder_input.setCurrentText("Default")
         self.entry_id = None
+        self.entry_is_encrypted = False
+        self.snippet_input.setReadOnly(False)
+        self.snippet_input.setPlaceholderText(
+            "Text that appears when you type a shortcut. Type { to insert placeholders..."
+        )
         self.new_input.clear()
         self.trigger_input.clear()
         self.snippet_input.clear()
@@ -359,9 +364,38 @@ Snippets come in handy for text you enter often or for standard messages you sen
             None
         """
         self.entry_id = entry.get("id")
+        self.entry_is_encrypted = bool(entry.get("is_encrypted", False))
         self.new_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
-        self.snippet_input.setPlainText(entry.get('snippet', ''))
+
+        # Vault: decrypt if encrypted and unlocked; show placeholder if locked
+        raw_snippet = entry.get('snippet', '')
+        if self.entry_is_encrypted:
+            try:
+                from utils.vault_manager import VaultManager
+                vm = VaultManager.get_instance()
+                if vm.is_unlocked():
+                    raw_snippet = vm.decrypt(raw_snippet)
+                    vm.reset_activity_timer()
+                    self.snippet_input.setPlaceholderText(
+                        "Text that appears when you type a shortcut. Type { to insert placeholders..."
+                    )
+                    self.snippet_input.setReadOnly(False)
+                else:
+                    raw_snippet = ""
+                    self.snippet_input.setPlaceholderText(
+                        "Vault locked - click the lock icon in the folder tree to unlock."
+                    )
+                    self.snippet_input.setReadOnly(True)
+            except Exception:
+                raw_snippet = ""
+        else:
+            self.snippet_input.setPlaceholderText(
+                "Text that appears when you type a shortcut. Type { to insert placeholders..."
+            )
+            self.snippet_input.setReadOnly(False)
+
+        self.snippet_input.setPlainText(raw_snippet)
         self.enabled_switch.setChecked(entry.get('enabled', True))
         self.folder_input.setCurrentText(entry.get('folder', 'Default'))
         self.style_switch.setChecked(entry.get('paste_style', 'Clipboard') == 'Clipboard')
@@ -815,7 +849,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         try:
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             icon = QIcon("assets/icons/new-window.svg")
             if tm:
                 icon = tm.recolor_icon(icon, tm.icon_color())
@@ -829,18 +863,18 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
     # ----- Popout Editor -----
     def open_popout(self) -> None:
-        if self._popout_dialog and not self._popout_dialog.isHidden():
-            self._popout_dialog.raise_()
-            self._popout_dialog.activateWindow()
+        if self.popout_dialog and not self.popout_dialog.isHidden():
+            self.popout_dialog.raise_()
+            self.popout_dialog.activateWindow()
             return
         from .snippet_popout_dialog import SnippetPopoutDialog
-        self._popout_dialog = SnippetPopoutDialog(
+        self.popout_dialog = SnippetPopoutDialog(
             snippet_text=self.snippet_input.toPlainText(),
             snippet_name=self.new_input.text().strip(),
             parent=self.window()
         )
-        self._popout_dialog.snippetApplied.connect(self.on_popout_applied)
-        self._popout_dialog.show()
+        self.popout_dialog.snippetApplied.connect(self.on_popout_applied)
+        self.popout_dialog.show()
 
     def on_popout_applied(self, text: str) -> None:
         self.snippet_input.setPlainText(text)

@@ -84,6 +84,34 @@ def sanitize_snippet(snippet: dict) -> dict:
     return {k: v for k, v in snippet.items() if k in ALLOWED_SNIPPET_FIELDS}
 
 
+def parse_and_validate_snippets(data: dict) -> list:
+    """Validate and sanitize a pre-parsed snippets dict (no file I/O).
+
+    Identical to the validation pass in :func:`FileUtils.import_snippets_yaml`
+    but operates on an already-parsed dict rather than a file path.  Used when
+    the file has been decrypted in memory before validation.
+
+    Args:
+        data (dict): Parsed YAML dict, expected to contain a ``snippets`` list.
+
+    Returns:
+        list[dict]: Validated and sanitized snippet list.
+
+    Raises:
+        ValueError: If structure or field validation fails.
+        TypeError: If a field has an unexpected type.
+    """
+    snippets = validate_snippets_list(data)
+    validated = []
+    for idx, snippet in enumerate(snippets):
+        try:
+            validate_snippet_fields(snippet)
+            validated.append(sanitize_snippet(snippet))
+        except (ValueError, TypeError) as exc:
+            raise type(exc)(f"Snippet #{idx + 1} validation failed: {exc}") from None
+    return validated
+
+
 def validate_snippets_list(data: dict) -> list:
     """
     Validate and extract snippets list from parsed YAML.
@@ -263,9 +291,9 @@ class FileUtils:
             with path.open("r", encoding="utf-8") as f:
                 # Platform-specific timeout (signal only works on Unix)
                 if sys.platform != "win32":
-                    def _timeout_handler(signum, frame):
+                    def timeout_handler(signum, frame):
                         raise TimeoutError(f"YAML parsing exceeded {YAML_PARSE_TIMEOUT} second timeout")
-                    signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.signal(signal.SIGALRM, timeout_handler)
                     signal.alarm(YAML_PARSE_TIMEOUT)
 
                 try:

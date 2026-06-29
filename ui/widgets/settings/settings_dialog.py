@@ -34,15 +34,17 @@ class SearchResult:
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: dict, save_callback, parent=None):
+    def __init__(self, settings: dict, save_callback, parent=None, extra_pages=None):
         super().__init__(parent)
         self.toast = SettingsToast(self)
 
         self.settings = settings
         self.save_callback = save_callback
-        self._last_sidebar_row = -1
-        self._nav_stack: list[QWidget] = []
-        self._search_index: list[SearchResult] = []
+        self.last_sidebar_row = -1
+        self.nav_stack: list[QWidget] = []
+        self.search_index: list[SearchResult] = []
+        self.extra_pages: list[tuple] = extra_pages or []
+        self.extra_page_widgets: list[QWidget] = []
 
         # Adding search debounce timer
         self.search_timer = QTimer(self)
@@ -107,6 +109,7 @@ class SettingsDialog(QDialog):
         root.addWidget(self.stack)
 
         self.build()
+        self.build_extra_pages()
         self.list.itemClicked.connect(self.on_sidebar_changed)
         self.list.setCurrentRow(0)
 
@@ -114,6 +117,10 @@ class SettingsDialog(QDialog):
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
 
     # ----- BUILD -----
+
+    @property
+    def root_page_count(self) -> int:
+        return len(self.settings) + len(self.extra_pages)
 
     def build(self):
         """ Build the sidebar and root pages. """
@@ -130,9 +137,17 @@ class SettingsDialog(QDialog):
             )
             self.stack.addWidget(page)
 
+    def build_extra_pages(self):
+        """Append non-settings sidebar pages (e.g. Vault) after the generated pages."""
+        self.extra_page_widgets.clear()
+        for label, widget in self.extra_pages:
+            self.list.addItem(QListWidgetItem(label))
+            self.stack.addWidget(widget)
+            self.extra_page_widgets.append(widget)
+
     def build_search_index(self):
         """ Build the search index for all settings. """
-        self._search_index.clear()
+        self.search_index.clear()
 
         def walk(category, node, path):
             for key, value in node.items():
@@ -143,7 +158,7 @@ class SettingsDialog(QDialog):
                     desc = value.get("description", "")
                     text = f"{label} {desc}".lower()
 
-                    self._search_index.append(
+                    self.search_index.append(
                         SearchResult(
                             category=category,
                             path=new_path,
@@ -192,7 +207,7 @@ class SettingsDialog(QDialog):
             self.reset_navigation()
             return
 
-        matches = [r for r in self._search_index if text in r.text][:15]
+        matches = [r for r in self.search_index if text in r.text][:15]
 
         if not matches:
             self.search_results.hide()
@@ -226,7 +241,7 @@ class SettingsDialog(QDialog):
         Navigate to the full path of a setting.
         Returns the final page widget.
         """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         category = path[0]
         index = list(self.settings.keys()).index(category)
@@ -252,7 +267,7 @@ class SettingsDialog(QDialog):
         Navigate only to the parent category of a leaf setting.
         Returns (page, leaf_key)
         """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         category = path[0]
         index = list(self.settings.keys()).index(category)
@@ -280,24 +295,24 @@ class SettingsDialog(QDialog):
         """ Add a new page to the navigation stack. """
         current = self.stack.currentWidget()
         if current:
-            self._nav_stack.append(current)
+            self.nav_stack.append(current)
 
         self.stack.addWidget(page)
         self.stack.setCurrentWidget(page)
 
         # Newly created sub-pages do not pass through the dialog-wide refresh
         # done at startup, so apply the same font-role mapping immediately.
-        self._refresh_widget_fonts(page)
+        self.refresh_widget_fonts(page)
         if hasattr(page, "refresh_breadcrumb_fonts"):
             page.refresh_breadcrumb_fonts()
 
     def pop_page(self):
         """ Remove the current page and go back to the previous one. """
-        if not self._nav_stack:
+        if not self.nav_stack:
             return
 
         current = self.stack.currentWidget()
-        previous = self._nav_stack.pop()
+        previous = self.nav_stack.pop()
 
         self.stack.setCurrentWidget(previous)
         self.stack.removeWidget(current)
@@ -306,36 +321,37 @@ class SettingsDialog(QDialog):
     def pop_pages(self, count: int):
         """ Pop multiple pages from the navigation stack. """
         for _ in range(count):
-            if not self._nav_stack:
+            if not self.nav_stack:
                 break
             self.pop_page()
 
     def reset_navigation(self, select_row=0):
         """ Reset navigation to a specific root page. """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
         self.stack.setCurrentIndex(select_row)
         self.list.setCurrentRow(select_row)
 
         for i in range(self.stack.count()):
             page = self.stack.widget(i)
-            page.apply_search_highlight("")
+            if hasattr(page, "apply_search_highlight"):
+                page.apply_search_highlight("")
 
     def on_sidebar_changed(self, item: QListWidgetItem):
         """ Handle when the user clicks a sidebar item """
         row = self.list.row(item)
 
         # If user clicked the same root again, reset navigation and return
-        if row == self._last_sidebar_row:
+        if row == self.last_sidebar_row:
             self.reset_navigation(row)
             return
 
-        self._last_sidebar_row = row
+        self.last_sidebar_row = row
 
         # Clear deep navigation
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         # Remove all stacked sub-pages (keep root pages only)
-        root_count = len(self.settings)
+        root_count = self.root_page_count
         while self.stack.count() > root_count:
             widget = self.stack.widget(self.stack.count() - 1)
             self.stack.removeWidget(widget)
@@ -428,7 +444,7 @@ class SettingsDialog(QDialog):
             return
 
         # Walk the settings tree and reset all values to defaults
-        self._reset_defaults_recursive(self.settings)
+        self.reset_defaults_recursive(self.settings)
 
         # Save the reset settings
         if callable(self.save_callback):
@@ -443,10 +459,10 @@ class SettingsDialog(QDialog):
             pass
 
         # Rebuild all root pages to reflect the new values
-        self._rebuild_pages()
+        self.rebuild_pages()
         self.toast.show_toast()
 
-    def _reset_defaults_recursive(self, node: dict):
+    def reset_defaults_recursive(self, node: dict):
         """ Recursively reset all leaf settings that have a 'default' key. """
         for key, value in node.items():
             if not isinstance(value, dict):
@@ -455,25 +471,30 @@ class SettingsDialog(QDialog):
             if "value" in value and "default" in value:
                 value["value"] = value["default"]
             else:
-                self._reset_defaults_recursive(value)
+                self.reset_defaults_recursive(value)
 
-    def _rebuild_pages(self):
+    def rebuild_pages(self):
         """ Tear down and rebuild all root category pages. """
-        # Clear navigation stack
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
-        # Remove all pages from the stack
+        # Detach extra page widgets before destroying everything
+        for widget in self.extra_page_widgets:
+            self.stack.removeWidget(widget)
+        self.extra_page_widgets.clear()
+
+        # Remove and destroy all remaining (generated) pages
         while self.stack.count() > 0:
             widget = self.stack.widget(0)
             self.stack.removeWidget(widget)
             widget.deleteLater()
 
-        # Rebuild
+        # Rebuild generated pages then re-attach extra pages
         self.build()
         self.build_search_index()
+        self.build_extra_pages()
 
         # Restore sidebar selection
-        row = max(0, self._last_sidebar_row)
+        row = max(0, self.last_sidebar_row)
         if row < self.list.count():
             self.list.setCurrentRow(row)
             self.stack.setCurrentIndex(row)
@@ -481,7 +502,7 @@ class SettingsDialog(QDialog):
     def applyStyles(self):
         """Apply fonts from main app to all widgets."""
         try:
-            font = self._get_medium_font()
+            font = self.get_medium_font()
             self.setFont(font)
 
             if hasattr(self, 'search') and self.search:
@@ -498,6 +519,8 @@ class SettingsDialog(QDialog):
                 self.apply_font_to_widget_tree(page, font)
                 if hasattr(page, "refresh_breadcrumb_fonts"):
                     page.refresh_breadcrumb_fonts()
+                if hasattr(page, "applyStyles"):
+                    page.applyStyles()
         except Exception:
             pass
 
@@ -510,7 +533,7 @@ class SettingsDialog(QDialog):
         try:
             main_app = getattr(self.parent(), 'parent', None)
 
-            def _font_for(w):
+            def font_for(w):
                 if main_app:
                     name = w.objectName()
                     if name == "SettingsHeader":
@@ -523,30 +546,30 @@ class SettingsDialog(QDialog):
                         return getattr(main_app, 'small_font_size', font)
                 return font
 
-            _applicable = (QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton)
+            applicable = (QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton)
 
-            if isinstance(widget, _applicable):
-                widget.setFont(_font_for(widget))
+            if isinstance(widget, applicable):
+                widget.setFont(font_for(widget))
                 if isinstance(widget, QComboBox) and widget.lineEdit():
-                    widget.lineEdit().setFont(_font_for(widget))
+                    widget.lineEdit().setFont(font_for(widget))
 
             # findChildren with a tuple of types crashes PySide6; use QWidget + isinstance
             for child in widget.findChildren(QWidget):
-                if isinstance(child, _applicable):
-                    child.setFont(_font_for(child))
+                if isinstance(child, applicable):
+                    child.setFont(font_for(child))
                     if isinstance(child, QComboBox) and child.lineEdit():
-                        child.lineEdit().setFont(_font_for(child))
+                        child.lineEdit().setFont(font_for(child))
         except Exception:
             pass
 
-    def _refresh_widget_fonts(self, widget):
+    def refresh_widget_fonts(self, widget):
         """Recursively update fonts on widget and all children."""
         try:
-            self.apply_font_to_widget_tree(widget, self._get_medium_font())
+            self.apply_font_to_widget_tree(widget, self.get_medium_font())
         except Exception:
             pass
 
-    def _get_medium_font(self):
+    def get_medium_font(self):
         """Return the current medium font from the main app, or a fallback."""
         from PySide6.QtGui import QFont
         app = getattr(self.parent(), 'parent', None)

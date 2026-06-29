@@ -18,10 +18,10 @@ class SnippetPopoutDialog(QDialog):
             Qt.WindowMaximizeButtonHint |
             Qt.WindowMinimizeButtonHint
         )
-        self._build_ui(snippet_text, snippet_name)
+        self.build_ui(snippet_text, snippet_name)
         self.applyStyles()
 
-    def _build_ui(self, snippet_text: str, snippet_name: str) -> None:
+    def build_ui(self, snippet_text: str, snippet_name: str) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)

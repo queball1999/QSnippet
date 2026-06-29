@@ -1,5 +1,4 @@
 import logging
-import time
 from threading import Thread, Event
 from utils.keyboard_utils import SnippetExpander
 from utils.snippet_db import SnippetDB
@@ -35,8 +34,8 @@ class SnippetService():
         )
 
         # Thread control
-        self._thread   = None
-        self._stop_evt = Event()
+        self.thread   = None
+        self.stop_evt = Event()
 
         logger.info("SnippetService initialized successfully")
 
@@ -104,11 +103,10 @@ class SnippetService():
         """
         logger.info("SnippetService monitor thread running...")
 
-        while not self._stop_evt.is_set():
-            time.sleep(1)
+        while not self.stop_evt.wait(timeout=1):
+            pass
 
         logger.info("SnippetService monitor shutting down...")
-        self.expander.stop()
 
     def start(self) -> None:
         """
@@ -120,7 +118,7 @@ class SnippetService():
         Returns:
             None
         """
-        if self._thread and self._thread.is_alive():
+        if self.thread and self.thread.is_alive():
             logger.info("SnippetService already running.")
             return
 
@@ -132,9 +130,9 @@ class SnippetService():
             logger.warning("SnippetExpander was already started; skipping.")
 
         # Now spawn our own thread just to wait for stop requests
-        self._stop_evt.clear()
-        self._thread = Thread(target=self.run_loop, daemon=True)
-        self._thread.start()
+        self.stop_evt.clear()
+        self.thread = Thread(target=self.run_loop, daemon=True)
+        self.thread.start()
         logger.info("SnippetService monitor thread started.")
 
     def stop(self) -> None:
@@ -146,18 +144,17 @@ class SnippetService():
         Returns:
             None
         """
-        if not self._thread:
+        if not self.thread:
             logger.info("SnippetService stop requested, but service was not running")
             return
 
         logger.info("Stopping SnippetService...")
-        self._stop_evt.set()
-        self._thread.join(timeout=5)
+        self.expander.stop()
+        self.stop_evt.set()
+        self.thread.join(timeout=2)
 
-        if self._thread.is_alive():
-            logger.warning(
-                "SnippetService monitor thread did not stop within timeout"
-            )
+        if self.thread.is_alive():
+            logger.warning("SnippetService monitor thread did not stop within timeout")
         else:
             logger.info("SnippetService stopped successfully")
 
@@ -201,9 +198,9 @@ class SnippetService():
                 to stop, otherwise False.
         """
         active = bool(
-            self._thread
-            and self._thread.is_alive()
-            and not self._stop_evt.is_set()
+            self.thread
+            and self.thread.is_alive()
+            and not self.stop_evt.is_set()
         )
         logger.debug(f"SnippetService active state: {active}")
         return active

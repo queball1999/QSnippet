@@ -17,8 +17,8 @@ class ColorPickerWidget(QWidget):
 
     def __init__(self, value: str = "system", parent=None):
         super().__init__(parent)
-        self._value = value if value else "system"
-        self._system_selected = False
+        self.value = value if value else "system"
+        self.system_selected = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -42,7 +42,7 @@ class ColorPickerWidget(QWidget):
         # Refresh whenever the theme changes so the swatch stays in sync
         try:
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             if tm:
                 tm.themeChanged.connect(self.refresh)
         except Exception:
@@ -50,10 +50,10 @@ class ColorPickerWidget(QWidget):
 
     # Public interface
     def get_value(self) -> str:
-        return self._value
+        return self.value
 
     def set_value(self, value: str) -> None:
-        self._value = value if value else "system"
+        self.value = value if value else "system"
         self.refresh()
 
     # Internal helpers
@@ -61,20 +61,20 @@ class ColorPickerWidget(QWidget):
         """Return the effective hex color for the current context."""
         try:
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             if tm:
                 # Pink / Nord always use their own built-in accent
                 if tm.theme_name not in ("dark", "light"):
                     return tm.get_colors()["accent"]
                 # Dark / Light with "system" value → resolve from OS
-                if self._value.lower() == "system":
+                if self.value.lower() == "system":
                     return tm.get_system_accent(tm.is_dark)
         except Exception:
             pass
 
-        if self._value.lower() == "system":
+        if self.value.lower() == "system":
             return "#4fa3ff"
-        return self._value
+        return self.value
 
     def refresh(self) -> None:
         color = self.display_color()
@@ -95,17 +95,17 @@ class ColorPickerWidget(QWidget):
 
         try:
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             is_fixed_theme = tm and tm.theme_name not in ("dark", "light")
         except Exception:
             is_fixed_theme = False
 
         if is_fixed_theme:
             self.label.setText("Theme default")
-        elif self._value.lower() == "system":
+        elif self.value.lower() == "system":
             self.label.setText("System default")
         else:
-            self.label.setText(self._value)
+            self.label.setText(self.value)
 
     def applyStyles(self) -> None:
         """Swatch styling is dynamic via refresh(); this satisfies the standard interface."""
@@ -118,13 +118,13 @@ class ColorPickerWidget(QWidget):
         # If on pink/nord, the accent is fixed - nothing to pick
         try:
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             if tm and tm.theme_name not in ("dark", "light"):
                 return
         except Exception:
             pass
 
-        self._system_selected = False
+        self.system_selected = False
 
         dialog = QColorDialog(QColor(self.display_color()), self)
         dialog.setWindowTitle("Choose Accent Color")
@@ -138,17 +138,17 @@ class ColorPickerWidget(QWidget):
             )
             sys_btn.clicked.connect(lambda: self.pick_system(dialog))
 
-        if dialog.exec() and not self._system_selected:
+        if dialog.exec() and not self.system_selected:
             color = dialog.selectedColor()
             if color.isValid():
-                self._value = color.name()
+                self.value = color.name()
                 self.refresh()
-                self.colorChanged.emit(self._value)
+                self.colorChanged.emit(self.value)
 
     def pick_system(self, dialog) -> None:
         """Called when the user clicks 'Use System Color' in the dialog."""
-        self._system_selected = True
-        self._value = "system"
+        self.system_selected = True
+        self.value = "system"
         self.refresh()
         self.colorChanged.emit("system")
         dialog.accept()

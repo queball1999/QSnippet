@@ -189,6 +189,9 @@ class main():
         # Initialize Snippet DB instance
         self.snippet_db = SnippetDB(self.snippet_db_file)
 
+        if self.snippet_db.was_freshly_created:
+            self.clear_vault_crypto_from_config()
+
         logger.info("Global variables created")
     
     def init_logger(self) -> None:
@@ -403,7 +406,7 @@ class main():
             for name, size in orig_font_sizes.items()
         }
 
-        # Button padding from settings (raw, unscaled — theme manager scales via QSS)
+        # Button padding from settings (raw, unscaled - theme manager scales via QSS)
         button_padding_setting = advanced.get("button_padding", {})
         bpx_dict = button_padding_setting.get("x", {})
         bpy_dict = button_padding_setting.get("y", {})
@@ -479,14 +482,14 @@ class main():
             # the new font family even though we don't walk their trees explicitly.
             self.app.setFont(font)
 
-            _applicable = (
+            applicable = (
                 QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
                 QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
             )
 
-            def _apply_to_tree(root):
+            def apply_to_tree(root):
                 for child in root.findChildren(QWidget):
-                    if isinstance(child, _applicable):
+                    if isinstance(child, applicable):
                         child.setFont(font)
                         if isinstance(child, QComboBox) and child.lineEdit():
                             child.lineEdit().setFont(font)
@@ -497,7 +500,7 @@ class main():
                         child.viewport().update()
 
             for top in self.app.topLevelWidgets():
-                _apply_to_tree(top)
+                apply_to_tree(top)
 
         except Exception as e:
             logger.debug(f"Error applying fonts to all widgets: {e}")
@@ -516,14 +519,14 @@ class main():
 
         # Only monitor if using system theme/accent
         if theme_val == "system" or accent_val == "system":
-            self._last_accent_color = None
+            self.last_accent_color = None
             timer = self.QTimer()
-            timer.timeout.connect(self._check_accent_color_changed)
+            timer.timeout.connect(self.check_accent_color_changed)
             timer.start(2000)  # Check every 2 seconds
             self.accent_color_monitor = timer
             logger.debug("System accent color monitor started")
 
-    def _check_accent_color_changed(self) -> None:
+    def check_accent_color_changed(self) -> None:
         """Check if system accent color has changed and reapply theme if it has."""
         from ui.theme_manager import ThemeManager
 
@@ -537,11 +540,11 @@ class main():
         current_accent = tm.get_system_accent(is_dark)
 
         # If color changed, reapply theme
-        if self._last_accent_color is not None and current_accent != self._last_accent_color:
-            logger.info(f"System accent color changed from {self._last_accent_color} to {current_accent}")
+        if self.last_accent_color is not None and current_accent != self.last_accent_color:
+            logger.info(f"System accent color changed from {self.last_accent_color} to {current_accent}")
             self.apply_theme()
 
-        self._last_accent_color = current_accent
+        self.last_accent_color = current_accent
 
     def apply_theme(self) -> None:
         """Create (or reuse) the ThemeManager and apply the current theme + scale."""
@@ -549,13 +552,13 @@ class main():
 
         appearance = self.settings.get("appearance", {})
 
-        def _val(key, default):
+        def val(key, default):
             v = appearance.get(key, {})
             return v.get("value", default) if isinstance(v, dict) else default
 
-        theme_val  = _val("theme",        "system")
-        scale_pct  = max(50, int(_val("ui_scale",     100)))
-        accent_col = _val("accent_color", "system")
+        theme_val  = val("theme",        "system")
+        scale_pct  = max(50, int(val("ui_scale",     100)))
+        accent_col = val("accent_color", "system")
 
         if not hasattr(self, "theme_manager") or self.theme_manager is None:
             self.theme_manager = ThemeManager(self.app)
@@ -921,6 +924,27 @@ class main():
 
         FileUtils.write_yaml(self.settings_file, self.settings)
         logger.debug("Finished checking notices")
+
+    def clear_vault_crypto_from_config(self) -> None:
+        """Clear vault cryptographic material after a fresh DB creation.
+
+        When the snippets database is recreated from scratch, any vault secrets
+        stored in config.yaml (salt, HMAC, wrapped recovery key) are orphaned -
+        they reference data that no longer exists.  This method removes those
+        keys so the vault is treated as unconfigured while preserving user
+        preferences (auto_lock_minutes, unlock_on_launch).
+        """
+        try:
+            vault_cfg = self.config.get("vault", {})
+            crypto_keys = ("configured", "salt", "hmac", "rec_wrapped_key", "rec_salt")
+            if any(vault_cfg.get(k) for k in crypto_keys):
+                for k in crypto_keys:
+                    vault_cfg.pop(k, None)
+                self.config["vault"] = vault_cfg
+                FileUtils.write_yaml(self.config_file, self.config)
+                logger.warning("Fresh DB detected. Cleared orphaned vault crypto material from config")
+        except Exception:
+            logger.exception("Failed to clear vault crypto from config after fresh DB creation")
 
     def start_program(self):
         """

@@ -14,31 +14,31 @@ except ImportError:
 
     class QFileSystemWatcher:
         def __init__(self, parent=None):
-            self._files = []
+            self.files = []
 
         def addPath(self, path):
-            self._files.append(path)
+            self.files.append(path)
 
         def files(self):
-            return self._files
+            return self.files
 
         def removePath(self, path):
-            if path in self._files:
-                self._files.remove(path)
+            if path in self.files:
+                self.files.remove(path)
 
     class Signal:
         def __init__(self, *args):
-            self._connections = []
+            self.connections = []
 
         def emit(self, *args):
-            for callback in self._connections:
+            for callback in self.connections:
                 try:
                     callback(*args)
                 except Exception as e:
                     logger.error(f"Error in signal callback: {e}")
 
         def connect(self, callback):
-            self._connections.append(callback)
+            self.connections.append(callback)
 
 class ConfigLoader(QObject):
     """
@@ -67,13 +67,13 @@ class ConfigLoader(QObject):
         self.config_path = os.path.abspath(config_path)
         logger.debug("Config Path: %s", self.config_path)
 
-        self._watcher = QFileSystemWatcher(self)
-        self._watcher.addPath(self.config_path)
-        self._watcher.fileChanged.connect(self.on_file_changed)
+        self.watcher = QFileSystemWatcher(self)
+        self.watcher.addPath(self.config_path)
+        self.watcher.fileChanged.connect(self.on_file_changed)
 
         # Debounce timer to prevent multiple rapid reloads
-        self._debounce_timer = None
-        self._debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
+        self.debounce_timer = None
+        self.debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
 
         # initial load
         self.config = {}
@@ -119,25 +119,25 @@ class ConfigLoader(QObject):
         """
         logger.debug("Config file change detected: %s", path)
 
-        if not self._watcher.files():
+        if not self.watcher.files():
             logger.debug("Re-adding config path to watcher")
-            self._watcher.addPath(self.config_path)
+            self.watcher.addPath(self.config_path)
 
         # If debounce is disabled, reload immediately
-        if self._debounce_delay_ms == 0:
+        if self.debounce_delay_ms == 0:
             self.load_config()
             return
 
         # Cancel previous debounce timer if it exists
-        if self._debounce_timer is not None:
-            self._debounce_timer.stop()
+        if self.debounce_timer is not None:
+            self.debounce_timer.stop()
 
         # Schedule config reload with debounce delay
         from PySide6.QtCore import QTimer
-        self._debounce_timer = QTimer()
-        self._debounce_timer.setSingleShot(True)
-        self._debounce_timer.timeout.connect(self.load_config)
-        self._debounce_timer.start(self._debounce_delay_ms)
+        self.debounce_timer = QTimer()
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self.load_config)
+        self.debounce_timer.start(self.debounce_delay_ms)
 
     def stop(self):
         """
@@ -149,7 +149,7 @@ class ConfigLoader(QObject):
             None
         """
         logger.debug("Stopping ConfigLoader watcher")
-        self._watcher.removePath(self.config_path)
+        self.watcher.removePath(self.config_path)
 
 class SettingsLoader(QObject):
     """
@@ -178,13 +178,13 @@ class SettingsLoader(QObject):
         self.settings_path = os.path.abspath(settings_path)
         logger.debug("Settings Path: %s", self.settings_path)
 
-        self._watcher = QFileSystemWatcher(self)
-        self._watcher.addPath(self.settings_path)
-        self._watcher.fileChanged.connect(self.on_file_changed)
+        self.watcher = QFileSystemWatcher(self)
+        self.watcher.addPath(self.settings_path)
+        self.watcher.fileChanged.connect(self.on_file_changed)
 
         # Debounce timer to prevent multiple rapid reloads
-        self._debounce_timer = None
-        self._debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
+        self.debounce_timer = None
+        self.debounce_delay_ms = debounce_delay_ms  # Configurable delay (0 = no debounce)
 
         # initial load
         self.settings = {}
@@ -283,25 +283,25 @@ class SettingsLoader(QObject):
         """
         logger.debug("Settings file change detected: %s", path)
 
-        if not self._watcher.files():
+        if not self.watcher.files():
             logger.debug("Re-adding settings path to watcher")
-            self._watcher.addPath(self.settings_path)
+            self.watcher.addPath(self.settings_path)
 
         # If debounce is disabled, reload immediately
-        if self._debounce_delay_ms == 0:
+        if self.debounce_delay_ms == 0:
             self.load_settings()
             return
 
         # Cancel previous debounce timer if it exists
-        if self._debounce_timer is not None:
-            self._debounce_timer.stop()
+        if self.debounce_timer is not None:
+            self.debounce_timer.stop()
 
         # Schedule settings reload with debounce delay
         from PySide6.QtCore import QTimer
-        self._debounce_timer = QTimer()
-        self._debounce_timer.setSingleShot(True)
-        self._debounce_timer.timeout.connect(self.load_settings)
-        self._debounce_timer.start(self._debounce_delay_ms)
+        self.debounce_timer = QTimer()
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self.load_settings)
+        self.debounce_timer.start(self.debounce_delay_ms)
 
     def stop(self):
         """
@@ -313,4 +313,4 @@ class SettingsLoader(QObject):
             None
         """
         logger.debug("Stopping SettingsLoader watcher")
-        self._watcher.removePath(self.settings_path)
+        self.watcher.removePath(self.settings_path)

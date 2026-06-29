@@ -6,6 +6,7 @@ watchdog
 pyinstaller
 psutil
 pytest
+cryptography
 
 # Windows-only
 pywin32; sys_platform == "win32"

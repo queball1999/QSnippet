@@ -18,7 +18,7 @@ class AppMessageBox(QMessageBox):
             None
         """
         super().__init__(parent)
-        self._icon_path = icon_path
+        self.icon_path = icon_path
 
     def setup(self, title, text, icon, buttons) -> int:
         """
@@ -36,7 +36,7 @@ class AppMessageBox(QMessageBox):
         Returns:
             None
         """
-        self.setWindowIcon(QIcon(self._icon_path) if self._icon_path else QIcon())
+        self.setWindowIcon(QIcon(self.icon_path) if self.icon_path else QIcon())
         self.setWindowTitle(title)
         self.setText(text)
         self.setIcon(icon)
@@ -122,7 +122,7 @@ class AppMessageBox(QMessageBox):
             bool: True if the checkbox was checked, otherwise False.
         """
         box = QMessageBox()
-        box.setWindowIcon(QIcon(self._icon_path) if self._icon_path else QIcon())
+        box.setWindowIcon(QIcon(self.icon_path) if self.icon_path else QIcon())
         box.setWindowTitle(title)
         box.setText(text)
         box.setIcon(QMessageBox.Information)

@@ -119,6 +119,7 @@ class SnippetDB:
         self.db_path = db_path
         self.lock = threading.RLock()
         self.closed = False
+        self.was_freshly_created = False
         logger.debug("SQLite path: %s", db_path)
         self.conn = sqlite3.connect(
             self.db_path,
@@ -129,6 +130,8 @@ class SnippetDB:
         self.configure_connection()
         self.create_table()
         self.create_indexes()
+        self.migrate_vault_schema()
+        self.create_vault_folders_table()
         self.create_custom_placeholders_table()
         self.seed_default_custom_placeholders()
         self.seed_empty_db()
@@ -198,6 +201,8 @@ class SnippetDB:
             item["enabled"] = bool(item["enabled"])
         if "return_press" in item:
             item["return_press"] = bool(item["return_press"])
+        if "is_encrypted" in item:
+            item["is_encrypted"] = bool(item["is_encrypted"])
         return item
 
     def escape_like_value(self, value: str) -> str:
@@ -321,7 +326,7 @@ class SnippetDB:
                 "paste_style": "clipboard",
                 "return_press": False,
                 "folder": "Getting Started",
-                "tags": "default,example",
+                "tags": "default,welcome",
             }
         ]
 
@@ -340,6 +345,7 @@ class SnippetDB:
                         entry,
                     )
                 logger.info("The database has been seeded successfully!")
+                self.was_freshly_created = True
 
         except sqlite3.Error as e:
             logger.exception("Failed to seed database with default snippets")
@@ -1068,6 +1074,229 @@ class SnippetDB:
         except sqlite3.Error as e:
             logger.exception("Failed to delete custom placeholder")
             return False
+
+    # Vault Support
+
+    def migrate_vault_schema(self) -> None:
+        """Add is_encrypted column to snippets if it does not exist (migration)."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(snippets)").fetchall()]
+                if "is_encrypted" not in cols:
+                    conn.execute("ALTER TABLE snippets ADD COLUMN is_encrypted BOOLEAN DEFAULT 0")
+                    logger.info("Migrated: added is_encrypted column to snippets")
+        except sqlite3.Error as exc:
+            logger.warning("Vault schema migration failed: %s", exc)
+
+    def create_vault_folders_table(self) -> None:
+        """Create the vault_folders table if it does not exist."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS vault_folders (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        folder_path TEXT UNIQUE NOT NULL
+                    )
+                """)
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to create vault_folders table: {exc}") from exc
+
+    def add_vault_folder(self, path: str) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("INSERT OR IGNORE INTO vault_folders (folder_path) VALUES (?)", (path,))
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to add vault folder '{path}': {exc}") from exc
+
+    def remove_vault_folder(self, path: str) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("DELETE FROM vault_folders WHERE folder_path = ?", (path,))
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to remove vault folder '{path}': {exc}") from exc
+
+    def get_vault_folders(self) -> List[str]:
+        try:
+            with self.managed_connection() as conn:
+                rows = conn.execute("SELECT folder_path FROM vault_folders").fetchall()
+            return [r[0] for r in rows]
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to get vault folders: {exc}") from exc
+
+    def is_vault_folder(self, path: str) -> bool:
+        try:
+            with self.managed_connection() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM vault_folders WHERE folder_path = ?", (path,)
+                ).fetchone()
+            return row is not None
+        except sqlite3.Error:
+            return False
+
+    def clear_vault_folders(self) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("DELETE FROM vault_folders")
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to clear vault folders: {exc}") from exc
+
+    def get_vault_snippets(self) -> List[Dict[str, Any]]:
+        """Return all snippets that are marked is_encrypted=1."""
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippets WHERE is_encrypted = 1")
+                return [self.normalize_snippet_row(r) for r in cur.fetchall()]
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to get vault snippets: {exc}") from exc
+
+    def get_snippets_by_folder(self, folder: str) -> List[Dict[str, Any]]:
+        """Return all snippets in the given folder path (exact match only)."""
+        try:
+            escaped = self.escape_like_value(folder)
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM snippets WHERE folder = ? OR folder LIKE ? ESCAPE '\\'",
+                    (folder, f"{escaped}/%"),
+                )
+                return [self.normalize_snippet_row(r) for r in cur.fetchall()]
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to get snippets for folder '{folder}': {exc}") from exc
+
+    def update_snippet_content(self, snippet_id: int, content: str) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("UPDATE snippets SET snippet = ? WHERE id = ?", (content, snippet_id))
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to update snippet content for id {snippet_id}: {exc}") from exc
+
+    def bulk_update_snippet_content(self, updates: list) -> None:
+        """Write all (snippet_id, content) pairs in a single atomic transaction."""
+        if not updates:
+            return
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.executemany(
+                    "UPDATE snippets SET snippet = ? WHERE id = ?",
+                    [(content, sid) for sid, content in updates],
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to bulk-update snippet content: {exc}") from exc
+
+    def bulk_encrypt_folder_snippets(self, updates: list) -> None:
+        """Atomically update snippet content and is_encrypted flag for a folder move.
+
+        Args:
+            updates: list of ``(snippet_id, new_content, is_encrypted_flag)`` tuples.
+        """
+        if not updates:
+            return
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.executemany(
+                    "UPDATE snippets SET snippet = ?, is_encrypted = ? WHERE id = ?",
+                    [(content, 1 if flag else 0, sid) for sid, content, flag in updates],
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to bulk-update folder snippets: {exc}") from exc
+
+    def is_under_vault_folder(self, path: str) -> bool:
+        """Return True if path is a vault folder root or is nested inside one.
+
+        Unlike ``is_vault_folder`` (exact match), this walks up the path hierarchy
+        so that e.g. ``"Vault/work"`` returns True when ``"Vault"`` is a vault root.
+        """
+        if self.is_vault_folder(path):
+            return True
+        parts = path.split("/")
+        for depth in range(len(parts) - 1, 0, -1):
+            if self.is_vault_folder("/".join(parts[:depth])):
+                return True
+        return False
+
+    def update_snippet_folder(self, snippet_id: int, folder: str) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("UPDATE snippets SET folder = ? WHERE id = ?", (folder, snippet_id))
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to update snippet folder for id {snippet_id}: {exc}") from exc
+
+    def set_snippet_encrypted(self, snippet_id: int, is_encrypted: bool) -> None:
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE snippets SET is_encrypted = ? WHERE id = ?",
+                    (1 if is_encrypted else 0, snippet_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to set is_encrypted for id {snippet_id}: {exc}") from exc
+
+    def insert_snippet_vault_aware(
+        self,
+        entry: Dict[str, Any],
+        vault_manager=None,
+    ) -> bool:
+        """Insert or update a snippet, auto-encrypting or decrypting based on vault state.
+
+        Inspects the source encryption state (``entry["is_encrypted"]``) and the
+        destination folder to decide whether to encrypt, decrypt, or leave the
+        content unchanged before writing to the database.
+
+        This method is the single gate for all vault encrypt/decrypt transitions.
+        Import, drag-drop, and any future programmatic write should use this
+        instead of ``insert_snippet()`` so the invariant is enforced at the data
+        layer regardless of which UI path triggers the write.
+
+        Args:
+            entry: Snippet data dict.  ``entry["folder"]`` is the **destination**
+                folder; ``entry["is_encrypted"]`` reflects the **current** DB
+                state; ``entry["snippet"]`` holds the current content (an
+                encrypted blob when ``is_encrypted`` is ``True``).
+            vault_manager: A ``VaultManager`` instance used for encrypt/decrypt.
+                Pass ``None`` to skip vault handling (treats as a plain insert).
+
+        Returns:
+            bool: ``True`` if a new snippet was inserted, ``False`` if updated.
+
+        Raises:
+            VaultError: If the snippet must be encrypted/decrypted but the vault
+                is locked (``vault_manager.is_unlocked()`` is ``False``).
+        """
+        from utils.vault_manager import VaultError
+
+        src_encrypted = bool(entry.get("is_encrypted"))
+        dest_is_vault = self.is_vault_folder(entry.get("folder", ""))
+
+        entry = dict(entry)  # don't mutate caller's dict
+        new_is_encrypted = src_encrypted
+
+        if src_encrypted and not dest_is_vault:
+            # Moving out of vault - must decrypt content before storing
+            if not vault_manager or not vault_manager.is_unlocked():
+                raise VaultError(
+                    "Vault must be unlocked to move encrypted snippets out of the vault."
+                )
+            entry["snippet"] = vault_manager.decrypt(entry["snippet"])
+            new_is_encrypted = False
+
+        elif not src_encrypted and dest_is_vault:
+            # Moving into vault - must encrypt content before storing
+            if not vault_manager or not vault_manager.is_unlocked():
+                raise VaultError(
+                    "Vault must be unlocked to save snippets into a vault folder."
+                )
+            entry["snippet"] = vault_manager.encrypt(entry["snippet"])
+            new_is_encrypted = True
+
+        result = self.insert_snippet(entry)
+
+        if new_is_encrypted != src_encrypted:
+            snippet_id = entry.get("id")
+            if snippet_id is not None:
+                self.set_snippet_encrypted(snippet_id, new_is_encrypted)
+
+        return result
 
     # Close Connection
     def close(self) -> None:

@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 
 from utils.snippet_db import SnippetDB, validate_snippet_entry, DatabaseValidationError
+from utils.vault_manager import VaultManager, VaultError
 
 
 def test_db_initializes_and_seeds(temp_snippet_db_path):
@@ -498,3 +499,279 @@ def test_insert_snippet_works_without_unique_trigger_constraint(tmp_path):
     assert len(rows) == 1
     assert rows[0]["label"] == "Legacy Two"
     assert rows[0]["snippet"] == "two"
+
+
+# Vault schema & DB methods
+
+class TestVaultSchema:
+    """is_encrypted column is added to new and migrated databases."""
+
+    def test_is_encrypted_present_in_new_db(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        snippets = db.get_all_snippets()
+        assert len(snippets) >= 1
+        assert "is_encrypted" in snippets[0]
+        assert snippets[0]["is_encrypted"] is False
+
+    def test_is_encrypted_defaults_false_on_insert(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({
+            "enabled": True, "label": "Vault Test", "trigger": "/vt",
+            "snippet": "plain", "paste_style": "clipboard",
+            "return_press": False, "folder": "", "tags": "",
+        })
+        row = next(s for s in db.get_all_snippets() if s["trigger"] == "/vt")
+        assert row["is_encrypted"] is False
+
+    def test_migrate_adds_column_to_existing_db(self, tmp_path):
+        """A database created without is_encrypted gets the column added."""
+        db_path = tmp_path / "legacy.db"
+
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE snippets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                enabled BOOLEAN DEFAULT True,
+                label TEXT NOT NULL,
+                trigger TEXT UNIQUE NOT NULL,
+                snippet TEXT NOT NULL,
+                paste_style TEXT,
+                return_press BOOLEAN DEFAULT False,
+                folder TEXT,
+                tags TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE custom_placeholders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                value TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO snippets (enabled, label, trigger, snippet, paste_style, return_press, folder, tags) "
+            "VALUES (1, 'Old', '/old', 'content', 'clipboard', 0, '', '')"
+        )
+        conn.commit()
+        conn.close()
+
+        db = SnippetDB(Path(db_path))
+        rows = db.get_all_snippets()
+        assert "is_encrypted" in rows[0]
+        assert rows[0]["is_encrypted"] is False
+
+
+class TestVaultFolders:
+    """vault_folders table operations."""
+
+    def test_add_and_get_vault_folder(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("Secrets")
+        assert db.get_vault_folders() == ["Secrets"]
+
+    def test_add_duplicate_folder_is_safe(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("Secrets")
+        db.add_vault_folder("Secrets")
+        assert db.get_vault_folders().count("Secrets") == 1
+
+    def test_is_vault_folder_true(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("Private")
+        assert db.is_vault_folder("Private") is True
+
+    def test_is_vault_folder_false(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        assert db.is_vault_folder("NotAVaultFolder") is False
+
+    def test_remove_vault_folder(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("Temp")
+        db.remove_vault_folder("Temp")
+        assert "Temp" not in db.get_vault_folders()
+
+    def test_remove_nonexistent_is_safe(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.remove_vault_folder("Ghost")  # should not raise
+
+    def test_clear_vault_folders(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("A")
+        db.add_vault_folder("B")
+        db.clear_vault_folders()
+        assert db.get_vault_folders() == []
+
+    def test_multiple_folders(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        for name in ["Alpha", "Beta", "Gamma"]:
+            db.add_vault_folder(name)
+        folders = db.get_vault_folders()
+        assert set(folders) == {"Alpha", "Beta", "Gamma"}
+
+
+class TestVaultSnippetOps:
+    """Vault-specific snippet operations: get_vault_snippets, update_snippet_content,
+    update_snippet_folder, set_snippet_encrypted, get_snippets_by_folder."""
+
+    _BASE = {
+        "enabled": True, "label": "Secret", "trigger": "/sec",
+        "snippet": "plain text", "paste_style": "clipboard",
+        "return_press": False, "folder": "Vault", "tags": "",
+    }
+
+    def insert(self, db, extra=None):
+        entry = dict(self._BASE)
+        if extra:
+            entry.update(extra)
+        db.insert_snippet(entry)
+        return next(s for s in db.get_all_snippets() if s["trigger"] == entry["trigger"])
+
+    def test_get_vault_snippets_empty_when_none_encrypted(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        assert db.get_vault_snippets() == []
+
+    def test_set_and_get_vault_snippets(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        row = self.insert(db)
+        db.set_snippet_encrypted(row["id"], True)
+
+        vault = db.get_vault_snippets()
+        assert len(vault) == 1
+        assert vault[0]["id"] == row["id"]
+        assert vault[0]["is_encrypted"] is True
+
+    def test_set_snippet_encrypted_false(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        row = self.insert(db)
+        db.set_snippet_encrypted(row["id"], True)
+        db.set_snippet_encrypted(row["id"], False)
+
+        assert db.get_vault_snippets() == []
+        updated = db.get_snippet(row["id"])
+        assert updated["is_encrypted"] is False
+
+    def test_update_snippet_content(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        row = self.insert(db)
+        db.update_snippet_content(row["id"], "ENCRYPTED_BLOB")
+        updated = db.get_snippet(row["id"])
+        assert updated["snippet"] == "ENCRYPTED_BLOB"
+
+    def test_update_snippet_folder(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        row = self.insert(db)
+        db.update_snippet_folder(row["id"], "Safe Landing")
+        updated = db.get_snippet(row["id"])
+        assert updated["folder"] == "Safe Landing"
+
+    def test_get_snippets_by_folder_exact(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        self.insert(db)
+        rows = db.get_snippets_by_folder("Vault")
+        assert len(rows) >= 1
+        assert all(r["folder"] == "Vault" for r in rows)
+
+    def test_get_snippets_by_folder_includes_subfolders(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        self.insert(db)                                              # folder="Vault"
+        self.insert(db, {"trigger": "/sub", "folder": "Vault/Sub"}) # sub-folder
+        rows = db.get_snippets_by_folder("Vault")
+        triggers = {r["trigger"] for r in rows}
+        assert "/sec" in triggers
+        assert "/sub" in triggers
+
+    def test_get_snippets_by_folder_excludes_others(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        self.insert(db, {"trigger": "/other", "folder": "Other"})
+        rows = db.get_snippets_by_folder("Vault")
+        assert not any(r["trigger"] == "/other" for r in rows)
+
+
+@pytest.fixture(autouse=True)
+def reset_vault_singleton():
+    vm = VaultManager.get_instance()
+    vm.lock()
+    vm.set_auto_lock_minutes(0)
+    yield
+    vm.lock()
+
+
+class TestInsertSnippetVaultAware:
+    """Tests for insert_snippet_vault_aware() — the single vault-encryption gate."""
+
+    _BASE = {
+        "enabled": True, "label": "Test", "trigger": "/t",
+        "snippet": "plain text", "paste_style": "clipboard",
+        "return_press": False, "folder": "General", "tags": "",
+    }
+
+    def vm_setup(self) -> tuple:
+        vm = VaultManager.get_instance()
+        cfg = vm.setup("test-password", {})
+        return vm, cfg
+
+    def test_plain_insert_into_normal_folder(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        result = db.insert_snippet_vault_aware(dict(self._BASE))
+        assert result is True
+        row = db.get_snippet_by_trigger("/t")
+        assert row["snippet"] == "plain text"
+        assert not row.get("is_encrypted")
+
+    def test_insert_into_vault_folder_encrypts(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        vm, _ = self.vm_setup()
+        db.add_vault_folder("Secret")
+        entry = {**self._BASE, "folder": "Secret", "trigger": "/sec"}
+        db.insert_snippet_vault_aware(entry, vault_manager=vm)
+        row = db.get_snippet_by_trigger("/sec")
+        assert row["is_encrypted"] is True
+        assert row["snippet"] != "plain text"
+
+    def test_insert_into_vault_folder_decryptable(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        vm, _ = self.vm_setup()
+        db.add_vault_folder("Secret")
+        entry = {**self._BASE, "folder": "Secret", "trigger": "/dec"}
+        db.insert_snippet_vault_aware(entry, vault_manager=vm)
+        row = db.get_snippet_by_trigger("/dec")
+        assert vm.decrypt(row["snippet"]) == "plain text"
+
+    def test_insert_into_vault_folder_locked_raises(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        vm, _ = self.vm_setup()
+        vm.lock()
+        db.add_vault_folder("Locked")
+        entry = {**self._BASE, "folder": "Locked", "trigger": "/locked"}
+        with pytest.raises(VaultError):
+            db.insert_snippet_vault_aware(entry, vault_manager=vm)
+
+    def test_encrypted_snippet_moved_to_normal_folder_decrypts(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        vm, _ = self.vm_setup()
+        db.add_vault_folder("Secret")
+        entry = {**self._BASE, "folder": "Secret", "trigger": "/move"}
+        db.insert_snippet_vault_aware(entry, vault_manager=vm)
+        row = db.get_snippet_by_trigger("/move")
+
+        # Move out of vault — is_encrypted=True, destination is non-vault folder
+        out_entry = {**row, "folder": "General", "is_encrypted": True}
+        db.insert_snippet_vault_aware(out_entry, vault_manager=vm)
+        moved = db.get_snippet_by_trigger("/move")
+        assert moved["snippet"] == "plain text"
+        assert not moved.get("is_encrypted")
+
+    def test_no_vault_manager_normal_folder_succeeds(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        entry = {**self._BASE, "trigger": "/novm"}
+        result = db.insert_snippet_vault_aware(entry, vault_manager=None)
+        assert result is True
+        assert db.get_snippet_by_trigger("/novm")["snippet"] == "plain text"
+
+    def test_no_vault_manager_vault_folder_raises(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.add_vault_folder("Secret")
+        entry = {**self._BASE, "folder": "Secret", "trigger": "/novm2"}
+        with pytest.raises(VaultError):
+            db.insert_snippet_vault_aware(entry, vault_manager=None)

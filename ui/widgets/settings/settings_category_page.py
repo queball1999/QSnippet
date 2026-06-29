@@ -36,12 +36,12 @@ class SettingsCategoryPage(QWidget):
         self.search_targets = {}
 
         # Track controls for reset: {key: (control_widget, reset_btn, meta)}
-        self._controls: dict[str, tuple[QWidget, QPushButton, dict]] = {}
+        self.controls: dict[str, tuple[QWidget, QPushButton, dict]] = {}
 
         # Adding save debounce
-        self._emit_timers: dict[str, QTimer] = {}
+        self.emit_timers: dict[str, QTimer] = {}
         self.pending_values: dict[str, object] = {}
-        self._breadcrumb_labels: list[QLabel] = []
+        self.breadcrumb_labels: list[QLabel] = []
 
         self.initUI()
 
@@ -142,7 +142,7 @@ class SettingsCategoryPage(QWidget):
 
             # Create reset button (visible only when value != default)
             reset_btn = self.create_reset_button(key, meta)
-            self._controls[key] = (control, reset_btn, meta)
+            self.controls[key] = (control, reset_btn, meta)
 
             card = SettingsCard(
                 title=title,
@@ -165,7 +165,7 @@ class SettingsCategoryPage(QWidget):
         The current (last) segment is non-clickable.
         """
         depth = len(self.path)
-        self._breadcrumb_labels.clear()
+        self.breadcrumb_labels.clear()
 
         for i, segment in enumerate(self.path):
             is_last = (i == depth - 1)
@@ -174,7 +174,7 @@ class SettingsCategoryPage(QWidget):
             label = QLabel(title)
             label.setObjectName("SettingsHeader")
             self.apply_breadcrumb_font(label)
-            self._breadcrumb_labels.append(label)
+            self.breadcrumb_labels.append(label)
 
             if not is_last:
                 # Clickable ancestor - pops back to this depth
@@ -188,12 +188,12 @@ class SettingsCategoryPage(QWidget):
                 separator = QLabel(" › ")
                 separator.setObjectName("SettingsHeader")
                 self.apply_breadcrumb_font(separator)
-                self._breadcrumb_labels.append(separator)
+                self.breadcrumb_labels.append(separator)
                 layout.addWidget(separator)
 
     def refresh_breadcrumb_fonts(self):
         """Re-apply current breadcrumb fonts, including already-rendered root labels."""
-        for label in self._breadcrumb_labels:
+        for label in self.breadcrumb_labels:
             if label is not None:
                 self.apply_breadcrumb_font(label)
 
@@ -263,20 +263,20 @@ class SettingsCategoryPage(QWidget):
 
     def update_reset_visibility(self, key: str, current_value):
         """ Show or hide the reset button based on whether value differs from default. """
-        if key not in self._controls:
+        if key not in self.controls:
             return
 
-        _, reset_btn, meta = self._controls[key]
+        _, reset_btn, meta = self.controls[key]
         has_default = "default" in meta
         is_changed = has_default and current_value != meta.get("default")
         reset_btn.setVisible(is_changed)
 
     def reset_setting(self, key: str):
         """ Reset a single setting to its default value. """
-        if key not in self._controls:
+        if key not in self.controls:
             return
 
-        control, reset_btn, meta = self._controls[key]
+        control, reset_btn, meta = self.controls[key]
         default = meta.get("default")
 
         if default is None:
@@ -342,7 +342,7 @@ class SettingsCategoryPage(QWidget):
         """
         changed = False
 
-        for key, (control, reset_btn, meta) in self._controls.items():
+        for key, (control, reset_btn, meta) in self.controls.items():
             if "default" not in meta:
                 continue
             if meta.get("value") == meta.get("default"):
@@ -360,7 +360,7 @@ class SettingsCategoryPage(QWidget):
         """
         Debounced change emitter.
         """
-        control, _, meta = self._controls.get(key, (None, None, {}))
+        control, _, meta = self.controls.get(key, (None, None, {}))
         old_value = meta.get("value")
         full_path = self.path + [key]
 
@@ -373,13 +373,13 @@ class SettingsCategoryPage(QWidget):
         self.pending_values[key] = value
         self.update_reset_visibility(key, value)
 
-        if key not in self._emit_timers:
+        if key not in self.emit_timers:
             timer = QTimer(self)
             timer.setSingleShot(True)
             timer.timeout.connect(lambda k=key: self.flush_change(k))
-            self._emit_timers[key] = timer
+            self.emit_timers[key] = timer
 
-        timer = self._emit_timers[key]
+        timer = self.emit_timers[key]
         timer.start(delay)
 
     def flush_change(self, key: str):
@@ -410,7 +410,7 @@ class SettingsCategoryPage(QWidget):
         # --- Bool toggle ---
         if typ in ("bool", "boolean"):
             from ui.theme_manager import ThemeManager
-            tm = ThemeManager.instance()
+            tm = ThemeManager.get_instance()
             accent = tm.get_colors()["accent"] if tm else "#4fa3ff"
             w = QAnimatedSwitch(checked_color=accent)
             w.setChecked(bool(value))

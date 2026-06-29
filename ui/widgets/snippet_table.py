@@ -27,10 +27,15 @@ class SnippetTable(QTreeView):
     deleteFolder = Signal(QStandardItem)  # folder item
     deleteSnippet = Signal(dict)           # entry data
     entrySelected = Signal(object)         # when a snippet is clicked (dict or None)
+    folderSelected = Signal(str)           # when a folder row is clicked (folder path)
     refreshSignal = Signal()    # trigger refresh
     # Emitted when drag-and-drop moves a folder or snippet to a new location
     folderMoved = Signal(str, str)   # old_path, new_path
     snippetMoved = Signal(dict, str) # entry dict, new_folder_path
+    # Vault signals
+    markFolderAsVault = Signal(object)    # folder QStandardItem
+    removeFolderVault = Signal(object)    # folder QStandardItem
+    vaultFolderClicked = Signal(str)      # folder path - emitted when a vault folder is clicked
     def __init__(self, main, parent=None):
         """
         Initialize the SnippetTable widget with model, proxy, and signal connections.
@@ -91,6 +96,9 @@ class SnippetTable(QTreeView):
 
         # Guard flag to suppress on_rows_removed during drag-and-drop moves
         self.is_dragging = False
+
+        # Vault state
+        self.vault_locked = False
 
         logger.info("SnippetTable initialized successfully")
 
@@ -196,20 +204,21 @@ class SnippetTable(QTreeView):
         # Save current expansion state before clearing (only if folders dict exists)
         previous_expansion_state = self.save_expansion_state() if hasattr(self, 'folders') and self.folders else {}
 
-        if not entries:
-            logger.debug("No entries were loaded")
-            return      # if none, return
-        
         self.entries = entries
         self.model.clear()
         self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style','Tags'])
         self.folders = {}  # folder_name > QStandardItem
 
+        vault_locked = getattr(self, "vault_locked", False)
+        vault_folder_set = getattr(self, "vault_folder_set", set())
+
         for entry in entries:
             folder = entry.get('folder', 'Default')
+            # Don't show vault snippet content while the vault is locked
+            if vault_locked and folder in vault_folder_set:
+                continue
             parent = self.get_or_create_folder(folder)
 
-            # Create child snippet row
             label = entry.get('label', '')
             logger.debug("Adding snippet '%s' to folder '%s'", label, folder)
 
@@ -219,10 +228,13 @@ class SnippetTable(QTreeView):
             style_item = QStandardItem(entry.get('paste_style',''))
             tags_item = QStandardItem(entry.get('tags',''))
 
-            # Store full entry dict on first column
             label_item.setData(entry, Qt.UserRole)
-
             parent.appendRow([label_item, trigger_item, enabled_item, style_item, tags_item])
+
+        # Always show vault folders even when empty or vault not yet configured
+        for vault_path in getattr(self, "vault_folder_set", set()):
+            if vault_path not in self.folders:
+                self.get_or_create_folder(vault_path)
 
         # Restore previous expansion state
         if previous_expansion_state:
@@ -250,6 +262,8 @@ class SnippetTable(QTreeView):
         if folder_path in self.folders:
             return self.folders[folder_path]
 
+        vault_folders: set = getattr(self, "vault_folder_set", set())
+
         parts = folder_path.split("/")
         for i, part in enumerate(parts):
             current_path = "/".join(parts[: i + 1])
@@ -258,6 +272,9 @@ class SnippetTable(QTreeView):
 
             folder_item = QStandardItem(part)
             folder_item.setData({"_type": "folder", "path": current_path}, Qt.UserRole)
+
+            if current_path in vault_folders:
+                self.apply_vault_icon(folder_item)
 
             empty_cols = [QStandardItem() for _ in range(4)]
             if i == 0:
@@ -270,6 +287,58 @@ class SnippetTable(QTreeView):
             logger.debug("Created folder node '%s'", current_path)
 
         return self.folders[folder_path]
+
+    def set_vault_folders(self, vault_folder_paths: list) -> None:
+        """Update the set of vault folder paths (used for icons in load_entries)."""
+        self.vault_folder_set = set(vault_folder_paths)
+
+    def set_vault_lock_state(self, is_locked: bool, is_setup: bool = True) -> None:
+        """Update locked state; collapse and clear vault folder rows when locking."""
+        self.vault_locked = is_locked
+        self.vault_is_setup = is_setup
+        if is_locked and hasattr(self, "folders"):
+            self.collapse_vault_folders()
+            self.clear_vault_folder_children()
+
+    def collapse_vault_folders(self) -> None:
+        for folder_path in getattr(self, "vault_folder_set", set()):
+            if folder_path not in getattr(self, "folders", {}):
+                continue
+            try:
+                src_idx = self.model.indexFromItem(self.folders[folder_path])
+                if src_idx.isValid():
+                    self.setExpanded(self.proxy.mapFromSource(src_idx), False)
+            except RuntimeError:
+                pass
+
+    def clear_vault_folder_children(self) -> None:
+        """Remove all snippet rows from vault folder nodes so they cannot be seen while locked."""
+        for folder_path in getattr(self, "vault_folder_set", set()):
+            folder_item = getattr(self, "folders", {}).get(folder_path)
+            if folder_item is None:
+                continue
+            try:
+                row_count = folder_item.rowCount()
+                if row_count:
+                    folder_item.removeRows(0, row_count)
+            except RuntimeError:
+                pass
+
+    def apply_vault_icon(self, item: QStandardItem) -> None:
+        try:
+            from PySide6.QtGui import QIcon
+            from ui.theme_manager import ThemeManager
+            is_locked = getattr(self, "vault_locked", True)
+            is_setup = getattr(self, "vault_is_setup", False)
+            # Show open lock only when vault is configured AND currently unlocked
+            svg = "assets/icons/lock-open.svg" if (is_setup and not is_locked) else "assets/icons/lock.svg"
+            tm = ThemeManager.get_instance()
+            icon = QIcon(svg)
+            if tm:
+                icon = tm.recolor_icon(icon, tm.icon_color())
+            item.setIcon(icon)
+        except Exception:
+            pass
 
     def refresh(self):
         """
@@ -327,7 +396,10 @@ class SnippetTable(QTreeView):
         logger.debug(f"Item Selected: {item}; Data: {data}; Src: {src_idx}")
 
         if isinstance(data, dict):
-            self.entrySelected.emit(data)
+            if data.get("_type") == "folder":
+                self.folderSelected.emit(data.get("path", ""))
+            else:
+                self.entrySelected.emit(data)
         else:
             self.entrySelected.emit(None)
 
@@ -395,13 +467,18 @@ class SnippetTable(QTreeView):
             # Clicked on a folder; show folder context menu
             proxy_idx0 = proxy_idx.sibling(proxy_idx.row(), 0)
             is_expanded = self.isExpanded(proxy_idx0)
-            menu = FolderContextMenu(item, is_expanded, self)
+            folder_path = data.get("path", "")
+            vault_set = getattr(self, "vault_folder_set", set())
+            is_vault = folder_path in vault_set
+            menu = FolderContextMenu(item, is_expanded, is_vault, self)
             menu.addItemRequested.connect(self.addSnippet.emit)
             menu.addFolderRequested.connect(self.addFolder.emit)
             menu.renameRequested.connect(self.renameFolder.emit)
             menu.deleteRequested.connect(self.deleteFolder.emit)
             menu.expandRequested.connect(lambda: self.setExpanded(proxy_idx0, True))
             menu.collapseRequested.connect(lambda: self.setExpanded(proxy_idx0, False))
+            menu.markAsVaultRequested.connect(self.markFolderAsVault.emit)
+            menu.removeVaultRequested.connect(self.removeFolderVault.emit)
         else:
             # Clicked on a snippet; show snippet context menu
             menu = SnippetContextMenu(data, self)
@@ -569,6 +646,12 @@ class SnippetTable(QTreeView):
             return
         parent = self.model.itemFromIndex(parent_idx)
         if parent and parent.rowCount() == 0:
+            # Never remove vault folder nodes - they must always remain visible
+            parent_data = parent.data(Qt.UserRole)
+            if isinstance(parent_data, dict):
+                folder_path = parent_data.get("path", "")
+                if folder_path in getattr(self, "vault_folder_set", set()):
+                    return
             logger.info("Removing empty folder: %s", parent.text())
             grandparent = parent.parent()
             if grandparent:
@@ -601,18 +684,17 @@ class SnippetTable(QTreeView):
                 # Folder rows are identified by _type == "folder" in UserRole
                 idata = item.data(Qt.UserRole) if item else None
                 if item and isinstance(idata, dict) and idata.get("_type") == "folder":
-                    # Let Qt handle clicks in the "branch" area (arrow and indentation)
-                    rect = self.visualRect(idx0)
+                    # Emit vault signal when a vault folder is clicked
+                    folder_path = idata.get("path", "")
+                    vault_set = getattr(self, "vault_folder_set", set())
+                    if folder_path in vault_set:
+                        self.vaultFolderClicked.emit(folder_path)
+                        vault_is_setup = getattr(self, "vault_is_setup", False)
+                        vault_locked   = getattr(self, "vault_locked", False)
+                        if vault_is_setup and not vault_locked:
+                            return super().mousePressEvent(event)  # unlocked — expand normally
+                        return  # locked or not configured — block expansion
 
-                    # The branch area is basically the left gutter before the text.
-                    # indentation() is the per level indent. Add a little extra for the arrow glyph.
-                    branch_area_right = rect.left() + self.indentation() + 24
-
-                    if event.pos().x() <= branch_area_right:
-                        return super().mousePressEvent(event)
-
-                    # Click was on the row content area, toggle expansion ourselves
-                    self.setExpanded(idx0, not self.isExpanded(idx0))
                     return super().mousePressEvent(event)
 
         return super().mousePressEvent(event)
@@ -621,7 +703,8 @@ class SnippetTable(QTreeView):
         """
         Handle mouse double-click events.
 
-        Captures and discards double-click events to prevent default editor activation.
+        Toggles expand/collapse for folder rows. Discards double-clicks on snippet
+        rows to prevent Qt's built-in inline editor from activating.
 
         Args:
             event (QMouseEvent): The mouse double-click event.
@@ -629,6 +712,15 @@ class SnippetTable(QTreeView):
         Returns:
             None
         """
+        if event.button() == Qt.LeftButton:
+            idx = self.indexAt(event.pos())
+            if idx.isValid():
+                idx0 = idx.sibling(idx.row(), 0)
+                src_idx0 = self.proxy.mapToSource(idx0)
+                item = self.model.itemFromIndex(src_idx0)
+                idata = item.data(Qt.UserRole) if item else None
+                if item and isinstance(idata, dict) and idata.get("_type") == "folder":
+                    self.setExpanded(idx0, not self.isExpanded(idx0))
         event.accept()
 
     def dropEvent(self, event):

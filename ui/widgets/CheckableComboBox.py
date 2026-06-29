@@ -74,10 +74,10 @@ class CheckableComboBox(QComboBox):
         self.setEditable(True)
         
         # Guard: popup is ONLY allowed when the user explicitly clicks the widget
-        self._popup_allowed = False
+        self.popup_allowed = False
         
         # Guard: suppress popup/completer interference during programmatic text updates
-        self._programmatic_update = False
+        self.programmatic_update = False
         
         # Cache line edit
         line_edit = self.lineEdit()
@@ -109,7 +109,7 @@ class CheckableComboBox(QComboBox):
         # Connect dataChanged to updateText
         self.source_model.dataChanged.connect(lambda *_: self.updateText())
         # Re-assert index -1 whenever rows are added so nothing auto-selects
-        self.source_model.rowsInserted.connect(lambda *_: self._reset_index())
+        self.source_model.rowsInserted.connect(lambda *_: self.reset_index())
 
         # Connect return press to addNewTagIfTyped
         line_edit.returnPressed.connect(self.onReturnPressed)
@@ -123,13 +123,13 @@ class CheckableComboBox(QComboBox):
 
         Overrides the base implementation to block all automatic popup
         invocations (e.g. from model changes, focus events, or programmatic
-        text updates). The popup is only shown when _popup_allowed is True,
+        text updates). The popup is only shown when popup_allowed is True,
         which is set exclusively in mousePressEvent.
 
         Returns:
             None
         """
-        if not self._popup_allowed:
+        if not self.popup_allowed:
             return
         super().showPopup()
 
@@ -147,11 +147,11 @@ class CheckableComboBox(QComboBox):
         Returns:
             None
         """
-        self._popup_allowed = True
+        self.popup_allowed = True
         super().mousePressEvent(event)
-        self._popup_allowed = False
+        self.popup_allowed = False
 
-    def _reset_index(self) -> None:
+    def reset_index(self) -> None:
         """
         Reset the current index to -1 after model row insertions.
 
@@ -161,11 +161,11 @@ class CheckableComboBox(QComboBox):
         Returns:
             None
         """
-        self._programmatic_update = True
+        self.programmatic_update = True
         try:
             self.setCurrentIndex(-1)
         finally:
-            self._programmatic_update = False
+            self.programmatic_update = False
 
     def onReturnPressed(self) -> None:
         """
@@ -209,7 +209,7 @@ class CheckableComboBox(QComboBox):
 
     def forceShowPopup(self) -> None:
         """
-        Show the dropdown popup regardless of the _popup_allowed guard.
+        Show the dropdown popup regardless of the popup_allowed guard.
 
         Used by external filtering code to open the popup after updating
         visible rows without requiring a mouse click. Focus is explicitly
@@ -218,11 +218,11 @@ class CheckableComboBox(QComboBox):
         Returns:
             None
         """
-        self._popup_allowed = True
+        self.popup_allowed = True
         try:
             super().showPopup()
         finally:
-            self._popup_allowed = False
+            self.popup_allowed = False
         # Popup may briefly grab focus; give it straight back to the line edit
         self.lineEdit().setFocus()
 
@@ -265,7 +265,7 @@ class CheckableComboBox(QComboBox):
                 return True
         return super().eventFilter(obj, event)
 
-    def _on_text_changed(self, text: str) -> None:
+    def on_text_changed(self, text: str) -> None:
         """
         Handle text changes in the line edit.
 
@@ -370,7 +370,7 @@ class CheckableComboBox(QComboBox):
         Returns:
             None
         """
-        self._programmatic_update = True
+        self.programmatic_update = True
         try:
             checked = self.checkedItems()
             if not checked:
@@ -380,7 +380,7 @@ class CheckableComboBox(QComboBox):
             else:
                 self.lineEdit().setText(", ".join(checked))
         finally:
-            self._programmatic_update = False
+            self.programmatic_update = False
 
     def uncheckAll(self) -> None:
         """
@@ -402,12 +402,12 @@ class CheckableComboBox(QComboBox):
                 item.setCheckState(Qt.Unchecked)
         
         # Clear the line edit text without triggering any side effects
-        self._programmatic_update = True
+        self.programmatic_update = True
         try:
             self.lineEdit().setText("")
             self.setCurrentIndex(-1)
         finally:
-            self._programmatic_update = False
+            self.programmatic_update = False
 
     def addNewTagIfTyped(self) -> None:
         """

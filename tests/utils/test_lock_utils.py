@@ -131,7 +131,7 @@ class TestUnixFlock:
 class TestLockFileCommon:
     """Test common functionality across platforms."""
 
-    def _get_platform_lock_identifier(self, tmp_path, suffix=""):
+    def get_platform_lock_identifier(self, tmp_path, suffix=""):
         """Get appropriate lock identifier for current platform."""
         if sys.platform == "win32":
             return f"Local\\QSnippet.Test.Lock{suffix}"
@@ -140,7 +140,7 @@ class TestLockFileCommon:
 
     def test_release_is_idempotent(self, tmp_path):
         """Release can be called multiple times safely."""
-        lock_id = self._get_platform_lock_identifier(tmp_path)
+        lock_id = self.get_platform_lock_identifier(tmp_path)
         lock = LockFile(lock_id)
         lock.try_acquire()
 
@@ -150,14 +150,14 @@ class TestLockFileCommon:
 
     def test_release_without_acquire_is_safe(self, tmp_path):
         """Release is safe to call if lock was never acquired."""
-        lock_id = self._get_platform_lock_identifier(tmp_path)
+        lock_id = self.get_platform_lock_identifier(tmp_path)
         lock = LockFile(lock_id)
         lock.release()  # Should not raise
         assert lock.acquired is False
 
     def test_context_manager_releases_on_exit(self, tmp_path):
         """Context manager releases lock on normal exit."""
-        lock_id = self._get_platform_lock_identifier(tmp_path)
+        lock_id = self.get_platform_lock_identifier(tmp_path)
 
         with LockFile(lock_id) as lock:
             lock.try_acquire()
@@ -170,7 +170,7 @@ class TestLockFileCommon:
 
     def test_context_manager_releases_on_exception(self, tmp_path):
         """Context manager releases lock even if exception occurs."""
-        lock_id = self._get_platform_lock_identifier(tmp_path)
+        lock_id = self.get_platform_lock_identifier(tmp_path)
 
         try:
             with LockFile(lock_id) as lock:
@@ -187,15 +187,15 @@ class TestLockFileCommon:
 
     def test_lock_identifier_string(self, tmp_path):
         """Lock identifier can be provided as string."""
-        lock_id = self._get_platform_lock_identifier(tmp_path)
+        lock_id = self.get_platform_lock_identifier(tmp_path)
         lock = LockFile(lock_id)
         assert lock.try_acquire() is True
         lock.release()
 
     def test_multiple_unique_locks(self, tmp_path):
         """Multiple different locks can be acquired simultaneously."""
-        lock1_id = self._get_platform_lock_identifier(tmp_path, suffix="1")
-        lock2_id = self._get_platform_lock_identifier(tmp_path, suffix="2")
+        lock1_id = self.get_platform_lock_identifier(tmp_path, suffix="1")
+        lock2_id = self.get_platform_lock_identifier(tmp_path, suffix="2")
 
         lock1 = LockFile(lock1_id)
         lock2 = LockFile(lock2_id)

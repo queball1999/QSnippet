@@ -86,7 +86,7 @@ def test_config_loader_stop(temp_config_file, mock_qt_app):
     write_yaml(temp_config_file, {"x": 1})
     loader = ConfigLoader(temp_config_file)
 
-    watcher = loader._watcher
+    watcher = loader.watcher
     remove_spy = MagicMock()
     watcher.removePath = remove_spy
 
@@ -192,7 +192,7 @@ def test_settings_loader_stop(temp_settings_file, mock_qt_app):
     write_yaml(temp_settings_file, {"x": 1})
     loader = SettingsLoader(temp_settings_file)
 
-    watcher = loader._watcher
+    watcher = loader.watcher
     remove_spy = MagicMock()
     watcher.removePath = remove_spy
 

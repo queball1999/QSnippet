@@ -15,6 +15,9 @@ class ToolbarMenu(QToolBar):
         super().__init__("Main Toolbar", parent)
         self.parent = parent
         self.icon_sources: dict[QAction, QIcon] = {}
+        self.vault_lock_icon = QIcon("assets/icons/lock.svg")
+        self.vault_open_icon = QIcon("assets/icons/lock-open.svg")
+        self.settings_icon = QIcon("assets/icons/settings.svg")
         self.init_actions()
         self.update_icons()
         self.connect_theme()
@@ -27,6 +30,50 @@ class ToolbarMenu(QToolBar):
         self.make_action("document-save", "Save Snippet",   self.editor.on_save)
         self.make_action("edit-delete",   "Delete Snippet", self.editor.on_delete)
 
+        self.addSeparator()
+        self.vault_action = QAction("Vault", self)
+        self.vault_action.setToolTip("Vault not configured - click to set up")
+        self.vault_action.triggered.connect(self.on_vault_clicked)
+        self.addAction(self.vault_action)
+        self.icon_sources[self.vault_action] = self.vault_lock_icon
+
+        self.addSeparator()
+        self.settings_action = QAction("Settings", self)
+        self.settings_action.setToolTip("Open Settings")
+        self.settings_action.triggered.connect(self.on_settings_clicked)
+        self.addAction(self.settings_action)
+        self.icon_sources[self.settings_action] = self.settings_icon
+
+    def update_vault_state(self, is_setup: bool, is_unlocked: bool) -> None:
+        """Update the vault toolbar button icon and tooltip to reflect current state."""
+        if not is_setup:
+            icon = self.vault_lock_icon
+            tooltip = "Vault not configured - click to set up"
+        elif is_unlocked:
+            icon = self.vault_open_icon
+            tooltip = "Vault is unlocked - click to lock"
+        else:
+            icon = self.vault_lock_icon
+            tooltip = "Vault is locked - click to unlock"
+
+        self.icon_sources[self.vault_action] = icon
+        self.vault_action.setToolTip(tooltip)
+
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.get_instance()
+        if tm:
+            self.vault_action.setIcon(tm.recolor_icon(icon, tm.icon_color()))
+        else:
+            self.vault_action.setIcon(icon)
+
+    def on_vault_clicked(self) -> None:
+        if hasattr(self.parent, "toggle_vault_lock"):
+            self.parent.toggle_vault_lock()
+
+    def on_settings_clicked(self) -> None:
+        if hasattr(self.parent, "show_settings_window"):
+            self.parent.show_settings_window()
+
     def make_action(self, theme_name: str, label: str, slot) -> QAction:
         icon   = QIcon.fromTheme(theme_name)
         action = QAction(label, self)
@@ -37,13 +84,13 @@ class ToolbarMenu(QToolBar):
 
     def connect_theme(self):
         from ui.theme_manager import ThemeManager
-        tm = ThemeManager.instance()
+        tm = ThemeManager.get_instance()
         if tm:
             tm.themeChanged.connect(self.update_icons)
 
     def update_icons(self):
         from ui.theme_manager import ThemeManager
-        tm = ThemeManager.instance()
+        tm = ThemeManager.get_instance()
         if tm is None:
             return
         color = tm.icon_color()

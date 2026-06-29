@@ -60,6 +60,8 @@ class SnippetExpander:
         self.last_managed_clipboard = None
         self.trigger_map = {}
         self.trigger_trie = {}
+        self.vault_unlock_callback = None  # Callable[[trigger, entry, style, return_press], None]
+        self.vault_folder_set: set = set()  # paths of vault-protected folders
 
         self.refresh_snippets()
 
@@ -215,6 +217,10 @@ class SnippetExpander:
 
         self.load_snippet_by_trigger.cache_clear()
         logger.debug("Incremental trigger removal: %s (id=%s)", trigger, snippet_id)
+
+    def set_vault_folders(self, vault_folder_paths: list) -> None:
+        """Update the set of vault-protected folder paths used for trigger intercept."""
+        self.vault_folder_set = set(vault_folder_paths)
 
     def retrieve_trigger_chars(self, snippets) -> list:
         """
@@ -634,8 +640,52 @@ class SnippetExpander:
                 self.clear_buffer()
                 return
 
+            # Vault intercept: intercept if encrypted OR if snippet lives in a vault folder
+            folder = snippet_entry.get("folder", "")
+            is_vault_content = (
+                snippet_entry.get("is_encrypted") or
+                (folder and folder in self.vault_folder_set)
+            )
+
+            if is_vault_content:
+                from utils.vault_manager import VaultManager
+                vm = VaultManager.get_instance()
+                if vm.is_unlocked():
+                    if snippet_entry.get("is_encrypted"):
+                        raw = snippet_entry.get("snippet", "")
+                        try:
+                            snippet_text = vm.decrypt(raw)
+                            vm.reset_activity_timer()
+                        except Exception:
+                            # Content may not be encrypted yet (DB inconsistency); use raw
+                            logger.warning("Decrypt failed for trigger %s; using raw content", trigger)
+                            snippet_text = raw
+                    else:
+                        # Folder is vault-protected but snippet not yet encrypted
+                        snippet_text = snippet_entry.get("snippet", "")
+                else:
+                    # Vault is locked - show unlock prompt on main thread
+                    if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
+                        cb = self.vault_unlock_callback
+                        trig = trigger
+                        se = snippet_entry
+                        st = style
+                        rp = return_press
+                        threading.Thread(
+                            target=lambda: cb(trig, se, st, rp),
+                            daemon=True,
+                        ).start()
+                    self.clear_buffer()
+                    return
+            else:
+                snippet_text = snippet_entry.get("snippet", "")
+
             logger.info("Trigger matched: %s", trigger)
-            self.expand(trigger, snippet_entry.get("snippet", ""), style, return_press)
+            try:
+                self.expand(trigger, snippet_text, style, return_press)
+            except Exception:
+                logger.exception("expand() raised in handle_char")
+                self.disabled = False
             self.clear_buffer()
 
     def expand_clipboard(self, snippet: str, return_press: bool = False) -> None:

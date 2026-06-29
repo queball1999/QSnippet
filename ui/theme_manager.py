@@ -130,33 +130,33 @@ class ThemeManager(QObject):
         tm = ThemeManager(app)
         tm.apply("dark", scale_pct=100)
 
-    After construction, retrieve the singleton via ThemeManager.instance().
+    After construction, retrieve the singleton via ThemeManager.get_instance().
     """
 
     themeChanged = Signal()
 
-    _instance: "ThemeManager | None" = None
+    instance: "ThemeManager | None" = None
 
     def __init__(self, app):
         super().__init__()
         self.app = app
-        self._theme_name = "dark"
-        self._scale_pct  = 100
-        ThemeManager._instance = self
+        self.theme_name = "dark"
+        self.scale_pct  = 100
+        ThemeManager.instance = self
 
     @classmethod
-    def instance(cls) -> "ThemeManager | None":
-        return cls._instance
+    def get_instance(cls) -> "ThemeManager | None":
+        return cls.instance
 
     # Public API
 
     def apply(self, theme_name: str, scale_pct: int = 100, accent_color: str = "system", btn_pad_x: int = 8, btn_pad_y: int = 6) -> None:
         """Resolve theme name, build QSS, and set it on QApplication."""
         resolved = self.resolve_theme(theme_name)
-        self._theme_name = resolved
-        self._scale_pct  = scale_pct
-        self._btn_pad_x  = btn_pad_x
-        self._btn_pad_y  = btn_pad_y
+        self.theme_name = resolved
+        self.scale_pct  = scale_pct
+        self.btn_pad_x  = btn_pad_x
+        self.btn_pad_y  = btn_pad_y
 
         colors = self.resolve_colors(resolved, accent_color)
         qss    = self.build_qss(colors, scale_pct, btn_pad_x, btn_pad_y)
@@ -168,11 +168,11 @@ class ThemeManager(QObject):
         logger.info("Theme applied: %s @ %d%%", resolved, scale_pct)
 
     def get_colors(self) -> dict[str, str]:
-        return self.resolve_colors(self._theme_name)
+        return self.resolve_colors(self.theme_name)
 
     @property
     def is_dark(self) -> bool:
-        return self._theme_name in _DARK_THEMES
+        return self.theme_name in _DARK_THEMES
 
     def icon_color(self) -> str:
         """Return the correct icon tint color for the current theme."""
@@ -203,14 +203,6 @@ class ThemeManager(QObject):
         painter.fillRect(result.rect(), QColor(color))
         painter.end()
         return _QIcon(result)
-
-    @property
-    def theme_name(self) -> str:
-        return self._theme_name
-
-    @property
-    def scale_pct(self) -> int:
-        return self._scale_pct
 
     def update_animated_switches(self, accent: str) -> None:
         """Push the new accent color into every live QAnimatedSwitch."""
@@ -862,6 +854,78 @@ QPushButton#PopoutBtn:hover {{
 QPushButton#PopoutBtn:pressed {{
     background-color: {c['selected']};
     border-radius: {r4}px;
+}}
+
+/* Vault dialogs */
+QLabel#VaultDialogTitle {{
+    font-weight: 700;
+    padding-bottom: {p4}px;
+}}
+QLabel#VaultDialogDesc {{
+    color: {c['text_muted']};
+}}
+QLabel#VaultErrorLabel {{
+    color: #e05555;
+    font-weight: 600;
+    padding-top: {p4}px;
+}}
+QFrame#VaultWarningBox {{
+    background-color: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: {r4}px;
+}}
+QLabel#VaultWarningText {{
+    color: #664d03;
+}}
+QPushButton#VaultConfirmBtn {{
+    background-color: {c['accent']};
+    color: #ffffff;
+    border: none;
+    border-radius: {r4}px;
+    padding: {bp_y}px {bp_x}px;
+    font-weight: 600;
+}}
+QPushButton#VaultConfirmBtn:hover {{
+    background-color: {c['accent']};
+    opacity: 0.85;
+}}
+QPushButton#VaultConfirmBtn:disabled {{
+    background-color: {c['border']};
+    color: {c['text_muted']};
+}}
+QFrame#VaultSeparator {{
+    color: {c['border']};
+}}
+QLineEdit#VaultField {{
+    border: 1px solid {c['border']};
+    border-radius: {r4}px;
+    padding: {p4}px {p8}px;
+    background-color: {c['input']};
+    color: {c['text']};
+}}
+QLabel#VaultFieldLabel {{
+    font-weight: 600;
+}}
+QLabel#VaultRecoveryCode {{
+    font-family: monospace;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 2px;
+    padding: {p8}px;
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r4}px;
+}}
+QFrame#VaultHintsFrame {{
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r4}px;
+}}
+QLabel#VaultHintPass {{
+    color: #3cb371;
+}}
+QLabel#VaultHintFail {{
+    color: {c['text_muted']};
 }}
 
 /* Placeholder dialog */

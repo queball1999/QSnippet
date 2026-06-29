@@ -216,7 +216,7 @@ class TestStatusClassification:
     """Test classify_snippets function for import wizard."""
 
     @pytest.fixture(autouse=True)
-    def _import_classify_snippets(self):
+    def import_classify_snippets(self):
         """Lazy import of UI component to avoid import errors in CI/CD."""
         from ui.widgets.import_export_wizard import classify_snippets
         self.classify_snippets = classify_snippets

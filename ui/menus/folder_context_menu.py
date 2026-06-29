@@ -13,11 +13,15 @@ class FolderContextMenu(QMenu):
     deleteRequested     = Signal(object)
     expandRequested     = Signal()
     collapseRequested   = Signal()
+    markAsVaultRequested   = Signal(object)   # folder_item
+    removeVaultRequested   = Signal(object)   # folder_item
 
-    def __init__(self, folder_item, is_expanded: bool = False, parent=None):
+    def __init__(self, folder_item, is_expanded: bool = False,
+                 is_vault: bool = False, parent=None):
         super().__init__(parent)
         self.folder_item = folder_item
         self.is_expanded = is_expanded
+        self.is_vault = is_vault
         self.build()
 
     def build(self):
@@ -40,8 +44,20 @@ class FolderContextMenu(QMenu):
             lambda: self.renameRequested.emit(self.folder_item)
         )
         self.addSeparator()
+
+        if self.is_vault:
+            self.addAction(
+                "Remove Vault Protection",
+                lambda: self.removeVaultRequested.emit(self.folder_item)
+            )
+        else:
+            self.addAction(
+                "Mark as Vault Folder",
+                lambda: self.markAsVaultRequested.emit(self.folder_item)
+            )
+
+        self.addSeparator()
         self.addAction(
             "Delete Folder",
             lambda: self.deleteRequested.emit(self.folder_item)
         )
-

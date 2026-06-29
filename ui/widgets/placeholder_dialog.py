@@ -323,7 +323,7 @@ class PlaceholderDialog(QDialog):
             self.name_error.hide()
             return
         if not _NAME_REGEX.match(text):
-            self.name_error.setText("Name must contain only letters (A–Z, a–z) and underscores, up to 250 characters.")
+            self.name_error.setText("Name must contain only letters (A-Z, a-z) and underscores, up to 250 characters.")
             self.name_error.show()
         elif text in _SYSTEM_NAMES:
             self.name_error.setText("This name is reserved by a system placeholder and cannot be used.")
@@ -384,7 +384,7 @@ class PlaceholderDialog(QDialog):
         if not self.name_is_valid(name):
             QMessageBox.warning(
                 self, "Validation Error",
-                "Name must contain only letters (A–Z, a–z) and underscores (no numbers or "
+                "Name must contain only letters (A-Z, a-z) and underscores (no numbers or "
                 "special characters), and be at most 250 characters long.\n\n"
                 "System placeholder names cannot be reused."
             )
@@ -392,7 +392,7 @@ class PlaceholderDialog(QDialog):
         entry = {"name": name, "value": value, "description": desc}
 
         if self.selected_row_id is None:
-            # New placeholder – check for duplicate name among customs
+            # New placeholder - check for duplicate name among customs
             existing = self.snippet_db.get_all_custom_placeholders()
             if any(p["name"] == name for p in existing):
                 QMessageBox.warning(
@@ -403,7 +403,7 @@ class PlaceholderDialog(QDialog):
                 return
             ok = self.snippet_db.insert_custom_placeholder(entry)
         else:
-            # Updating existing – allow same name (owner), check others
+            # Updating existing - allow same name (owner), check others
             existing = self.snippet_db.get_all_custom_placeholders()
             conflict = any(p["name"] == name and p["id"] != self.selected_row_id for p in existing)
             if conflict:
@@ -466,11 +466,11 @@ class PlaceholderDialog(QDialog):
                 child.setFont(font)
             if hasattr(self, 'table') and self.table:
                 self.table.setFont(font)
-                self._apply_header_font(self.table.horizontalHeader(), font)
+                self.apply_header_font(self.table.horizontalHeader(), font)
         except Exception:
             pass
 
-    def _apply_header_font(self, header, font):
+    def apply_header_font(self, header, font):
         """Set font on a QHeaderView and force a visual repaint."""
         if not header:
             return

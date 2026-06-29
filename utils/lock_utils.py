@@ -39,8 +39,8 @@ class LockFile:
         """
         self.lock_identifier = lock_identifier
         self.acquired = False
-        self._handle = None  # For Windows mutex
-        self._lock_fd = None  # For Unix file lock
+        self.handle = None  # For Windows mutex
+        self.lock_fd = None  # For Unix file lock
 
     def try_acquire(self) -> bool:
         """
@@ -90,7 +90,7 @@ class LockFile:
                 kernel32.CloseHandle(mutex_handle)
                 return False
 
-            self._handle = mutex_handle
+            self.handle = mutex_handle
             self.acquired = True
             logger.debug(f"Windows mutex acquired: {self.lock_identifier}")
             return True
@@ -122,7 +122,7 @@ class LockFile:
             try:
                 # Try to acquire exclusive non-blocking lock
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self._lock_fd = lock_fd
+                self.lock_fd = lock_fd
                 self.acquired = True
                 logger.debug(f"Unix lock acquired: {lock_path}")
                 return True
@@ -160,7 +160,7 @@ class LockFile:
 
     def release_windows(self) -> None:
         """Release Windows mutex."""
-        if not self._handle:
+        if not self.handle:
             return
 
         try:
@@ -171,14 +171,14 @@ class LockFile:
             kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
             kernel32.CloseHandle.restype = wintypes.BOOL
 
-            kernel32.CloseHandle(self._handle)
+            kernel32.CloseHandle(self.handle)
             logger.debug("Windows mutex released")
         finally:
-            self._handle = None
+            self.handle = None
 
     def release_unix(self) -> None:
         """Release Unix file lock."""
-        if self._lock_fd is None:
+        if self.lock_fd is None:
             return
 
         try:
@@ -186,11 +186,11 @@ class LockFile:
 
             # fcntl.flock() automatically releases when fd is closed
             # but we can explicitly release it
-            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
-            os.close(self._lock_fd)
+            fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
+            os.close(self.lock_fd)
             logger.debug("Unix lock released")
         finally:
-            self._lock_fd = None
+            self.lock_fd = None
 
     def __enter__(self):
         """Context manager entry."""

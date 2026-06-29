@@ -137,6 +137,7 @@ class SnippetEditor(QWidget):
         # Left: snippet table
         self.table = SnippetTable(main=self.main, parent=self)
         self.table.entrySelected.connect(self.on_entry_selected)
+        self.table.folderSelected.connect(self.on_folder_selected)
         self.table.refreshSignal.connect(self.load_snippets)
         # folder signals
         self.table.addFolder.connect(self.on_add_folder)
@@ -209,6 +210,17 @@ class SnippetEditor(QWidget):
         """
         old_text = self.parent.statusBar().currentMessage() or ""
         self.parent.statusBar().showMessage(f"Loading Snippets...")
+
+        # Always pre-load vault folder set so lock icons render correctly.
+        # "Vault" is always included so the folder is visible even before setup.
+        try:
+            vault_folders = list(self.main.snippet_db.get_vault_folders())
+            if "Vault" not in vault_folders:
+                vault_folders.append("Vault")
+            self.table.set_vault_folders(vault_folders)
+        except Exception:
+            pass
+
         snippets = self.main.snippet_db.get_all_snippets()
         self.table.load_entries(snippets)
         self.parent.statusBar().showMessage(old_text)
@@ -265,7 +277,19 @@ class SnippetEditor(QWidget):
             self.stack.setCurrentWidget(self.form)
             self.form.load_entry(entry)
         else:
-            self.stack.setCurrentWidget(self.home_widget)    
+            self.stack.setCurrentWidget(self.home_widget)
+
+    def on_folder_selected(self, folder_path: str) -> None:
+        """Update the form's folder field when a folder row is clicked.
+
+        Only acts when the snippet form is already visible, so the current
+        widget (home or form) is never displaced by a folder click.
+
+        Args:
+            folder_path: Full folder path of the clicked folder row.
+        """
+        if self.stack.currentWidget() is self.form and folder_path:
+            self.form.folder_input.setCurrentText(folder_path)
 
     def show_home_widget(self, *_):
         """
@@ -346,6 +370,10 @@ class SnippetEditor(QWidget):
                 )
                 return
             
+            # Vault transition confirmation (before writing to DB)
+            if not self.check_vault_form_transition(entry):
+                return
+
             # Insert the snippet into the DB
             # returns True if new, False if updated
             is_new = self.main.snippet_db.insert_snippet(entry)
@@ -361,9 +389,11 @@ class SnippetEditor(QWidget):
                     title="Snippet Updated"
                 )
 
+            # Emit before load_snippets so on_snippet_saved_vault clears is_encrypted
+            # before the table refresh can reload the snippet with a stale flag.
+            self.trigger_snippet_saved.emit(entry)
             self.load_snippets()    # Reload snippets to reflect changes
             self.table.select_entry(entry)
-            self.trigger_snippet_saved.emit(entry)  # Incremental expander update
             self.form.invalidate_caches()  # Tags may have changed
 
             # Here we could go home or stay on new form
@@ -487,7 +517,12 @@ class SnippetEditor(QWidget):
         new = "/".join(parts)
         if new == old:
             return
-        self.main.snippet_db.rename_folder(old, new)
+        db = self.main.snippet_db
+        db.rename_folder(old, new)
+        # Keep vault_folders in sync when the renamed folder is a vault root.
+        if db.is_vault_folder(old):
+            db.remove_vault_folder(old)
+            db.add_vault_folder(new)
         self.load_snippets()
         self.form.invalidate_caches()  # Folder list has changed
         self.main.message_box.info(f'Renamed folder "{old}" to "{new}"', title='Folder Renamed')
@@ -547,52 +582,293 @@ class SnippetEditor(QWidget):
         self.form.invalidate_caches()  # Folder list has changed
 
     def on_folder_moved(self, old_path: str, new_path: str):
-        """
-        Persist a folder that was drag-and-drop moved to a new nested path.
+        """Persist a folder drag-and-drop move, handling vault encrypt/decrypt transitions.
 
-        Delegates to ``rename_folder`` which also cascades to sub-paths.
+        Detects when the move crosses a vault boundary and:
+        - Shows a confirmation dialog before encrypting or decrypting.
+        - Encrypts all snippets in the subtree when moving into a vault folder.
+        - Decrypts all snippets in the subtree when moving out of a vault folder.
+        - Updates the ``vault_folders`` registry when a vault root folder itself is moved.
 
         Args:
             old_path (str): Previous full path, e.g. ``"work"``.
-            new_path (str): New full path, e.g. ``"personal/work"``.
+            new_path (str): New full path, e.g. ``"Vault/work"``.
 
         Returns:
             None
         """
+        from PySide6.QtWidgets import QMessageBox
+        from utils.vault_manager import VaultError
+
+        db = self.main.snippet_db
+        window = self.parent
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        old_in_vault = db.is_under_vault_folder(old_path)
+        new_in_vault = db.is_under_vault_folder(new_path)
+        old_is_vault_root = db.is_vault_folder(old_path)
+
+        cfg = window.vault_config() if hasattr(window, "vault_config") else {}
+        is_vault_setup = vm.is_setup(cfg) if vm else False
+        if not is_vault_setup:
+            table_vault_set = getattr(self.table, "vault_folder_set", set())
+            parts = new_path.split("/")
+            if any("/".join(parts[:i + 1]) in table_vault_set for i in range(len(parts))):
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Vault Not Configured")
+                msg.setText(
+                    "Cannot move folder into vault.\n\nThe vault is not set up."
+                )
+                msg.setMinimumWidth(250)
+                setup_btn = msg.addButton("Set Up Vault", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.setDefaultButton(setup_btn)
+                msg.exec()
+                if msg.clickedButton() == setup_btn:
+                    window.show_vault_settings()
+                return
+
+        moving_into_vault = (not old_in_vault) and new_in_vault
+        moving_out_of_vault = old_in_vault and (not new_in_vault) and (not old_is_vault_root)
+
+        if moving_into_vault or moving_out_of_vault:
+            snippets = db.get_snippets_by_folder(old_path)
+            count = len(snippets)
+            noun = "snippet" if count == 1 else "snippets"
+
+            if moving_into_vault:
+                if vm and not vm.is_unlocked():
+                    self.main.message_box.warning(
+                        "The vault is locked. Unlock the vault before moving a folder into it.",
+                        title="Vault Locked",
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    "Move Folder Into Vault",
+                    f'Moving "{old_path}" into a vault folder will encrypt '
+                    f'{count} {noun} (including any sub-folders).\n\nDo you wish to proceed?',
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+            else:
+                if vm and not vm.is_unlocked():
+                    self.main.message_box.warning(
+                        "The vault is locked. Unlock the vault before moving an encrypted "
+                        "folder out of it.",
+                        title="Vault Locked",
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    "Move Folder Out of Vault",
+                    f'Moving "{old_path}" out of the vault will permanently decrypt '
+                    f'{count} {noun} (including any sub-folders).\n\nDo you wish to proceed?',
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+
+            if answer != QMessageBox.Yes:
+                return
+
         try:
-            self.main.snippet_db.rename_folder(old_path, new_path)
+            db.rename_folder(old_path, new_path)
+
+            # Keep vault_folders in sync when a vault root itself is moved.
+            if old_is_vault_root:
+                db.remove_vault_folder(old_path)
+                # Only re-register as a root if the new location is not already
+                # inside another vault (it would be implicitly protected).
+                if not db.is_under_vault_folder(new_path):
+                    db.add_vault_folder(new_path)
+
+            # Encrypt or decrypt all snippets now living under new_path.
+            if (moving_into_vault or moving_out_of_vault) and vm:
+                snippets = db.get_snippets_by_folder(new_path)
+                updates = []
+                for s in snippets:
+                    sid = s["id"]
+                    content = s.get("snippet", "")
+                    is_enc = bool(s.get("is_encrypted"))
+                    if moving_into_vault and not is_enc:
+                        updates.append((sid, vm.encrypt(content), True))
+                    elif moving_out_of_vault and is_enc:
+                        updates.append((sid, vm.decrypt(content), False))
+                db.bulk_encrypt_folder_snippets(updates)
+
             self.load_snippets()
             self.trigger_reload.emit()
-        except Exception as e:
-            logger.error(f"Error moving folder: {e}")
+        except VaultError as exc:
+            logger.warning("Vault error during folder move: %s", exc)
+            self.main.message_box.warning(str(exc), title="Vault Locked")
+        except Exception as exc:
+            logger.error("Error moving folder: %s", exc)
             self.main.message_box.warning(
-                f"Error moving folder: {e}",
-                title="Move Error"
+                f"Error moving folder: {exc}",
+                title="Move Error",
             )
 
-    def on_snippet_moved(self, entry: dict, new_folder: str):
-        """
-        Persist a snippet that was drag-and-drop moved to a different folder.
+    def check_vault_form_transition(self, entry: dict) -> bool:
+        """Show confirmation or error dialogs for vault ↔ non-vault folder changes.
 
-        Updates the snippet's folder field in the database.
+        Must be called before ``insert_snippet`` so the user can cancel without
+        any DB write occurring.
 
         Args:
-            entry (dict): Original snippet entry dict.
-            new_folder (str): The destination folder path.
+            entry (dict): The entry dict from ``get_entry()``, with the
+                *destination* folder already set.
+
+        Returns:
+            bool: True if the save should proceed, False to cancel.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        db = self.main.snippet_db
+        window = self.parent
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        snippet_id = entry.get("id")
+        dest_is_vault = db.is_under_vault_folder(entry.get("folder", ""))
+
+        src_is_encrypted = False
+        src_is_vault = False
+        if snippet_id:
+            db_entry = db.get_snippet(snippet_id) or {}
+            src_is_encrypted = bool(db_entry.get("is_encrypted"))
+            src_is_vault = db.is_under_vault_folder(db_entry.get("folder", ""))
+
+        moving_into_vault = (not src_is_vault) and dest_is_vault
+        moving_out_of_vault = src_is_encrypted and (not dest_is_vault)
+
+        if moving_into_vault:
+            if vm and not vm.is_unlocked():
+                self.main.message_box.warning(
+                    "The vault is locked. Unlock the vault before saving a snippet "
+                    "to a vault folder.",
+                    title="Vault Locked",
+                )
+                return False
+            answer = QMessageBox.question(
+                self,
+                "Move Into Vault",
+                "This snippet is about to be moved to the vault and encrypted.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            return answer == QMessageBox.Yes
+
+        if moving_out_of_vault:
+            if vm and not vm.is_unlocked():
+                self.main.message_box.warning(
+                    "The vault is locked. Unlock the vault before moving an encrypted "
+                    "snippet out of it.",
+                    title="Vault Locked",
+                )
+                return False
+            answer = QMessageBox.question(
+                self,
+                "Move Out of Vault",
+                "This snippet will be permanently decrypted and moved out of the vault.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            return answer == QMessageBox.Yes
+
+        return True
+
+    def on_snippet_moved(self, entry: dict, new_folder: str):
+        """Persist a snippet drag-and-drop move, handling vault encrypt/decrypt transitions.
+
+        When moving a snippet out of a vault folder the user is shown a
+        confirmation dialog because the content will be permanently decrypted.
+        When moving into a vault folder the vault must be unlocked.  All
+        encrypt/decrypt work is delegated to
+        :meth:`SnippetDB.insert_snippet_vault_aware` so the invariant is
+        enforced at the data layer.
+
+        Args:
+            entry (dict): Original snippet entry dict (folder = *source* folder).
+            new_folder (str): Destination folder path.
 
         Returns:
             None
         """
+        from utils.vault_manager import VaultError
+
+        db = self.main.snippet_db
+        window = self.parent  # QSnippet main window (stored directly, not callable)
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        src_encrypted = bool(entry.get("is_encrypted"))
+        dest_is_vault = db.is_vault_folder(new_folder)
+        src_is_vault = db.is_vault_folder(entry.get("folder", ""))
+
+        from PySide6.QtWidgets import QMessageBox
+
+        cfg = window.vault_config() if hasattr(window, "vault_config") else {}
+        is_vault_setup = vm.is_setup(cfg) if vm else False
+        if not is_vault_setup:
+            table_vault_set = getattr(self.table, "vault_folder_set", set())
+            parts = new_folder.split("/")
+            if any("/".join(parts[:i + 1]) in table_vault_set for i in range(len(parts))):
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Vault Not Configured")
+                msg.setText(
+                    "Cannot move snippet into vault.\n\nThe vault is not set up."
+                )
+                msg.setMinimumWidth(250)
+                setup_btn = msg.addButton("Set Up Vault", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.setDefaultButton(setup_btn)
+                msg.exec()
+                if msg.clickedButton() == setup_btn:
+                    window.show_vault_settings()
+                return
+
+        # Confirm before encrypting into vault
+        if not src_is_vault and dest_is_vault:
+            answer = QMessageBox.question(
+                self,
+                "Move Into Vault",
+                "This snippet is about to be moved to the vault and encrypted.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        # Confirm before permanently decrypting
+        if src_encrypted and not dest_is_vault:
+            answer = QMessageBox.question(
+                self,
+                "Move Out of Vault",
+                "This snippet is encrypted. Moving it out of the vault will "
+                "permanently decrypt its contents.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
         try:
             updated = {**entry, "folder": new_folder}
-            self.main.snippet_db.insert_snippet(updated)
+            db.insert_snippet_vault_aware(updated, vault_manager=vm)
             self.load_snippets()
             self.trigger_reload.emit()
-        except Exception as e:
-            logger.error(f"Error moving snippet: {e}")
+        except VaultError as exc:
+            logger.warning("Vault error during snippet move: %s", exc)
             self.main.message_box.warning(
-                f"Error moving snippet: {e}",
-                title="Move Error"
+                str(exc),
+                title="Vault Locked",
+            )
+        except Exception as exc:
+            logger.error("Error moving snippet: %s", exc)
+            self.main.message_box.warning(
+                f"Error moving snippet: {exc}",
+                title="Move Error",
             )
 
     def on_edit_snippet(self, entry=None, *_):

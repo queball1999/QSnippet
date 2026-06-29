@@ -3,7 +3,7 @@ from PySide6.QtCore import Signal
 
 class TrayMenu(QMenu):
     """
-    TrayMenu is the context menu for the system tray icon, allowing users 
+    TrayMenu is the context menu for the system tray icon, allowing users
     to edit quick settings, open UI, and exit the application.
     """
     # Primary Signals
@@ -13,6 +13,10 @@ class TrayMenu(QMenu):
     # Quick Settings Signals
     startup_signal = Signal(bool)   # Signal to toggle startup option
     showui_signal = Signal(bool)    # Signal to toggle show UI at start option
+
+    # Vault Signals
+    vault_lock_signal = Signal()
+    vault_unlock_signal = Signal()
 
     def __init__(self, main=None, parent=None):
         """
@@ -28,8 +32,6 @@ class TrayMenu(QMenu):
         super().__init__(parent)
         self.main = main
         self.parent = parent
-        # Colors
-        # Font Sizes
         self.add_actions()
 
     def add_actions(self):
@@ -60,13 +62,23 @@ class TrayMenu(QMenu):
         )
         self.showui_action.toggled.connect(lambda checked: self.showui_signal.emit(checked))
 
-        self.addSeparator() # Add seperator
+        self.addSeparator()
+
+        self.vault_unlock_action = self.addAction("Unlock Vault")
+        self.vault_unlock_action.setData("Unlock Vault")
+        self.vault_unlock_action.triggered.connect(self.vault_unlock_signal.emit)
+
+        self.vault_lock_action = self.addAction("Lock Vault")
+        self.vault_lock_action.setData("Lock Vault")
+        self.vault_lock_action.triggered.connect(self.vault_lock_signal.emit)
+
+        self.addSeparator()
 
         self.stop_action = self.addAction("Edit Snippets")
         self.stop_action.setData("Edit Snippets")
         self.stop_action.triggered.connect(self.edit_signal.emit)
 
-        self.addSeparator() # Add seperator
+        self.addSeparator()
 
         self.exit_action = self.addAction("Exit")
         self.exit_action.setData("Exit")
@@ -86,4 +98,9 @@ class TrayMenu(QMenu):
 
         self.launch_action.blockSignals(False)
         self.showui_action.blockSignals(False)
+
+    def update_vault_state(self, is_setup: bool, is_unlocked: bool) -> None:
+        """Show the relevant vault action based on current vault state."""
+        self.vault_unlock_action.setVisible(is_setup and not is_unlocked)
+        self.vault_lock_action.setVisible(is_setup and is_unlocked)
 

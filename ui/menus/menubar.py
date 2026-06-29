@@ -240,6 +240,11 @@ class MenuBar(QMenuBar):
         self.update_icons()
         self.connect_theme()
 
+    # ----- VAULT -----
+
+    def update_vault_state(self, is_setup: bool, is_unlocked: bool) -> None:
+        """No-op - vault state is shown in the toolbar only."""
+
     # ----- ICON THEMING -----
 
     def collect_icon_actions(self):
@@ -263,13 +268,13 @@ class MenuBar(QMenuBar):
 
     def connect_theme(self):
         from ui.theme_manager import ThemeManager
-        tm = ThemeManager.instance()
+        tm = ThemeManager.get_instance()
         if tm:
             tm.themeChanged.connect(self.update_icons)
 
     def update_icons(self):
         from ui.theme_manager import ThemeManager
-        tm = ThemeManager.instance()
+        tm = ThemeManager.get_instance()
         if tm is None:
             return
         color = tm.icon_color()

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QLabel, QPushButton
 )
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
 # Import custom modules
 from utils import FileUtils, AppLogger
@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 class QSnippet(QMainWindow):
+    # Emitted from the pynput background thread; Qt delivers it to the main thread via queued connection.
+    vault_trigger_signal = Signal(str, object, str, bool)
+
     def __init__(self, parent=None) -> None:
         """
         Initialize the main QSnippet application window.
@@ -159,8 +162,31 @@ class QSnippet(QMainWindow):
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)
         self.editor.trigger_reload.connect(lambda: self.snippet_service.refresh())
-        self.editor.trigger_snippet_saved.connect(lambda entry: self.snippet_service.refresh_snippet(entry))
+        self.editor.trigger_snippet_saved.connect(self.on_snippet_saved_vault)
         self.editor.trigger_snippet_deleted.connect(lambda sid: self.snippet_service.remove_snippet(sid))
+
+        # Vault: connect folder signals from the snippet table
+        self.editor.table.markFolderAsVault.connect(self.on_mark_folder_as_vault)
+        self.editor.table.removeFolderVault.connect(self.on_remove_folder_vault)
+        self.editor.table.vaultFolderClicked.connect(self.on_vault_folder_clicked)
+
+        # Vault: locked trigger → main-thread dialog via Signal (thread-safe queued connection)
+        self.vault_trigger_signal.connect(self.handle_vault_trigger_main)
+        self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
+
+        # Vault: auto-lock fires from a background thread - dispatch UI update to main thread
+        from utils.vault_manager import VaultManager
+        def on_vault_locked():
+            from PySide6.QtWidgets import QApplication
+            if QApplication.instance():
+                QTimer.singleShot(0, self.update_vault_ui)
+        VaultManager.get_instance().set_lock_callback(on_vault_locked)
+
+        # Vault startup sequence
+        QTimer.singleShot(0, self.refresh_vault_folder_icons)
+        QTimer.singleShot(0, self.update_vault_ui)
+        QTimer.singleShot(0, self.apply_vault_timeout_from_config)
+        QTimer.singleShot(0, self.maybe_unlock_vault_on_launch)
         
         layout.addWidget(self.linux_notice)
         layout.addWidget(self.editor)
@@ -248,9 +274,17 @@ class QSnippet(QMainWindow):
             menu.exit_signal.connect(self.exit)
             menu.startup_signal.connect(self.handle_startup_signal)
             menu.showui_signal.connect(self.handle_show_ui_signal)
+            menu.vault_unlock_signal.connect(lambda: self.show_vault_unlock(on_success=self.update_vault_ui))
+            menu.vault_lock_signal.connect(self.tray_lock_vault)
 
+            self.tray_menu = menu
             self.tray.setContextMenu(menu)
             self.tray.show()
+
+            # Set initial vault action visibility
+            vm = self.vault_manager()
+            cfg = self.vault_config()
+            menu.update_vault_state(vm.is_setup(cfg), vm.is_unlocked())
 
             logger.info("System tray initialized successfully")
 
@@ -446,15 +480,31 @@ class QSnippet(QMainWindow):
             logger.debug("Import cancelled by user")
             return
 
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+        if vm.is_setup(cfg) and not vm.is_unlocked():
+            self.show_vault_unlock(
+                message="Unlock the vault before importing to ensure vault folders are accessible.",
+                on_success=lambda: self.run_import_wizard(Path(path)),
+            )
+            return
+
+        self.run_import_wizard(Path(path))
+
+    def run_import_wizard(self, path: Path) -> None:
+        from ui.widgets.import_export_wizard import ImportExportWizard
+        vm = self.vault_manager()
+        cfg = self.vault_config()
         self.import_export_wizard = ImportExportWizard(
             mode="import",
             snippet_db=self.parent.snippet_db,
-            import_path=Path(path),
-            parent=self
+            import_path=path,
+            parent=self,
+            vault_manager=vm if vm.is_setup(cfg) else None,
         )
         self.import_export_wizard.exec()
         self.snippet_service.refresh()
-        self.editor.load_snippets()
+        self.refresh_vault_folder_icons()
 
     def handle_export_action(self) -> None:
         """
@@ -463,18 +513,32 @@ class QSnippet(QMainWindow):
         Returns:
             None
         """
-        from ui.widgets.import_export_wizard import ImportExportWizard
-
         logger.info("Exporting snippets via menu action")
 
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+        if vm.is_setup(cfg) and not vm.is_unlocked():
+            self.show_vault_unlock(
+                message="Unlock the vault before exporting to include vault snippets.",
+                on_success=self.run_export_wizard,
+            )
+            return
+
+        self.run_export_wizard()
+
+    def run_export_wizard(self) -> None:
+        from ui.widgets.import_export_wizard import ImportExportWizard
+        vm = self.vault_manager()
+        cfg = self.vault_config()
         self.import_export_wizard = ImportExportWizard(
             mode="export",
             snippet_db=self.parent.snippet_db,
-            parent=self
+            parent=self,
+            vault_manager=vm if vm.is_setup(cfg) else None,
         )
         self.import_export_wizard.exec()
         self.snippet_service.refresh()
-        self.editor.load_snippets()
+        self.refresh_vault_folder_icons()
 
     def handle_rename_action(self) -> None:
         """
@@ -808,11 +872,15 @@ class QSnippet(QMainWindow):
         logger.info("Showing settings window")
 
         from ui.widgets.settings import SettingsDialog
+        from ui.widgets.settings.vault_settings_page import VaultSettingsPage
+
+        vault_page = VaultSettingsPage(window=self)
 
         self.settings_dialog = SettingsDialog(
             settings=self.parent.settings,
             save_callback=self.save_settings,
             parent=self,
+            extra_pages=[("Vault", vault_page)],
         )
         self.settings_dialog.exec()
 
@@ -872,6 +940,442 @@ class QSnippet(QMainWindow):
             self.placeholder_dialog.applyStyles()
 
         self.app.processEvents()
+
+    # Vault
+    def vault_db(self):
+        """Return the main app's snippet DB (used for vault operations)."""
+        return self.parent.snippet_db
+
+    def vault_config(self) -> dict:
+        return self.parent.cfg
+
+    def vault_manager(self):
+        from utils.vault_manager import VaultManager
+        return VaultManager.get_instance()
+
+    def maybe_unlock_vault_on_launch(self) -> None:
+        """Show vault unlock dialog on startup when 'unlock on launch' is configured."""
+        try:
+            cfg = self.vault_config()
+            vm = self.vault_manager()
+            if vm.is_setup(cfg) and cfg.get("vault", {}).get("unlock_on_launch", False):
+                self.show_vault_unlock(on_success=self.update_vault_ui)
+        except Exception:
+            pass
+
+    def apply_vault_timeout_from_config(self) -> None:
+        """Apply the saved auto-lock timeout from config to VaultManager."""
+        try:
+            minutes = self.vault_config().get("vault", {}).get("auto_lock_minutes", 15)
+            self.vault_manager().set_auto_lock_minutes(int(minutes))
+        except Exception:
+            pass
+
+    def update_vault_ui(self) -> None:
+        """Sync toolbar vault button, table lock state, and clipboard with VaultManager state."""
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+        is_setup = vm.is_setup(cfg)
+        is_unlocked = vm.is_unlocked()
+        if hasattr(self, "toolbar"):
+            self.toolbar.update_vault_state(is_setup, is_unlocked)
+        if hasattr(self, "menubar"):
+            self.menubar.update_vault_state(is_setup, is_unlocked)
+        if hasattr(self, "tray_menu"):
+            self.tray_menu.update_vault_state(is_setup, is_unlocked)
+        # Update table lock state; reload snippets when the state transitions
+        # so load_entries can filter vault rows in or out correctly.
+        if hasattr(self, "editor") and hasattr(self.editor, "table"):
+            table = self.editor.table
+            prev_locked = getattr(table, "vault_locked", None)
+            new_locked = is_setup and not is_unlocked
+            table.set_vault_lock_state(new_locked)
+            if prev_locked != new_locked:
+                self.editor.load_snippets()
+        # Clear clipboard when vault locks to prevent lingering sensitive content
+        if is_setup and not is_unlocked:
+            try:
+                from PySide6.QtWidgets import QApplication
+                QApplication.clipboard().clear()
+            except Exception:
+                pass
+
+    def toggle_vault_lock(self) -> None:
+        """Lock if unlocked; unlock if locked; set up if not configured."""
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+        if not vm.is_setup(cfg):
+            self.show_vault_settings()
+        elif vm.is_unlocked():
+            vm.lock()
+            self.update_vault_ui()
+        else:
+            self.show_vault_unlock(on_success=self.update_vault_ui)
+
+    def tray_lock_vault(self) -> None:
+        """Lock vault from the tray menu and refresh tray state."""
+        self.vault_manager().lock()
+        self.update_vault_ui()
+
+    def refresh_vault_folder_icons(self) -> None:
+        try:
+            vf = list(self.vault_db().get_vault_folders())
+            # Always show the default Vault folder node even before vault is configured
+            if "Vault" not in vf:
+                vf.append("Vault")
+            self.editor.table.set_vault_folders(vf)
+            # Keep expander's vault folder set in sync for trigger intercept
+            self.snippet_service.expander.set_vault_folders(vf)
+            # Apply lock state before loading so load_entries filters vault rows correctly
+            vm = self.vault_manager()
+            cfg = self.vault_config()
+            is_setup = vm.is_setup(cfg)
+            self.editor.table.set_vault_lock_state(
+                is_setup and not vm.is_unlocked(),
+                is_setup=is_setup,
+            )
+            # Reload table so vault folder nodes and icons are applied immediately
+            self.editor.load_snippets()
+        except Exception:
+            pass
+
+    def on_snippet_saved_vault(self, entry: dict) -> None:
+        """Intercept snippet form saves to encrypt when destination is a vault folder.
+
+        The snippet form always writes plaintext content to the DB via
+        ``insert_snippet``.  This handler then either encrypts the content
+        (destination is vault) or clears the ``is_encrypted`` flag (moved out
+        of vault, content already plaintext).
+
+        Drag-and-drop moves are handled by ``on_snippet_moved`` via
+        ``insert_snippet_vault_aware`` and do **not** pass through here.
+        """
+        try:
+            db = self.vault_db()
+            folder = entry.get("folder", "")
+            snippet_id = entry.get("id")
+            vm = self.vault_manager()
+
+            if db.is_vault_folder(folder):
+                if not vm.is_unlocked():
+                    self.show_vault_unlock(
+                        message="Unlock vault to save to this folder.",
+                        on_success=lambda: self.encrypt_and_save(snippet_id, vm)
+                    )
+                    return
+                self.encrypt_and_save(snippet_id, vm)
+            else:
+                # The form wrote plaintext to the DB. If the snippet was previously
+                # encrypted (moved out of a vault folder), clear the flag only.
+                # No decrypt is needed - the form already provides plaintext.
+                db_snippet = db.get_snippet(snippet_id) or {}
+                if db_snippet.get("is_encrypted"):
+                    try:
+                        db.set_snippet_encrypted(snippet_id, False)
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to clear is_encrypted for snippet %s: %s",
+                            snippet_id, exc,
+                        )
+                        self.parent.message_box.warning(
+                            "The snippet was saved but its vault encryption flag could "
+                            "not be cleared. If this persists, try re-saving the snippet.",
+                            title="Vault Warning",
+                        )
+
+            self.snippet_service.refresh_snippet(entry)
+        except Exception:
+            self.snippet_service.refresh_snippet(entry)
+
+    def encrypt_and_save(self, snippet_id: int, vm) -> None:
+        try:
+            db = self.vault_db()
+            snippet = db.get_snippet(snippet_id)
+            # Always re-encrypt: the form decrypts before display, so snippet
+            # content in the DB is always plaintext at this point regardless
+            # of the is_encrypted flag.
+            cipher = vm.encrypt(snippet.get("snippet", ""))
+            db.update_snippet_content(snippet_id, cipher)
+            db.set_snippet_encrypted(snippet_id, True)
+            vm.reset_activity_timer()
+        except Exception as exc:
+            logger.error("Failed to encrypt snippet %s: %s", snippet_id, exc)
+
+    def on_mark_folder_as_vault(self, folder_item) -> None:
+        from PySide6.QtCore import QTimer as _QTimer
+        data = folder_item.data(Qt.UserRole) if folder_item else {}
+        folder_path = data.get("path", "") if isinstance(data, dict) else ""
+        if not folder_path:
+            return
+
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+
+        if not vm.is_setup(cfg):
+            # First time - run setup dialog
+            from ui.widgets.vault_setup_dialog import VaultSetupDialog
+            dlg = VaultSetupDialog(cfg, self.vault_db(), mode="setup", parent=self)
+            dlg.vaultConfigured.connect(lambda updated: self.after_vault_setup(updated, folder_path))
+            dlg.exec()
+            return
+
+        if not vm.is_unlocked():
+            self.show_vault_unlock(
+                message=f"Unlock vault to protect folder: {folder_path}",
+                on_success=lambda: self.mark_folder_vault(folder_path)
+            )
+            return
+
+        self.mark_folder_vault(folder_path)
+
+    def after_vault_setup(self, updated_config: dict, folder_path: str) -> None:
+        self.parent.cfg = updated_config
+        self.update_vault_ui()
+        self.mark_folder_vault(folder_path)
+
+    def mark_folder_vault(self, folder_path: str) -> None:
+        try:
+            db = self.vault_db()
+            vm = self.vault_manager()
+
+            existing = db.get_snippets_by_folder(folder_path)
+            is_new_empty_folder = len(existing) == 0
+
+            db.add_vault_folder(folder_path)
+
+            # Encrypt all existing snippets in the folder
+            for snippet in existing:
+                if not snippet.get("is_encrypted"):
+                    try:
+                        cipher = vm.encrypt(snippet.get("snippet", ""))
+                        db.update_snippet_content(snippet["id"], cipher)
+                        db.set_snippet_encrypted(snippet["id"], True)
+                    except Exception as exc:
+                        logger.error("Failed to encrypt snippet %s: %s", snippet.get("id"), exc)
+
+            # Seed a welcome snippet when creating a brand-new empty vault folder
+            if is_new_empty_folder and vm.is_unlocked():
+                self.insert_vault_welcome_snippet(db, vm, folder_path)
+
+            vm.reset_activity_timer()
+            self.refresh_vault_folder_icons()
+            self.update_vault_ui()
+            self.editor.load_snippets()
+            self.snippet_service.refresh()
+        except Exception as exc:
+            logger.error("Failed to mark folder as vault: %s", exc)
+
+    def insert_vault_welcome_snippet(self, db, vm, folder_path: str) -> None:
+        """Insert an encrypted welcome snippet into a newly created vault folder."""
+        try:
+            plain = (
+                "Welcome to QSnippet Vault!\n\n"
+                "This folder is encrypted with AES-256-GCM. "
+                "Add snippets here for personal information you paste frequently - "
+                "addresses, account numbers, and similar private data.\n\n"
+                "Remember: the Vault is not a replacement for a dedicated password manager."
+            )
+            cipher = vm.encrypt(plain)
+            entry = {
+                "enabled": True,
+                "label": "Welcome to the Vault",
+                "trigger": "/vault",
+                "snippet": cipher,
+                "paste_style": "Clipboard",
+                "return_press": False,
+                "folder": folder_path,
+                "tags": "vault,welcome",
+            }
+            db.insert_snippet(entry)  # sets entry["id"] as a side effect
+            if entry.get("id"):
+                db.set_snippet_encrypted(entry["id"], True)
+        except Exception as exc:
+            logger.warning("Could not create vault welcome snippet: %s", exc)
+
+    def on_remove_folder_vault(self, folder_item) -> None:
+        data = folder_item.data(Qt.UserRole) if folder_item else {}
+        folder_path = data.get("path", "") if isinstance(data, dict) else ""
+        if not folder_path:
+            return
+
+        vm = self.vault_manager()
+        if not vm.is_unlocked():
+            self.show_vault_unlock(
+                message=f"Unlock vault to remove protection from: {folder_path}",
+                on_success=lambda: self.unmark_folder_vault(folder_path)
+            )
+            return
+
+        self.unmark_folder_vault(folder_path)
+
+    def unmark_folder_vault(self, folder_path: str) -> None:
+        try:
+            db = self.vault_db()
+            vm = self.vault_manager()
+            db.remove_vault_folder(folder_path)
+
+            for snippet in db.get_snippets_by_folder(folder_path):
+                if snippet.get("is_encrypted"):
+                    try:
+                        plain = vm.decrypt(snippet.get("snippet", ""))
+                        db.update_snippet_content(snippet["id"], plain)
+                        db.set_snippet_encrypted(snippet["id"], False)
+                    except Exception as exc:
+                        logger.error("Failed to decrypt snippet %s: %s", snippet.get("id"), exc)
+
+            self.refresh_vault_folder_icons()
+            self.update_vault_ui()
+            self.editor.load_snippets()
+            self.snippet_service.refresh()
+        except Exception as exc:
+            logger.error("Failed to unmark folder vault: %s", exc)
+
+    def on_vault_folder_clicked(self, folder_path: str) -> None:
+        """Open setup wizard if vault not configured; otherwise show unlock dialog when locked."""
+        vm = self.vault_manager()
+        cfg = self.vault_config()
+        if not vm.is_setup(cfg):
+            self.show_vault_settings()
+        elif not vm.is_unlocked():
+            self.show_vault_unlock(
+                message=f"Unlock the vault to access: {folder_path}",
+                on_success=self.update_vault_ui,
+            )
+
+    def show_vault_unlock(self, message: str = "", on_success=None) -> None:
+        from ui.widgets.vault_unlock_dialog import VaultUnlockDialog
+        dlg = VaultUnlockDialog(self.vault_config(), parent=self, message=message)
+        dlg.unlocked.connect(lambda _: self.update_vault_ui())
+        if on_success:
+            dlg.unlocked.connect(lambda _: on_success())
+        dlg.exec()
+        if dlg.recovery_was_used:
+            self.show_forced_password_reset()
+
+    def show_forced_password_reset(self) -> None:
+        from ui.widgets.vault_setup_dialog import VaultSetupDialog
+        dlg = VaultSetupDialog(self.vault_config(), self.vault_db(), mode="force_reset", parent=self)
+        def on_configured(updated):
+            self.parent.cfg = updated
+            self.apply_vault_timeout_from_config()
+            self.update_vault_ui()
+        dlg.vaultConfigured.connect(on_configured)
+        dlg.exec()
+
+    def on_vault_snippet_triggered(self, trigger: str, snippet_entry: dict,
+                                    style: str, return_press: bool) -> None:
+        """Called from expander background thread when a locked vault snippet is triggered."""
+        self.vault_trigger_signal.emit(trigger, snippet_entry, style, return_press)
+
+    def handle_vault_trigger_main(self, trigger: str, snippet_entry: dict,
+                                   style: str, return_press: bool) -> None:
+        try:
+            vm = self.vault_manager()
+
+            # If vault was unlocked between trigger detection and now, expand directly.
+            if vm.is_unlocked():
+                expander = self.snippet_service.expander
+                try:
+                    if snippet_entry.get("is_encrypted"):
+                        plain = vm.decrypt(snippet_entry.get("snippet", ""))
+                    else:
+                        plain = snippet_entry.get("snippet", "")
+                    vm.reset_activity_timer()
+                    with expander.buffer_lock:
+                        expander.buffer = trigger
+                        expander.cursor_pos = len(trigger)
+                    expander.expand(trigger, plain, style, return_press)
+                    expander.clear_buffer()
+                except Exception as exc:
+                    logger.error("Direct vault expand failed: %s", exc)
+                return
+
+            from ui.widgets.vault_unlock_dialog import VaultUnlockDialog
+            from PySide6.QtCore import Qt as _Qt
+            dlg = VaultUnlockDialog(
+                self.vault_config(), parent=self,
+                message=f"Unlock vault to paste snippet: {snippet_entry.get('label', trigger)}"
+            )
+            # Stay on top even when the main window is hidden (minimized to tray)
+            dlg.setWindowFlags(dlg.windowFlags() | _Qt.WindowStaysOnTopHint)
+
+            def after_unlock(_):
+                try:
+                    inner_vm = self.vault_manager()
+                    if snippet_entry.get("is_encrypted"):
+                        raw = snippet_entry.get("snippet", "")
+                        try:
+                            plain = inner_vm.decrypt(raw)
+                        except Exception:
+                            logger.warning("Decrypt failed for '%s'; using raw content", trigger)
+                            plain = raw
+                    else:
+                        plain = snippet_entry.get("snippet", "")
+                    inner_vm.reset_activity_timer()
+                    self.update_vault_ui()
+                    expander = self.snippet_service.expander
+
+                    def do_expand():
+                        # Buffer was cleared before dialog; restore trigger so
+                        # expand() knows how many chars to backspace.
+                        with expander.buffer_lock:
+                            expander.buffer = trigger
+                            expander.cursor_pos = len(trigger)
+                        expander.expand(trigger, plain, style, return_press)
+                        expander.clear_buffer()
+
+                    # Delay so the dialog fully closes and the OS returns focus
+                    # to the original application before backspaces are sent.
+                    QTimer.singleShot(150, do_expand)
+                except Exception as exc:
+                    logger.error("Failed to decrypt and expand vault snippet: %s", exc)
+
+            dlg.unlocked.connect(after_unlock)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            dlg.exec()
+            if dlg.recovery_was_used:
+                self.show_forced_password_reset()
+        except Exception as exc:
+            logger.error("handle_vault_trigger_main failed: %s", exc)
+
+    def show_vault_settings(self) -> None:
+        """Open vault management dialog (change or disable password) from settings."""
+        from ui.widgets.vault_setup_dialog import VaultSetupDialog
+        cfg = self.vault_config()
+        vm = self.vault_manager()
+        is_first_setup = not vm.is_setup(cfg)
+        mode = "change" if not is_first_setup else "setup"
+        dlg = VaultSetupDialog(cfg, self.vault_db(), mode=mode, parent=self)
+
+        def on_vault_configured(updated):
+            self.parent.cfg = updated
+            self.apply_vault_timeout_from_config()
+            self.update_vault_ui()
+            if is_first_setup:
+                # Create a default "Vault" folder so it immediately appears in the tree
+                db = self.vault_db()
+                if not db.get_vault_folders():
+                    QTimer.singleShot(0, lambda: self.mark_folder_vault("Vault"))
+
+        dlg.vaultConfigured.connect(on_vault_configured)
+        dlg.exec()
+
+    def disable_vault(self) -> None:
+        from ui.widgets.vault_setup_dialog import VaultSetupDialog
+        cfg = self.vault_config()
+        dlg = VaultSetupDialog(cfg, self.vault_db(), mode="disable", parent=self)
+
+        def after_disable(updated):
+            self.parent.cfg = updated
+            self.refresh_vault_folder_icons()
+            self.update_vault_ui()
+            self.editor.load_snippets()
+            self.snippet_service.refresh()
+
+        dlg.vaultConfigured.connect(after_disable)
+        dlg.exec()
 
     def refresh_theme_display(self) -> None:
         """Re-apply theme/scale/accent after a live change to those settings."""
