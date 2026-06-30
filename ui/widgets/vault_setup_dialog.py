@@ -786,7 +786,7 @@ class VaultSetupDialog(QDialog):
         if hasattr(self, "recovery_code_label"):
             self.recovery_code_label.clear()
 
-    def _confirm_cancel_setup(self) -> bool:
+    def confirm_cancel_setup(self) -> bool:
         from PySide6.QtWidgets import QMessageBox
         ret = QMessageBox.question(
             self,
@@ -802,7 +802,7 @@ class VaultSetupDialog(QDialog):
         if self.force_reset:
             return
         if self.mode == "setup" and not self.cancel_confirmed:
-            if not self._confirm_cancel_setup():
+            if not self.confirm_cancel_setup():
                 return
             self.cancel_confirmed = True
         self.clear_sensitive_fields()
@@ -813,7 +813,7 @@ class VaultSetupDialog(QDialog):
             event.ignore()
             return
         if self.mode == "setup" and not self.cancel_confirmed:
-            if not self._confirm_cancel_setup():
+            if not self.confirm_cancel_setup():
                 event.ignore()
                 return
             self.cancel_confirmed = True

@@ -270,10 +270,13 @@ class SnippetDB:
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_enabled ON snippets(enabled);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_folder ON snippets(folder);")
+                # Composite index serves ORDER BY folder, id in get_all_snippets
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_folder_id ON snippets(folder, id);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_label ON snippets(label);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_tags ON snippets(tags);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_trigger ON snippets(trigger);")
+                # idx_snippets_trigger is intentionally omitted: the UNIQUE constraint
+                # on the trigger column already creates an implicit index.
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_encrypted ON snippets(is_encrypted);")
 
                 # Create FTS5 virtual table for full-text search
                 try:
@@ -506,6 +509,26 @@ class SnippetDB:
         except sqlite3.Error as e:
             logger.exception("Failed to retrieve snippets from database")
             raise DatabaseOperationError(f"Failed to fetch snippets: {e}") from e
+
+    def get_snippet_count(self) -> int:
+        """
+        Get the total count of snippets in the database.
+
+        Returns:
+            int: Total number of snippets.
+
+        Raises:
+            DatabaseOperationError: If query fails.
+        """
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM snippets")
+                count = cur.fetchone()[0]
+            return count
+        except sqlite3.Error as e:
+            logger.exception("Failed to get snippet count")
+            raise DatabaseOperationError(f"Failed to count snippets: {e}") from e
 
     def get_snippet(self, snippet_id: int) -> Dict[str, Any]:
         """

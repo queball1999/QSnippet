@@ -129,7 +129,6 @@ class main():
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.snippet_db_file = self.app_data_dir / "snippets.db"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
 
@@ -147,14 +146,8 @@ class main():
         self.settings_file = self.app_data_dir / "settings.yaml"
         self.license_file  = self.working_dir / "LICENSE"
 
-        # Use this to ensure files exist
-        # Define files in a list of dicts with "file" and "function" keys
+        # Ensure config and settings files exist first (DB deferred until settings are loaded)
         sys_utils.ensure_files_exist([
-            {
-                "file": self.snippet_db_file,
-                "function": lambda p=self.snippet_db_file:
-                    FileUtils.create_snippets_db_file(p)
-            },
             {
                 "file": self.config_file,
                 "function": lambda p=self.config_file:
@@ -185,7 +178,31 @@ class main():
             default_path=self.default_settings_file,
             user_path=self.settings_file,
         )
+
+        # Resolve the snippet DB path: use custom directory from settings if set,
+        # otherwise fall back to the default app data directory.
+        custom_db_dir = (
+            self.settings.get("saving", {})
+            .get("db_path", {})
+            .get("value", "")
+            or ""
+        ).strip()
         
+        if custom_db_dir:
+            self.snippet_db_file = Path(custom_db_dir) / "snippets.db"
+            Path(custom_db_dir).mkdir(parents=True, exist_ok=True)
+        else:
+            self.snippet_db_file = self.app_data_dir / "snippets.db"
+
+        # Ensure the DB file exists at the resolved path
+        sys_utils.ensure_files_exist([
+            {
+                "file": self.snippet_db_file,
+                "function": lambda p=self.snippet_db_file:
+                    FileUtils.create_snippets_db_file(p)
+            },
+        ])
+
         # Initialize Snippet DB instance
         self.snippet_db = SnippetDB(self.snippet_db_file)
 

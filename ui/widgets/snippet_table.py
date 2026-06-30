@@ -100,6 +100,12 @@ class SnippetTable(QTreeView):
         # Vault state
         self.vault_locked = False
 
+        # Block expand-arrow clicks from opening locked/unconfigured vault folders.
+        # mousePressEvent only catches clicks whose indexAt() lands on the item;
+        # the branch/arrow area returns an invalid index, so we use the expanded
+        # signal as a catch-all and immediately collapse if the vault is not open.
+        self.expanded.connect(self.on_vault_expanded)
+
         logger.info("SnippetTable initialized successfully")
 
     def configure_columns(self):
@@ -209,13 +215,16 @@ class SnippetTable(QTreeView):
         self.model.setHorizontalHeaderLabels(['Label','Trigger','Enabled','Paste Style','Tags'])
         self.folders = {}  # folder_name > QStandardItem
 
+        vault_is_setup = getattr(self, "vault_is_setup", False)
         vault_locked = getattr(self, "vault_locked", False)
         vault_folder_set = getattr(self, "vault_folder_set", set())
+        vault_unlocked = vault_is_setup and not vault_locked
 
         for entry in entries:
             folder = entry.get('folder', 'Default')
-            # Don't show vault snippet content while the vault is locked
-            if vault_locked and folder in vault_folder_set:
+            # Only show vault snippet rows when the vault is explicitly unlocked.
+            # Covers both "set up and locked" and "not yet configured" states.
+            if not vault_unlocked and folder in vault_folder_set:
                 continue
             parent = self.get_or_create_folder(folder)
 
@@ -323,6 +332,28 @@ class SnippetTable(QTreeView):
                     folder_item.removeRows(0, row_count)
             except RuntimeError:
                 pass
+
+    def on_vault_expanded(self, proxy_index) -> None:
+        """Immediately collapse any vault folder that is not currently unlocked.
+
+        Qt's branch/expand-arrow click bypasses mousePressEvent's indexAt() check,
+        so this signal handler is the authoritative guard against accidental expansion.
+        """
+        idx0 = proxy_index.sibling(proxy_index.row(), 0)
+        src_idx = self.proxy.mapToSource(idx0)
+        item = self.model.itemFromIndex(src_idx)
+        idata = item.data(Qt.UserRole) if item else None
+        if not isinstance(idata, dict) or idata.get("_type") != "folder":
+            return
+        folder_path = idata.get("path", "")
+        vault_set = getattr(self, "vault_folder_set", set())
+        if folder_path not in vault_set:
+            return
+        vault_is_setup = getattr(self, "vault_is_setup", False)
+        vault_locked   = getattr(self, "vault_locked", False)
+        if vault_is_setup and not vault_locked:
+            return  # vault is unlocked - allow expansion
+        self.collapse(proxy_index)
 
     def apply_vault_icon(self, item: QStandardItem) -> None:
         try:
@@ -692,8 +723,8 @@ class SnippetTable(QTreeView):
                         vault_is_setup = getattr(self, "vault_is_setup", False)
                         vault_locked   = getattr(self, "vault_locked", False)
                         if vault_is_setup and not vault_locked:
-                            return super().mousePressEvent(event)  # unlocked — expand normally
-                        return  # locked or not configured — block expansion
+                            return super().mousePressEvent(event)  # unlocked - expand normally
+                        return  # locked or not configured - block expansion
 
                     return super().mousePressEvent(event)
 

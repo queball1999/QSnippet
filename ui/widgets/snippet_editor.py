@@ -82,6 +82,11 @@ class SnippetEditor(QWidget):
         self.reload_timer.setInterval(50)  # 50ms delay to ensure DB operations complete
         self.reload_timer.timeout.connect(self.perform_reload)
 
+        # Inactivity timer for new snippet form
+        self.inactivity_timer = QTimer(self)
+        self.inactivity_timer.setSingleShot(True)
+        self.inactivity_timer.timeout.connect(self.on_inactivity_timeout)
+
         # Track expand state before search started (None = not in search mode)
         self.pre_search_expanded = None
 
@@ -161,6 +166,11 @@ class SnippetEditor(QWidget):
         self.form.deleteClicked.connect(self.on_delete)
         self.form.cancelPressed.connect(self.show_home_widget)
 
+        # Reset inactivity timer on any field edit
+        self.form.new_input.textChanged.connect(self.reset_inactivity_timer)
+        self.form.trigger_input.textChanged.connect(self.reset_inactivity_timer)
+        self.form.snippet_input.textChanged.connect(self.reset_inactivity_timer)
+
         # Layout
         self.left_layout.addLayout(search_layout)
         self.left_layout.addWidget(self.table)
@@ -208,8 +218,7 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        old_text = self.parent.statusBar().currentMessage() or ""
-        self.parent.statusBar().showMessage(f"Loading Snippets...")
+        self.parent.statusBar().showMessage("Loading snippets...")
 
         # Always pre-load vault folder set so lock icons render correctly.
         # "Vault" is always included so the folder is visible even before setup.
@@ -223,7 +232,7 @@ class SnippetEditor(QWidget):
 
         snippets = self.main.snippet_db.get_all_snippets()
         self.table.load_entries(snippets)
-        self.parent.statusBar().showMessage(old_text)
+        self.parent.show_snippets_loaded_message()
 
     def safe_reload_snippets(self):
         """
@@ -301,6 +310,7 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
+        self.stop_inactivity_timer()
         self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
@@ -322,6 +332,7 @@ class SnippetEditor(QWidget):
         self.form.clear_form()
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
+        self.start_inactivity_timer()
 
     def toggle_collapse_folders(self):
         """
@@ -356,6 +367,7 @@ class SnippetEditor(QWidget):
             Exception: If an unexpected error occurs during save.
         """
         try:
+            self.stop_inactivity_timer()
             if not self.form.validate():
                 return
             
@@ -1088,6 +1100,73 @@ class SnippetEditor(QWidget):
 
         box.exec()
 
+    # ----- Inactivity Timer -----
+
+    def get_inactivity_timeout_ms(self):
+        """Return the configured inactivity timeout in milliseconds, or None if disabled."""
+        val = (
+            self.main.settings
+            .get("general", {})
+            .get("form_behavior", {})
+            .get("inactivity_timeout", {})
+            .get("value", "120")
+        )
+        if str(val).lower() == "off":
+            return None
+        try:
+            return int(val) * 1000
+        except (ValueError, TypeError):
+            return 120 * 1000
+
+    def start_inactivity_timer(self):
+        timeout_ms = self.get_inactivity_timeout_ms()
+        if timeout_ms is None:
+            return
+        self.inactivity_timer.start(timeout_ms)
+
+    def stop_inactivity_timer(self):
+        self.inactivity_timer.stop()
+
+    def reset_inactivity_timer(self):
+        """Restart the timer only when it is already active (i.e. new form is open)."""
+        if self.inactivity_timer.isActive():
+            self.start_inactivity_timer()
+
+    def on_inactivity_timeout(self):
+        """Called when the inactivity timer fires while the new snippet form is open."""
+        if self.stack.currentWidget() is not self.form:
+            return
+        # Only act on new (unsaved) snippets
+        if getattr(self.form, "entry_id", None) is not None:
+            return
+
+        if not self.form.has_unsaved_changes():
+            logger.debug("Inactivity timeout: empty new form closed automatically")
+            self.show_home_widget()
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle("Inactivity Detected")
+        box.setText(
+            "The new snippet form has been idle.\n\n"
+            "Would you like to save your changes or discard them?"
+        )
+        save_btn = box.addButton("Save", QMessageBox.AcceptRole)
+        discard_btn = box.addButton("Discard", QMessageBox.DestructiveRole)
+        keep_btn = box.addButton("Keep Editing", QMessageBox.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == save_btn:
+            self.on_save()
+        elif clicked == discard_btn:
+            self.show_home_widget()
+        else:
+            # Restart timer for another cycle
+            self.start_inactivity_timer()
+
     def applyStyles(self):
         """
         Apply font and size styling to search controls and all child widgets.
@@ -1130,6 +1209,7 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
+        self.stop_inactivity_timer()
         self.resume_service()
         self.stack.setCurrentIndex(0)   # go home
 

@@ -190,6 +190,24 @@ general:
         - "off"
       description: Clear snippet clipboard contents after the specified number of seconds.
 
+  form_behavior:
+    description: Configure how the new snippet form behaves when left idle.
+    inactivity_timeout:
+      type: string
+      value: "60"
+      default: "60"
+      options:
+        - "30"
+        - "60"
+        - "120"
+        - "300"
+        - "600"
+        - "off"
+      description: >
+        Seconds of inactivity before the new snippet form is closed automatically.
+        If no content has been entered the form closes silently; otherwise you are
+        prompted to save or discard. Set to "off" to disable.
+
 notices:
   disable_notices:
     type: bool
@@ -209,3 +227,10 @@ saving:
     value: true
     default: true
     description: Return to the home view after saving. If unchecked, remain on the current page.
+
+  db_path:
+    type: string
+    value: ""
+    default: ""
+    hidden: true
+    description: Custom directory path for the snippets database. Supports cloud-synced folders (NextCloud, OneDrive, Dropbox) and network shares (SMB/NFS). Leave blank to use the default app data location.

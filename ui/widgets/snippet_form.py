@@ -336,6 +336,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.folder_input.setCurrentText("Default")
         self.entry_id = None
         self.entry_is_encrypted = False
+        self.original_entry = None
         self.snippet_input.setReadOnly(False)
         self.snippet_input.setPlaceholderText(
             "Text that appears when you type a shortcut. Type { to insert placeholders..."
@@ -409,6 +410,37 @@ Snippets come in handy for text you enter often or for standard messages you sen
         raw_tags = entry.get('tags', '')
         tags = [t.strip() for t in raw_tags.split(',') if t.strip()]
         self.tags_input.setCheckedItems(tags)
+
+        # Snapshot the loaded state so we can detect changes later
+        self.original_entry = self.get_entry()
+
+    def has_unsaved_changes(self) -> bool:
+        """Return True if the form differs from its state when it was last loaded or cleared."""
+        entry_id = getattr(self, "entry_id", None)
+
+        if entry_id is None:
+            name = self.new_input.text().strip()
+            trigger = self.trigger_input.text().strip()
+            snippet = self.snippet_input.toPlainText().strip()
+            return not (name in ("", "New Snippet") and not trigger and not snippet)
+
+        if self.original_entry is None:
+            return False
+
+        def sorted_tags(tags_str):
+            return ",".join(sorted(t.strip() for t in tags_str.split(",") if t.strip()))
+
+        current = self.get_entry()
+        return (
+            current["label"] != self.original_entry["label"]
+            or current["trigger"] != self.original_entry["trigger"]
+            or current["snippet"] != self.original_entry["snippet"]
+            or current["enabled"] != self.original_entry["enabled"]
+            or current["folder"] != self.original_entry["folder"]
+            or current["paste_style"] != self.original_entry["paste_style"]
+            or current["return_press"] != self.original_entry["return_press"]
+            or sorted_tags(current["tags"]) != sorted_tags(self.original_entry["tags"])
+        )
 
     def get_entry(self) -> dict:
         """

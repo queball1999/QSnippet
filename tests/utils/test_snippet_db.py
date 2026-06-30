@@ -698,7 +698,7 @@ def reset_vault_singleton():
 
 
 class TestInsertSnippetVaultAware:
-    """Tests for insert_snippet_vault_aware() — the single vault-encryption gate."""
+    """Tests for insert_snippet_vault_aware() - the single vault-encryption gate."""
 
     _BASE = {
         "enabled": True, "label": "Test", "trigger": "/t",
@@ -755,7 +755,7 @@ class TestInsertSnippetVaultAware:
         db.insert_snippet_vault_aware(entry, vault_manager=vm)
         row = db.get_snippet_by_trigger("/move")
 
-        # Move out of vault — is_encrypted=True, destination is non-vault folder
+        # Move out of vault - is_encrypted=True, destination is non-vault folder
         out_entry = {**row, "folder": "General", "is_encrypted": True}
         db.insert_snippet_vault_aware(out_entry, vault_manager=vm)
         moved = db.get_snippet_by_trigger("/move")

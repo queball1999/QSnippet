@@ -405,7 +405,7 @@ class TestValidateSnippetFieldsControlChars:
 
 
 class TestParseAndValidateSnippets:
-    """Tests for parse_and_validate_snippets() — in-memory validation path used after decryption."""
+    """Tests for parse_and_validate_snippets() - in-memory validation path used after decryption."""
 
     _VALID = {
         "label": "Test",

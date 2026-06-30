@@ -330,6 +330,26 @@ class QSnippet(QMainWindow):
         self.state = "stopped"
         self.update_status_bar("Stopped")
 
+    def swap_database(self, new_path: Path) -> None:
+        """Hot-swap the snippet database to a new path without restarting the app."""
+        logger.info("Swapping database to %s", new_path)
+        was_running = self.snippet_service.active()
+
+        self.snippet_service.shutdown()
+        self.parent.snippet_db.close()
+
+        self.parent.snippet_db_file = new_path
+        from utils.snippet_db import SnippetDB
+        self.parent.snippet_db = SnippetDB(new_path)
+
+        self.snippet_service = SnippetService(new_path, settings_provider=lambda: self.parent.settings)
+        self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
+
+        if was_running:
+            self.start_service()
+
+        self.refresh_vault_folder_icons()
+
     def pause_service(self) -> None:
         """
         Pause the snippet service and update application state.
@@ -374,7 +394,7 @@ class QSnippet(QMainWindow):
 
     def update_status_bar(self, status: str) -> None:
         """
-        Update the status bar message when the editor is visible.
+        Update the status bar message.
 
         Args:
             status (str): The service status string to display.
@@ -383,10 +403,45 @@ class QSnippet(QMainWindow):
             None
         """
         try:
-            if self.editor.isVisible():
-                self.statusBar().showMessage(f"Service status: {status}")
+            self.statusBar().showMessage(f"Service status: {status}")
         except Exception as e:
             logger.exception(f"Failed to update status bar: {e}")
+
+    def show_snippets_loaded_message(self) -> None:
+        """
+        Display a temporary message showing loaded snippets count and DB path.
+        Auto-hides after 10 seconds and restores service status.
+        """
+        try:
+            db_path = str(self.parent.snippet_db_file)
+            snippet_count = self.parent.snippet_db.get_snippet_count()
+
+            # Truncate path to ~50 chars for display
+            display_path = db_path
+            if len(db_path) > 50:
+                display_path = "..." + db_path[-47:]
+
+            message = f"Loaded {snippet_count} snippets from {display_path}"
+
+            status_bar = self.statusBar()
+            status_bar.showMessage(message)
+
+            # Set tooltip with full path on the status bar
+            status_bar.setToolTip(f"Database: {db_path}")
+
+            # Clear message after 10 seconds and restore service status
+            def restore_status():
+                if self.state == "running":
+                    self.update_status_bar("Running")
+                elif self.state == "paused":
+                    self.update_status_bar("Paused")
+                elif self.state == "stopped":
+                    self.update_status_bar("Stopped")
+
+            QTimer.singleShot(5000, restore_status)
+
+        except Exception as e:
+            logger.exception(f"Failed to show snippets loaded message: {e}")
 
     # Handlers
     def handle_startup_signal(self, enabled: bool) -> None:
@@ -873,14 +928,16 @@ class QSnippet(QMainWindow):
 
         from ui.widgets.settings import SettingsDialog
         from ui.widgets.settings.vault_settings_page import VaultSettingsPage
+        from ui.widgets.settings.db_settings_page import DbSettingsPage
 
         vault_page = VaultSettingsPage(window=self)
+        db_page = DbSettingsPage(window=self)
 
         self.settings_dialog = SettingsDialog(
             settings=self.parent.settings,
             save_callback=self.save_settings,
             parent=self,
-            extra_pages=[("Vault", vault_page)],
+            extra_pages=[("Vault", vault_page), ("Database", db_page)],
         )
         self.settings_dialog.exec()
 
@@ -1443,11 +1500,56 @@ class QSnippet(QMainWindow):
         Raises:
             SystemExit: Always raised when exiting the application.
         """
+        if not self.confirm_discard_new_form():
+            return
         logger.info("Exiting QSnippet")
         self.snippet_service.shutdown()
         self.parent.snippet_db.close()
         self.tray.hide()
         sys.exit()
+
+    def confirm_discard_new_form(self) -> bool:
+        """
+        Check whether it is safe to close or quit while the snippet form is open.
+
+        Covers both new and edit modes. Silently navigates home when there are no
+        changes; shows Save / Discard / Keep Editing when there are.
+
+        Returns:
+            bool: True if the caller may proceed (close/quit), False to cancel.
+        """
+        if self.editor.stack.currentWidget() is not self.editor.form:
+            return True
+
+        if not self.editor.form.has_unsaved_changes():
+            self.editor.show_home_widget()
+            return True
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved Snippet")
+        box.setText(
+            "The snippet form has unsaved changes.\n\n"
+            "Would you like to save your changes or discard them?"
+        )
+        save_btn = box.addButton("Save", QMessageBox.AcceptRole)
+        box.addButton("Discard", QMessageBox.DestructiveRole)
+        keep_btn = box.addButton("Keep Editing", QMessageBox.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == keep_btn:
+            return False
+        if clicked == save_btn:
+            self.editor.on_save()
+            # If form is still showing, save failed — cancel the close
+            if self.editor.stack.currentWidget() is self.editor.form:
+                return False
+            return True
+
+        # Discard
+        self.editor.show_home_widget()
+        return True
 
     def closeEvent(self, event) -> None:
         """
@@ -1462,6 +1564,18 @@ class QSnippet(QMainWindow):
         Returns:
             None
         """
-        logger.debug("Close event intercepted; hiding window")
         event.ignore()
+        if not self.confirm_discard_new_form():
+            return
+        logger.debug("Close event intercepted; hiding window")
+        self.editor.stop_inactivity_timer()
         self.hide()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if (
+            hasattr(self, "editor")
+            and self.editor.stack.currentWidget() is self.editor.form
+            and getattr(self.editor.form, "entry_id", None) is None
+        ):
+            self.editor.start_inactivity_timer()
