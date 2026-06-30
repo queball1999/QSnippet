@@ -7,8 +7,9 @@ from PySide6.QtWidgets import (
     QLineEdit, QTextEdit, QHeaderView, QSizePolicy, QFrame,
     QMessageBox
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QColor, QFont
+from .QAnimatedSwitch import QAnimatedSwitch
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class PlaceholderDialog(QDialog):
         self.snippet_db = snippet_db
         self.selected_row_id = None    # DB id of the currently selected custom row
         self.is_system_row = False     # Whether the selected row is a system placeholder
+        self.was_encrypted = False     # Track if placeholder was encrypted before editing
 
         self.setWindowTitle("Manage Placeholders")
         self.resize(860, 560)
@@ -156,6 +158,23 @@ class PlaceholderDialog(QDialog):
         self.desc_input.setPlaceholderText("Short description (optional)")
         self.desc_input.setMaxLength(500)
 
+        # Vault encryption toggle
+        self.vault_encrypt_toggle = QAnimatedSwitch(
+            objectName="vault_encrypt_toggle",
+            on_text="Vault Encrypted",
+            off_text="Vault Encrypted",
+            text_position="left",
+            toggle_size=QSize(50, 30),
+            start_state="off",
+            parent=self
+        )
+        self.vault_encrypt_toggle.stateChanged.connect(self.on_vault_encrypt_toggled)
+
+        self.vault_encrypt_hint = QLabel("Value will be stored encrypted. Vault must be unlocked to view or edit.")
+        self.vault_encrypt_hint.setObjectName("FieldHint")
+        self.vault_encrypt_hint.setWordWrap(True)
+        self.vault_encrypt_hint.hide()
+
         # Value field
         value_label = QLabel("Replacement Value")
         value_label.setObjectName("FieldLabel")
@@ -189,6 +208,8 @@ class PlaceholderDialog(QDialog):
         right_layout.addWidget(self.name_error)
         right_layout.addWidget(desc_label)
         right_layout.addWidget(self.desc_input)
+        right_layout.addWidget(self.vault_encrypt_toggle, alignment=Qt.AlignLeft)
+        right_layout.addWidget(self.vault_encrypt_hint)
         right_layout.addWidget(value_label)
         right_layout.addWidget(self.value_input)
         right_layout.addStretch()
@@ -217,22 +238,27 @@ class PlaceholderDialog(QDialog):
 
         # System rows (read-only)
         for ph in SYSTEM_PLACEHOLDERS:
-            self.add_table_row("System", ph["name"], ph["description"], row_id=None, is_system=True)
+            self.add_table_row("System", ph["name"], ph["description"], row_id=None, is_system=True, is_encrypted=False)
 
         # Custom rows from DB
         for ph in self.snippet_db.get_all_custom_placeholders():
-            self.add_table_row("Custom", ph["name"], ph["description"], row_id=ph["id"], is_system=False)
+            self.add_table_row("Custom", ph["name"], ph["description"], row_id=ph["id"], is_system=False, is_encrypted=ph.get("is_encrypted", False))
 
-    def add_table_row(self, row_type: str, name: str, description: str, row_id, is_system: bool):
+    def add_table_row(self, row_type: str, name: str, description: str, row_id, is_system: bool, is_encrypted: bool = False):
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        type_item  = QTableWidgetItem(row_type)
+        # Add lock icon for encrypted custom placeholders
+        if is_encrypted and not is_system:
+            type_item = QTableWidgetItem("🔒 Custom")
+        else:
+            type_item = QTableWidgetItem(row_type)
+
         name_item  = QTableWidgetItem(name)
         desc_item  = QTableWidgetItem(description)
 
         # Store metadata in the name cell
-        name_item.setData(Qt.UserRole, {"id": row_id, "is_system": is_system})
+        name_item.setData(Qt.UserRole, {"id": row_id, "is_system": is_system, "is_encrypted": is_encrypted})
 
         if is_system:
             grey = QColor("#aaaaaa")
@@ -285,13 +311,43 @@ class PlaceholderDialog(QDialog):
             # Editable custom placeholder
             ph_list = self.snippet_db.get_all_custom_placeholders()
             ph = next((p for p in ph_list if p["id"] == self.selected_row_id), None)
-            value = ph["value"] if ph else ""
+            is_encrypted = ph.get("is_encrypted", False) if ph else False
+            self.was_encrypted = is_encrypted
+
             self.editor_title.setText(f"Placeholder: {{{name}}}")
             self.set_value_placeholder_hint(name)
             self.system_notice.hide()
             self.name_input.setText(name)
             self.desc_input.setText(desc)
-            self.value_input.setPlainText(value)
+
+            # Handle vault encryption display
+            self.vault_encrypt_toggle.stateChanged.disconnect(self.on_vault_encrypt_toggled)
+            self.vault_encrypt_toggle.setChecked(is_encrypted)
+            self.vault_encrypt_toggle.stateChanged.connect(self.on_vault_encrypt_toggled)
+
+            if is_encrypted:
+                from utils.vault_manager import VaultManager
+                vm = VaultManager.get_instance()
+                if vm.is_unlocked():
+                    try:
+                        decrypted_value = vm.decrypt(ph["value"]) if ph else ""
+                        self.value_input.setPlainText(decrypted_value)
+                        self.value_input.setReadOnly(False)
+                        self.value_input.setPlaceholderText("Text that will replace {" + name + "} when a snippet is expanded...")
+                    except Exception as e:
+                        logger.warning("Failed to decrypt placeholder '%s': %s", name, e)
+                        self.value_input.setPlainText("")
+                        self.value_input.setReadOnly(False)
+                else:
+                    self.value_input.setPlainText("")
+                    self.value_input.setPlaceholderText("Vault locked — unlock to view or edit")
+                    self.value_input.setReadOnly(True)
+            else:
+                value = ph["value"] if ph else ""
+                self.value_input.setPlainText(value)
+                self.value_input.setReadOnly(False)
+                self.value_input.setPlaceholderText("Text that will replace {" + name + "} when a snippet is expanded...")
+
             self.set_editor_enabled(True)
             self.delete_btn.setEnabled(True)
 
@@ -302,11 +358,16 @@ class PlaceholderDialog(QDialog):
         self.name_input.clear()
         self.desc_input.clear()
         self.value_input.clear()
+        self.value_input.setReadOnly(False)
+        self.value_input.setPlaceholderText("Text that will replace {placeholder} when a snippet is expanded...")
         self.set_value_placeholder_hint(None)
         self.name_error.hide()
         self.system_notice.hide()
+        self.vault_encrypt_toggle.setChecked(False)
+        self.vault_encrypt_hint.hide()
         self.selected_row_id = None
         self.is_system_row = False
+        self.was_encrypted = False
 
     def set_editor_enabled(self, enabled: bool, show_fields: bool = False):
         """Enable or disable the right-panel editor controls."""
@@ -314,8 +375,17 @@ class PlaceholderDialog(QDialog):
         for w in (self.name_input, self.desc_input, self.value_input):
             w.setReadOnly(not enabled)
             w.setVisible(visible)
+        self.vault_encrypt_toggle.enable(enabled)
+        self.vault_encrypt_toggle.setVisible(visible)
         self.save_btn.setEnabled(enabled)
         self.save_btn.setVisible(visible)
+
+    def on_vault_encrypt_toggled(self, state):
+        """Show/hide vault encryption hint when toggle is toggled."""
+        if self.vault_encrypt_toggle.isChecked():
+            self.vault_encrypt_hint.show()
+        else:
+            self.vault_encrypt_hint.hide()
 
     def validate_name(self, text: str):
         """Inline validation feedback for the name field."""
@@ -376,6 +446,7 @@ class PlaceholderDialog(QDialog):
         name  = self.name_input.text().strip()
         desc  = self.desc_input.text().strip()
         value = self.value_input.toPlainText().strip()
+        is_vault_encrypted = self.vault_encrypt_toggle.isChecked()
 
         # Validation
         if not name:
@@ -389,7 +460,30 @@ class PlaceholderDialog(QDialog):
                 "System placeholder names cannot be reused."
             )
             return
-        entry = {"name": name, "value": value, "description": desc}
+
+        # Check vault encryption requirements
+        if is_vault_encrypted:
+            from utils.vault_manager import VaultManager
+            vm = VaultManager.get_instance()
+            if not vm.is_unlocked():
+                QMessageBox.warning(
+                    self, "Vault Locked",
+                    "Vault must be unlocked to save encrypted placeholders.\n"
+                    "Please unlock the vault first."
+                )
+                return
+            try:
+                encrypted_value = vm.encrypt(value)
+            except Exception as e:
+                logger.exception("Failed to encrypt placeholder value")
+                QMessageBox.critical(
+                    self, "Encryption Error",
+                    f"Failed to encrypt placeholder value: {e}"
+                )
+                return
+            entry = {"name": name, "value": encrypted_value, "description": desc, "is_encrypted": 1}
+        else:
+            entry = {"name": name, "value": value, "description": desc, "is_encrypted": 0}
 
         if self.selected_row_id is None:
             # New placeholder - check for duplicate name among customs

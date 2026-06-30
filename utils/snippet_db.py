@@ -135,6 +135,7 @@ class SnippetDB:
         self.setup_fts()
         self.create_vault_folders_table()
         self.create_custom_placeholders_table()
+        self.migrate_custom_placeholders_vault_schema()
         self.seed_default_custom_placeholders()
         self.seed_empty_db()
         logger.info("SnippetDB initialized successfully")
@@ -1056,10 +1057,10 @@ class SnippetDB:
     def create_custom_placeholders_table(self) -> None:
         """
         Create the custom_placeholders table if it does not exist.
-        
+
         Returns:
             None
-        
+
         Raises:
             DatabaseOperationError: If table creation fails.
         """
@@ -1071,7 +1072,8 @@ class SnippetDB:
                         id          INTEGER PRIMARY KEY AUTOINCREMENT,
                         name        TEXT UNIQUE NOT NULL,
                         value       TEXT NOT NULL DEFAULT '',
-                        description TEXT NOT NULL DEFAULT ''
+                        description TEXT NOT NULL DEFAULT '',
+                        is_encrypted BOOLEAN NOT NULL DEFAULT 0
                     )
                 """)
             logger.info("custom_placeholders table ensured")
@@ -1110,10 +1112,10 @@ class SnippetDB:
     def get_all_custom_placeholders(self) -> List[Dict[str, Any]]:
         """
         Retrieve all user-defined custom placeholders.
-        
+
         Returns:
-            list[dict]: A list of dicts with keys id, name, value, description.
-        
+            list[dict]: A list of dicts with keys id, name, value, description, is_encrypted.
+
         Raises:
             DatabaseOperationError: If retrieval fails.
         """
@@ -1121,9 +1123,9 @@ class SnippetDB:
         try:
             with self.managed_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT id, name, value, description FROM custom_placeholders ORDER BY name ASC")
+                cur.execute("SELECT id, name, value, description, is_encrypted FROM custom_placeholders ORDER BY name ASC")
                 rows = cur.fetchall()
-            result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3]} for r in rows]
+            result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3], "is_encrypted": bool(r[4])} for r in rows]
             logger.debug("Custom placeholders fetched: %d", len(result))
             return result
         except sqlite3.Error as e:
@@ -1135,8 +1137,8 @@ class SnippetDB:
         Insert a new custom placeholder.
 
         Args:
-            entry (dict): Dict with keys name, value, description.
-        
+            entry (dict): Dict with keys name, value, description, is_encrypted (optional, defaults to 0).
+
         Returns:
             bool: True on success, False on error.
         """
@@ -1144,8 +1146,13 @@ class SnippetDB:
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute(
-                    "INSERT INTO custom_placeholders (name, value, description) VALUES (:name, :value, :description)",
-                    entry,
+                    "INSERT INTO custom_placeholders (name, value, description, is_encrypted) VALUES (:name, :value, :description, :is_encrypted)",
+                    {
+                        "name": entry.get("name"),
+                        "value": entry.get("value", ""),
+                        "description": entry.get("description", ""),
+                        "is_encrypted": entry.get("is_encrypted", 0),
+                    },
                 )
             logger.info("Custom placeholder inserted successfully")
             return True
@@ -1158,8 +1165,8 @@ class SnippetDB:
         Update an existing custom placeholder by id.
 
         Args:
-            entry (dict): Dict with keys id, name, value, description.
-        
+            entry (dict): Dict with keys id, name, value, description, is_encrypted (optional).
+
         Returns:
             bool: True on success, False on error.
         """
@@ -1167,8 +1174,14 @@ class SnippetDB:
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute(
-                    "UPDATE custom_placeholders SET name=:name, value=:value, description=:description WHERE id=:id",
-                    entry,
+                    "UPDATE custom_placeholders SET name=:name, value=:value, description=:description, is_encrypted=:is_encrypted WHERE id=:id",
+                    {
+                        "id": entry.get("id"),
+                        "name": entry.get("name"),
+                        "value": entry.get("value", ""),
+                        "description": entry.get("description", ""),
+                        "is_encrypted": entry.get("is_encrypted", 0),
+                    },
                 )
             logger.info("Custom placeholder updated successfully")
             return True
@@ -1208,6 +1221,17 @@ class SnippetDB:
                     logger.info("Migrated: added is_encrypted column to snippets")
         except sqlite3.Error as exc:
             logger.warning("Vault schema migration failed: %s", exc)
+
+    def migrate_custom_placeholders_vault_schema(self) -> None:
+        """Add is_encrypted column to custom_placeholders if it does not exist (migration)."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(custom_placeholders)").fetchall()]
+                if "is_encrypted" not in cols:
+                    conn.execute("ALTER TABLE custom_placeholders ADD COLUMN is_encrypted BOOLEAN NOT NULL DEFAULT 0")
+                    logger.info("Migrated: added is_encrypted column to custom_placeholders")
+        except sqlite3.Error as exc:
+            logger.warning("Custom placeholder vault migration failed: %s", exc)
 
     def create_vault_folders_table(self) -> None:
         """Create the vault_folders table if it does not exist."""

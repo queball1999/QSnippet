@@ -120,6 +120,13 @@ class SnippetExpander:
         self.clear_buffer()
         logger.info("SnippetExpander reloaded snippets from DB")
 
+    def has_encrypted_placeholders(self, text: str) -> bool:
+        """Check if snippet text contains any vault-encrypted placeholders."""
+        return any(
+            ph.get("is_encrypted") and f"{{{ph['name']}}}" in text
+            for ph in self.custom_placeholders
+        )
+
     # Incremental trigger-map updates   update or remove a
     # single trigger in memory without a DB round-trip or
     # keyboard buffer clear.
@@ -680,6 +687,24 @@ class SnippetExpander:
             else:
                 snippet_text = snippet_entry.get("snippet", "")
 
+            # Check for encrypted placeholders if vault is not already being unlocked
+            if not is_vault_content and self.has_encrypted_placeholders(snippet_text):
+                from utils.vault_manager import VaultManager
+                vm = VaultManager.get_instance()
+                if not vm.is_unlocked():
+                    if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
+                        cb = self.vault_unlock_callback
+                        trig = trigger
+                        se = snippet_entry
+                        st = style
+                        rp = return_press
+                        threading.Thread(
+                            target=lambda: cb(trig, se, st, rp),
+                            daemon=True,
+                        ).start()
+                    self.clear_buffer()
+                    return
+
             logger.info("Trigger matched: %s", trigger)
             try:
                 self.expand(trigger, snippet_text, style, return_press)
@@ -885,7 +910,17 @@ class SnippetExpander:
 
         # --    User-defined custom placeholders ---
         for ph in self.custom_placeholders:
-            text = text.replace(f"{{{ph['name']}}}", ph["value"])
+            if ph.get("is_encrypted"):
+                from utils.vault_manager import VaultManager
+                vm = VaultManager.get_instance()
+                try:
+                    val = vm.decrypt(ph["value"]) if vm.is_unlocked() else ""
+                except Exception:
+                    logger.warning("Failed to decrypt placeholder '%s'", ph.get("name"))
+                    val = ""
+            else:
+                val = ph["value"]
+            text = text.replace(f"{{{ph['name']}}}", val)
 
         # --    Nested snippets ---
         nested_pattern = re.compile(r"\{\W(.+?)\}")
