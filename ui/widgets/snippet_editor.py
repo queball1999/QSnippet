@@ -112,6 +112,7 @@ class SnippetEditor(QWidget):
         self.search_bar = QLineEdit(clearButtonEnabled=True)
         self.search_bar.setObjectName("SearchBar")
         self.search_bar.setPlaceholderText("Search all the things...")
+        self.search_bar.setToolTip("Search all the things... (Ctrl+F to focus)")
         self.search_bar.setMinimumWidth(100)
         self.search_bar.textChanged.connect(self.on_search_text_changed)
         # This line must go here to ensure we initalize search first
@@ -1052,6 +1053,28 @@ class SnippetEditor(QWidget):
             results = [s for s in results if s.get("enabled", True)]
         elif filter_mode == "Disabled Only":
             results = [s for s in results if not s.get("enabled", False)]
+
+        # Always strip vault-folder snippets when vault is locked or not configured.
+        # Query VaultManager directly so this path is not affected by stale table state.
+        try:
+            window = self.parent
+            if hasattr(window, "vault_manager") and hasattr(window, "vault_config"):
+                vm = window.vault_manager()
+                cfg = window.vault_config()
+                vault_open = vm.is_setup(cfg) and vm.is_unlocked()
+                if not vault_open:
+                    vault_folder_set = getattr(self.table, "vault_folder_set", set())
+                    results = [
+                        s for s in results
+                        if not bool(s.get("is_encrypted"))
+                        and s.get("folder", "") not in vault_folder_set
+                        and not any(
+                            s.get("folder", "").startswith(vf + "/")
+                            for vf in vault_folder_set
+                        )
+                    ]
+        except Exception:
+            pass
 
         self.table.load_entries(results)
 

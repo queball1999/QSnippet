@@ -221,11 +221,17 @@ class SnippetTable(QTreeView):
         vault_unlocked = vault_is_setup and not vault_locked
 
         for entry in entries:
-            folder = entry.get('folder', 'Default')
-            # Only show vault snippet rows when the vault is explicitly unlocked.
-            # Covers both "set up and locked" and "not yet configured" states.
-            if not vault_unlocked and folder in vault_folder_set:
-                continue
+            folder = entry.get('folder', 'Default') or 'Default'
+            # Block vault content unless the vault is explicitly unlocked.
+            # Two independent checks so neither can be bypassed alone:
+            #   1. Folder is a vault root or nested inside one.
+            #   2. Snippet is encrypted (defense-in-depth regardless of folder).
+            if not vault_unlocked:
+                in_vault_folder = folder in vault_folder_set or any(
+                    folder.startswith(vf + "/") for vf in vault_folder_set
+                )
+                if in_vault_folder or bool(entry.get("is_encrypted")):
+                    continue
             parent = self.get_or_create_folder(folder)
 
             label = entry.get('label', '')

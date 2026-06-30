@@ -209,6 +209,28 @@ def test_search_snippets_escapes_like_wildcards(temp_snippet_db_path):
     assert not any(r["trigger"] == "/welcome" for r in results)
 
 
+def test_search_snippets_short_keyword_uses_like(temp_snippet_db_path):
+    """Keywords shorter than 3 chars must still return results (FTS trigram fallback to LIKE)."""
+    db = SnippetDB(temp_snippet_db_path)
+
+    db.insert_snippet({
+        "enabled": True,
+        "label": "Hi There",
+        "trigger": "/hi",
+        "snippet": "a short hello",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    })
+
+    results_one = db.search_snippets("H")
+    assert any(r["trigger"] == "/hi" for r in results_one), "single-char search should match"
+
+    results_two = db.search_snippets("hi")
+    assert any(r["trigger"] == "/hi" for r in results_two), "two-char search should match"
+
+
 def test_folder_operations_escape_like_characters(temp_snippet_db_path):
     """Folder rename should only touch the intended literal folder path."""
     db = SnippetDB(temp_snippet_db_path)

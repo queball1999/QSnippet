@@ -167,6 +167,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.new_input.setObjectName("NameInput")
         self.new_input.setPlaceholderText("New Snippet")
         self.new_input.setToolTip("Name or description of your snippet.")
+        self.new_input.setMaxLength(500)
+        self.label_counter = QLabel("")
+        self.label_counter.setObjectName("FieldCharCounter")
+        self.label_counter.hide()
+        self.new_input.textChanged.connect(self.on_label_text_changed)
 
         self.trigger_label = QLabel("Trigger<span style='color:red'>*</span>")
         self.trigger_label.setObjectName("TriggerLabel")
@@ -176,6 +181,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.trigger_input.setObjectName("TriggerInput")
         self.trigger_input.setToolTip(self.trigger_tooltip)
         self.trigger_input.setPlaceholderText("/do")
+        self.trigger_input.setMaxLength(255)
+        self.trigger_counter = QLabel("")
+        self.trigger_counter.setObjectName("FieldCharCounter")
+        self.trigger_counter.hide()
+        self.trigger_input.textChanged.connect(self.on_trigger_text_changed)
 
         self.folder_label = QLabel("Folder")
         self.folder_label.setToolTip("Folder which your snippet is organized in.")
@@ -237,6 +247,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_input.setFocusPolicy(Qt.StrongFocus)
         self.snippet_input.installEventFilter(self)
         self.snippet_input.setMinimumHeight(100)
+        self.snippet_counter = QLabel("")
+        self.snippet_counter.setObjectName("FieldCharCounter")
+        self.snippet_counter.hide()
+        self.enforcing_snippet_limit = False
+        self.snippet_input.textChanged.connect(self.on_snippet_text_changed)
 
         # Popup list (looks like intellisense)
         self.intellisense_popup = QListWidget(self)
@@ -282,8 +297,10 @@ Snippets come in handy for text you enter often or for standard messages you sen
         first_row = QGridLayout()
         first_row.addWidget(self.new_label, 0, 0, 1, 1, Qt.AlignLeft)
         first_row.addWidget(self.new_input, 1, 0, 1, 1)
+        first_row.addWidget(self.label_counter, 2, 0, 1, 1, Qt.AlignRight)
         first_row.addWidget(self.trigger_label, 0, 1, 1, 1, Qt.AlignLeft)
         first_row.addWidget(self.trigger_input, 1, 1, 1, 1)
+        first_row.addWidget(self.trigger_counter, 2, 1, 1, 1, Qt.AlignRight)
 
         second_row = QGridLayout()
         second_row.addWidget(self.folder_label, 0, 0, 1, 1, Qt.AlignLeft)
@@ -303,6 +320,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         snippet_header.setContentsMargins(0, 0, 0, 0)
         snippet_header.addWidget(self.snippet_label, alignment=Qt.AlignVCenter)
         snippet_header.addStretch()
+        snippet_header.addWidget(self.snippet_counter, alignment=Qt.AlignVCenter)
         snippet_header.addWidget(self.popout_btn, alignment=Qt.AlignVCenter)
         layout.addLayout(snippet_header, 5, 0, 1, 3)
         layout.addWidget(self.snippet_input, 6, 0, 1, 3)
@@ -671,6 +689,53 @@ Snippets come in handy for text you enter often or for standard messages you sen
             return False
         return True
     
+    # ----- Character Limit Enforcement -----
+    def update_char_counter(self, counter_label: QLabel, text_len: int, max_len: int) -> None:
+        """Show a live character counter when content is within 20% of its limit."""
+        if text_len >= int(max_len * 0.8):
+            counter_label.setText(f"{text_len:,} / {max_len:,}")
+            counter_label.setStyleSheet("color: red;" if text_len >= max_len else "color: orange;")
+            counter_label.show()
+        else:
+            counter_label.hide()
+
+    def on_label_text_changed(self, text: str) -> None:
+        self.update_char_counter(self.label_counter, len(text), 500)
+        if len(text) >= 500:
+            try:
+                self.main.statusBar().showMessage("Name has reached the 500 character limit.", 3000)
+            except Exception:
+                pass
+
+    def on_trigger_text_changed(self, text: str) -> None:
+        self.update_char_counter(self.trigger_counter, len(text), 255)
+        if len(text) >= 255:
+            try:
+                self.main.statusBar().showMessage("Trigger has reached the 255 character limit.", 3000)
+            except Exception:
+                pass
+
+    def on_snippet_text_changed(self) -> None:
+        if self.enforcing_snippet_limit:
+            return
+        text = self.snippet_input.toPlainText()
+        length = len(text)
+        max_len = 1_000_000
+        if length > max_len:
+            self.enforcing_snippet_limit = True
+            cursor = self.snippet_input.textCursor()
+            pos = cursor.position()
+            self.snippet_input.setPlainText(text[:max_len])
+            cursor.setPosition(min(pos, max_len))
+            self.snippet_input.setTextCursor(cursor)
+            self.enforcing_snippet_limit = False
+            length = max_len
+            try:
+                self.main.statusBar().showMessage("Snippet has reached the 1,000,000 character limit.", 3000)
+            except Exception:
+                pass
+        self.update_char_counter(self.snippet_counter, length, max_len)
+
     # ----- Pop-Up Menu -----
     def fill_intellisense_popup_list(self):
         """
@@ -860,6 +925,9 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_label.setFont(self.main.medium_font_size)
         self.snippet_input.setFont(self.main.medium_font_size)
         self.intellisense_popup.setFont(self.main.medium_font_size)
+        self.label_counter.setFont(self.main.small_font_size)
+        self.trigger_counter.setFont(self.main.small_font_size)
+        self.snippet_counter.setFont(self.main.small_font_size)
         
         self.new_btn.setFont(self.main.medium_font_size)
         self.save_btn.setFont(self.main.medium_font_size)

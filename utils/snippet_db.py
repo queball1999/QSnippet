@@ -128,9 +128,11 @@ class SnippetDB:
         )
         self.conn.row_factory = sqlite3.Row
         self.configure_connection()
+        self.fts_available = False
         self.create_table()
-        self.create_indexes()
         self.migrate_vault_schema()
+        self.create_indexes()
+        self.setup_fts()
         self.create_vault_folders_table()
         self.create_custom_placeholders_table()
         self.seed_default_custom_placeholders()
@@ -278,22 +280,92 @@ class SnippetDB:
                 # on the trigger column already creates an implicit index.
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_snippets_encrypted ON snippets(is_encrypted);")
 
-                # Create FTS5 virtual table for full-text search
-                try:
-                    conn.execute("""
-                        CREATE VIRTUAL TABLE IF NOT EXISTS snippets_fts USING fts5(
-                            label, trigger, snippet, tags,
-                            content='snippets', content_rowid='id'
-                        )
-                    """)
-                    logger.debug("Full-text search index created")
-                except sqlite3.OperationalError as fts_err:
-                    logger.warning("FTS5 not available (SQLite compiled without FTS5): %s", fts_err)
-
                 logger.info("Indexes created/verified in database")
         except sqlite3.Error as e:
             logger.exception("Failed to create indexes in database")
             raise DatabaseOperationError(f"Failed to create indexes: {e}") from e
+
+    def setup_fts(self) -> None:
+        """
+        Create or migrate the FTS5 full-text search index with the trigram tokenizer
+        and install the four sync triggers that keep it current.
+
+        The trigram tokenizer indexes every 3-character sequence, enabling infix
+        (substring) matching equivalent to LIKE '%keyword%' but via the index.
+        Safe to call on every startup: exits immediately if already configured.
+
+        Returns:
+            None
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                cur = conn.cursor()
+
+                # Check whether FTS table already uses the trigram tokenizer
+                cur.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='snippets_fts'"
+                )
+                row = cur.fetchone()
+                has_trigram = row and "trigram" in (row[0] or "")
+
+                cur.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type='trigger'"
+                    " AND name IN ('snippets_ai','snippets_bd','snippets_bu','snippets_au')"
+                )
+                trigger_count = cur.fetchone()[0]
+
+                if has_trigram and trigger_count == 4:
+                    logger.debug("FTS5 trigram index already configured")
+                    self.fts_available = True
+                    return
+
+                # Drop stale FTS table (may exist without trigram from a previous run)
+                conn.execute("DROP TABLE IF EXISTS snippets_fts")
+
+                conn.execute("""
+                    CREATE VIRTUAL TABLE snippets_fts USING fts5(
+                        label, trigger, snippet, tags,
+                        content='snippets', content_rowid='id',
+                        tokenize='trigram'
+                    )
+                """)
+
+                for name in ("snippets_ai", "snippets_bd", "snippets_bu", "snippets_au"):
+                    conn.execute(f"DROP TRIGGER IF EXISTS {name}")
+
+                conn.execute("""
+                    CREATE TRIGGER snippets_ai AFTER INSERT ON snippets BEGIN
+                        INSERT INTO snippets_fts(rowid, label, trigger, snippet, tags)
+                        VALUES (new.id, new.label, new.trigger, new.snippet, new.tags);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER snippets_bd BEFORE DELETE ON snippets BEGIN
+                        INSERT INTO snippets_fts(snippets_fts, rowid, label, trigger, snippet, tags)
+                        VALUES ('delete', old.id, old.label, old.trigger, old.snippet, old.tags);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER snippets_bu BEFORE UPDATE ON snippets BEGIN
+                        INSERT INTO snippets_fts(snippets_fts, rowid, label, trigger, snippet, tags)
+                        VALUES ('delete', old.id, old.label, old.trigger, old.snippet, old.tags);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER snippets_au AFTER UPDATE ON snippets BEGIN
+                        INSERT INTO snippets_fts(rowid, label, trigger, snippet, tags)
+                        VALUES (new.id, new.label, new.trigger, new.snippet, new.tags);
+                    END
+                """)
+
+                # Populate index from existing rows
+                conn.execute("INSERT INTO snippets_fts(snippets_fts) VALUES('rebuild')")
+                self.fts_available = True
+                logger.info("FTS5 trigram index created and populated")
+
+        except sqlite3.OperationalError as e:
+            logger.warning("FTS5 trigram unavailable, search will use LIKE: %s", e)
+            self.fts_available = False
 
     def seed_empty_db(self) -> None:
         """
@@ -807,23 +879,49 @@ class SnippetDB:
         logger.info("Searching snippets in the database.")
         logger.debug("Keyword: %s", keyword)
 
+        if not keyword:
+            return self.get_all_snippets()
+
         try:
+            # FTS5 trigram requires at least 3 characters; shorter queries return no rows.
+            if self.fts_available and len(keyword) >= 3:
+                # Wrap in double quotes for a trigram phrase/substring match.
+                # This is equivalent to LIKE '%keyword%' but uses the index.
+                fts_query = f'"{keyword.replace(chr(34), chr(34) * 2)}"'
+                with self.managed_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """
+                        SELECT s.* FROM snippets s
+                        WHERE s.id IN (
+                            SELECT rowid FROM snippets_fts WHERE snippets_fts MATCH ?
+                        )
+                        ORDER BY s.folder, s.id
+                        """,
+                        (fts_query,),
+                    )
+                    results = [self.normalize_snippet_row(row) for row in cur.fetchall()]
+                logger.debug("FTS search results count: %d", len(results))
+                return results
+
+            # Fallback: LIKE scan (short keyword, or FTS5/trigram unavailable)
             escaped_keyword = self.escape_like_value(keyword)
             wildcard = f"%{escaped_keyword}%"
-            query = """
-                SELECT * FROM snippets
-                WHERE label LIKE ? ESCAPE '\\'
-                   OR snippet LIKE ? ESCAPE '\\'
-                   OR trigger LIKE ? ESCAPE '\\'
-                   OR tags LIKE ? ESCAPE '\\'
-            """
             with self.managed_connection() as conn:
                 cur = conn.cursor()
-                cur.execute(query, (wildcard, wildcard, wildcard, wildcard))
+                cur.execute(
+                    """
+                    SELECT * FROM snippets
+                    WHERE label   LIKE ? ESCAPE '\\'
+                       OR snippet LIKE ? ESCAPE '\\'
+                       OR trigger LIKE ? ESCAPE '\\'
+                       OR tags    LIKE ? ESCAPE '\\'
+                    """,
+                    (wildcard, wildcard, wildcard, wildcard),
+                )
                 results = [self.normalize_snippet_row(row) for row in cur.fetchall()]
 
-            logger.info("Successfully searched snippets.")
-            logger.debug("Search results count: %d", len(results))
+            logger.debug("LIKE search results count: %d", len(results))
             return results
         except sqlite3.Error as e:
             logger.exception("Failed to search snippets in database")

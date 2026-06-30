@@ -1046,7 +1046,7 @@ class QSnippet(QMainWindow):
             table = self.editor.table
             prev_locked = getattr(table, "vault_locked", None)
             new_locked = is_setup and not is_unlocked
-            table.set_vault_lock_state(new_locked)
+            table.set_vault_lock_state(new_locked, is_setup=is_setup)
             if prev_locked != new_locked:
                 self.editor.load_snippets()
         # Clear clipboard when vault locks to prevent lingering sensitive content
