@@ -12,8 +12,9 @@ $VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml
 
 $APP_NAME     = "QSnippet"
 $ENTRY        = "QSnippet.py"
-$ICON_WINDOWS = (Resolve-Path "./images/QSnippet.ico").Path
-$ImageDir     = Resolve-Path "./images"
+$IconsDir     = Resolve-Path "./assets/icons"
+$ImagesDir    = Resolve-Path "./assets/images"
+$ICON_WINDOWS = (Join-Path $IconsDir "QSnippet.ico")
 
 # Define custom paths
 $BUILD_DIR = "build"
@@ -28,7 +29,8 @@ $PYINSTALLER_ARGS = @(
     "--workpath", "$BUILD_DIR/work",
     "--specpath", "$BUILD_DIR/spec",
     "--name", $APP_NAME,
-    "--add-data", "$ImageDir;images",
+    "--add-data", "$IconsDir;assets/icons",
+    "--add-data", "$ImagesDir;assets/images",
     $ENTRY
 )
 

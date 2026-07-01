@@ -697,6 +697,7 @@ class SnippetEditor(QWidget):
 
             # Encrypt or decrypt all snippets now living under new_path.
             if (moving_into_vault or moving_out_of_vault) and vm:
+                import uuid as _uuid
                 snippets = db.get_snippets_by_folder(new_path)
                 updates = []
                 for s in snippets:
@@ -704,9 +705,11 @@ class SnippetEditor(QWidget):
                     content = s.get("snippet", "")
                     is_enc = bool(s.get("is_encrypted"))
                     if moving_into_vault and not is_enc:
-                        updates.append((sid, vm.encrypt(content), True))
+                        new_uuid = str(_uuid.uuid4())
+                        updates.append((sid, vm.encrypt(content, aad=new_uuid.encode()), True, new_uuid))
                     elif moving_out_of_vault and is_enc:
-                        updates.append((sid, vm.decrypt(content), False))
+                        aad = (s.get("vault_uuid") or "").encode()
+                        updates.append((sid, vm.decrypt(content, aad=aad), False, None))
                 db.bulk_encrypt_folder_snippets(updates)
 
             self.load_snippets()

@@ -398,7 +398,8 @@ class ImportExportWizard(QDialog):
             if s.get("is_encrypted"):
                 if self.vm and self.vm.is_unlocked():
                     try:
-                        s["snippet"] = self.vm.decrypt(s["snippet"])
+                        aad = (s.get("vault_uuid") or "").encode()
+                        s["snippet"] = self.vm.decrypt(s["snippet"], aad=aad)
                         s["_vault_status"] = "vault"
                     except Exception:
                         s["_vault_status"] = "error"
@@ -570,7 +571,8 @@ class ImportExportWizard(QDialog):
 
             if self.vm and self.vm.is_unlocked():
                 try:
-                    s["snippet"] = self.vm.decrypt(s["snippet"])
+                    aad = (s.get("vault_uuid") or "").encode()
+                    s["snippet"] = self.vm.decrypt(s["snippet"], aad=aad)
                     s["_was_encrypted"] = True
                 except Exception:
                     s["snippet"] = ""
@@ -855,6 +857,7 @@ class ImportExportWizard(QDialog):
                     if db_row and db_row.get("is_encrypted"):
                         row["snippet"] = db_row["snippet"]
                         row["is_encrypted"] = True
+                        row["vault_uuid"] = db_row.get("vault_uuid")
                 except Exception:
                     pass  # fall back to decrypted content already in s
 

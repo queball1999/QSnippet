@@ -661,7 +661,8 @@ class SnippetExpander:
                     if snippet_entry.get("is_encrypted"):
                         raw = snippet_entry.get("snippet", "")
                         try:
-                            snippet_text = vm.decrypt(raw)
+                            aad = (snippet_entry.get("vault_uuid") or "").encode()
+                            snippet_text = vm.decrypt(raw, aad=aad)
                             vm.reset_activity_timer()
                         except Exception:
                             # Content may not be encrypted yet (DB inconsistency); use raw
@@ -914,7 +915,8 @@ class SnippetExpander:
                 from utils.vault_manager import VaultManager
                 vm = VaultManager.get_instance()
                 try:
-                    val = vm.decrypt(ph["value"]) if vm.is_unlocked() else ""
+                    aad = (ph.get("vault_uuid") or "").encode()
+                    val = vm.decrypt(ph["value"], aad=aad) if vm.is_unlocked() else ""
                 except Exception:
                     logger.warning("Failed to decrypt placeholder '%s'", ph.get("name"))
                     val = ""

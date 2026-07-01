@@ -64,6 +64,7 @@ class VaultUnlockDialog(QDialog):
         self.pw_field = PasswordField()
         self.pw_field.setObjectName("VaultField")
         self.pw_field.setPlaceholderText("Vault password")
+        self.pw_field.setMaxLength(255)
         pw_row.addWidget(self.pw_field)
         pw_layout.addLayout(pw_row)
 
@@ -90,6 +91,7 @@ class VaultUnlockDialog(QDialog):
         self.rec_field = PasswordField()
         self.rec_field.setObjectName("VaultField")
         self.rec_field.setPlaceholderText("xxxx-xxxx-xxxx-xxxx-xxxx")
+        self.rec_field.setMaxLength(255)
         rec_row.addWidget(self.rec_field)
         rec_layout.addLayout(rec_row)
 

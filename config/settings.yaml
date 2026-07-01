@@ -180,8 +180,8 @@ general:
     description: Control how and when clipboard contents are cleared after copying a snippet.
     clipboard_timeout:
       type: string
-      value: "30"
-      default: "30"
+      value: "15"
+      default: "15"
       options:
         - "15"
         - "30"

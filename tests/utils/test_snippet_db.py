@@ -758,7 +758,8 @@ class TestInsertSnippetVaultAware:
         entry = {**self._BASE, "folder": "Secret", "trigger": "/dec"}
         db.insert_snippet_vault_aware(entry, vault_manager=vm)
         row = db.get_snippet_by_trigger("/dec")
-        assert vm.decrypt(row["snippet"]) == "plain text"
+        aad = (row.get("vault_uuid") or "").encode()
+        assert vm.decrypt(row["snippet"], aad=aad) == "plain text"
 
     def test_insert_into_vault_folder_locked_raises(self, temp_snippet_db_path):
         db = SnippetDB(temp_snippet_db_path)

@@ -25,7 +25,7 @@ LicenseFile={#SourcePath}\LICENSE
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#SourcePath}\output\windows
 OutputBaseFilename=QSnippet-{#MyAppVersion}-windows-installer
-SetupIconFile={#SourcePath}\images\QSnippet.ico
+SetupIconFile={#SourcePath}\assets\icons\QSnippet.ico
 ; Force appwiz icon and name
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}

@@ -394,7 +394,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 from utils.vault_manager import VaultManager
                 vm = VaultManager.get_instance()
                 if vm.is_unlocked():
-                    raw_snippet = vm.decrypt(raw_snippet)
+                    aad = (entry.get("vault_uuid") or "").encode()
+                    raw_snippet = vm.decrypt(raw_snippet, aad=aad)
                     vm.reset_activity_timer()
                     self.snippet_input.setPlaceholderText(
                         "Text that appears when you type a shortcut. Type { to insert placeholders..."

@@ -136,6 +136,7 @@ class SnippetDB:
         self.create_vault_folders_table()
         self.create_custom_placeholders_table()
         self.migrate_custom_placeholders_vault_schema()
+        self.migrate_aad_binding_schema()
         self.seed_default_custom_placeholders()
         self.seed_empty_db()
         logger.info("SnippetDB initialized successfully")
@@ -315,7 +316,18 @@ class SnippetDB:
                 )
                 trigger_count = cur.fetchone()[0]
 
-                if has_trigram and trigger_count == 4:
+                # Also verify the insert/update/delete triggers are vault-aware (have a WHEN clause),
+                # since deleting a never-indexed (encrypted) rowid from FTS5 corrupts the index.
+                cur.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type='trigger'"
+                    " AND name IN ('snippets_ai','snippets_bd','snippets_bu')"
+                )
+                rows = {r[0]: r[1] for r in cur.fetchall()}
+                all_vault_aware = all(
+                    "WHEN" in (rows.get(name) or "") for name in ("snippets_ai", "snippets_bd", "snippets_bu")
+                )
+
+                if has_trigram and trigger_count == 4 and all_vault_aware:
                     logger.debug("FTS5 trigram index already configured")
                     self.fts_available = True
                     return
@@ -334,20 +346,28 @@ class SnippetDB:
                 for name in ("snippets_ai", "snippets_bd", "snippets_bu", "snippets_au"):
                     conn.execute(f"DROP TRIGGER IF EXISTS {name}")
 
+                # Only index non-encrypted snippets so vault content (labels, triggers)
+                # cannot be found via FTS when the vault is locked.
                 conn.execute("""
-                    CREATE TRIGGER snippets_ai AFTER INSERT ON snippets BEGIN
+                    CREATE TRIGGER snippets_ai AFTER INSERT ON snippets
+                    WHEN new.is_encrypted = 0
+                    BEGIN
                         INSERT INTO snippets_fts(rowid, label, trigger, snippet, tags)
                         VALUES (new.id, new.label, new.trigger, new.snippet, new.tags);
                     END
                 """)
                 conn.execute("""
-                    CREATE TRIGGER snippets_bd BEFORE DELETE ON snippets BEGIN
+                    CREATE TRIGGER snippets_bd BEFORE DELETE ON snippets
+                    WHEN old.is_encrypted = 0
+                    BEGIN
                         INSERT INTO snippets_fts(snippets_fts, rowid, label, trigger, snippet, tags)
                         VALUES ('delete', old.id, old.label, old.trigger, old.snippet, old.tags);
                     END
                 """)
                 conn.execute("""
-                    CREATE TRIGGER snippets_bu BEFORE UPDATE ON snippets BEGIN
+                    CREATE TRIGGER snippets_bu BEFORE UPDATE ON snippets
+                    WHEN old.is_encrypted = 0
+                    BEGIN
                         INSERT INTO snippets_fts(snippets_fts, rowid, label, trigger, snippet, tags)
                         VALUES ('delete', old.id, old.label, old.trigger, old.snippet, old.tags);
                     END
@@ -355,12 +375,17 @@ class SnippetDB:
                 conn.execute("""
                     CREATE TRIGGER snippets_au AFTER UPDATE ON snippets BEGIN
                         INSERT INTO snippets_fts(rowid, label, trigger, snippet, tags)
-                        VALUES (new.id, new.label, new.trigger, new.snippet, new.tags);
+                        SELECT new.id, new.label, new.trigger, new.snippet, new.tags
+                        WHERE new.is_encrypted = 0;
                     END
                 """)
 
-                # Populate index from existing rows
-                conn.execute("INSERT INTO snippets_fts(snippets_fts) VALUES('rebuild')")
+                # Populate index from non-encrypted rows only
+                conn.execute("""
+                    INSERT INTO snippets_fts(rowid, label, trigger, snippet, tags)
+                    SELECT id, label, trigger, snippet, tags FROM snippets
+                    WHERE is_encrypted = 0
+                """)
                 self.fts_available = True
                 logger.info("FTS5 trigram index created and populated")
 
@@ -1123,9 +1148,9 @@ class SnippetDB:
         try:
             with self.managed_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT id, name, value, description, is_encrypted FROM custom_placeholders ORDER BY name ASC")
+                cur.execute("SELECT id, name, value, description, is_encrypted, vault_uuid FROM custom_placeholders ORDER BY name ASC")
                 rows = cur.fetchall()
-            result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3], "is_encrypted": bool(r[4])} for r in rows]
+            result = [{"id": r[0], "name": r[1], "value": r[2], "description": r[3], "is_encrypted": bool(r[4]), "vault_uuid": r[5]} for r in rows]
             logger.debug("Custom placeholders fetched: %d", len(result))
             return result
         except sqlite3.Error as e:
@@ -1146,12 +1171,14 @@ class SnippetDB:
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute(
-                    "INSERT INTO custom_placeholders (name, value, description, is_encrypted) VALUES (:name, :value, :description, :is_encrypted)",
+                    "INSERT INTO custom_placeholders (name, value, description, is_encrypted, vault_uuid) "
+                    "VALUES (:name, :value, :description, :is_encrypted, :vault_uuid)",
                     {
                         "name": entry.get("name"),
                         "value": entry.get("value", ""),
                         "description": entry.get("description", ""),
                         "is_encrypted": entry.get("is_encrypted", 0),
+                        "vault_uuid": entry.get("vault_uuid"),
                     },
                 )
             logger.info("Custom placeholder inserted successfully")
@@ -1174,13 +1201,15 @@ class SnippetDB:
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute(
-                    "UPDATE custom_placeholders SET name=:name, value=:value, description=:description, is_encrypted=:is_encrypted WHERE id=:id",
+                    "UPDATE custom_placeholders SET name=:name, value=:value, description=:description, "
+                    "is_encrypted=:is_encrypted, vault_uuid=:vault_uuid WHERE id=:id",
                     {
                         "id": entry.get("id"),
                         "name": entry.get("name"),
                         "value": entry.get("value", ""),
                         "description": entry.get("description", ""),
                         "is_encrypted": entry.get("is_encrypted", 0),
+                        "vault_uuid": entry.get("vault_uuid"),
                     },
                 )
             logger.info("Custom placeholder updated successfully")
@@ -1221,6 +1250,24 @@ class SnippetDB:
                     logger.info("Migrated: added is_encrypted column to snippets")
         except sqlite3.Error as exc:
             logger.warning("Vault schema migration failed: %s", exc)
+
+    def migrate_aad_binding_schema(self) -> None:
+        """Add vault_uuid column to snippets and custom_placeholders (migration).
+
+        The vault_uuid is passed as AES-GCM AAD at encrypt/decrypt time so that
+        ciphertext blobs are cryptographically bound to their row.  Existing
+        encrypted rows (vault_uuid=NULL) remain backward-compatible: they were
+        encrypted without AAD and will be re-encrypted with a UUID on next unlock.
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                for table in ("snippets", "custom_placeholders"):
+                    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+                    if "vault_uuid" not in cols:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN vault_uuid TEXT DEFAULT NULL")
+                        logger.info("Migrated: added vault_uuid to %s", table)
+        except sqlite3.Error as exc:
+            logger.warning("AAD binding schema migration failed: %s", exc)
 
     def migrate_custom_placeholders_vault_schema(self) -> None:
         """Add is_encrypted column to custom_placeholders if it does not exist (migration)."""
@@ -1295,6 +1342,73 @@ class SnippetDB:
         except sqlite3.Error as exc:
             raise DatabaseOperationError(f"Failed to get vault snippets: {exc}") from exc
 
+    def update_snippet_vault_uuid(self, snippet_id: int, new_blob: str, vault_uuid: str) -> None:
+        """Update the encrypted blob and vault_uuid for an existing vault snippet.
+
+        Used by the AAD migration pass to re-encrypt legacy (no-AAD) blobs and
+        assign each snippet a vault_uuid that acts as AES-GCM additional
+        authenticated data, binding the ciphertext to this specific row.
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE snippets SET snippet=?, vault_uuid=? WHERE id=?",
+                    (new_blob, vault_uuid, snippet_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                f"Failed to update vault_uuid for snippet {snippet_id}: {exc}"
+            ) from exc
+
+    def set_snippet_vault_uuid(self, snippet_id: int, vault_uuid: str) -> None:
+        """Assign vault_uuid to a snippet without changing the blob (post-insert binding)."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE snippets SET vault_uuid=? WHERE id=?",
+                    (vault_uuid, snippet_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                f"Failed to set vault_uuid for snippet {snippet_id}: {exc}"
+            ) from exc
+
+    def set_placeholder_vault_uuid(self, placeholder_id: int, vault_uuid: str) -> None:
+        """Assign vault_uuid to a placeholder without changing the blob (post-insert binding)."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE custom_placeholders SET vault_uuid=? WHERE id=?",
+                    (vault_uuid, placeholder_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                f"Failed to set vault_uuid for placeholder {placeholder_id}: {exc}"
+            ) from exc
+
+    def update_placeholder_vault_uuid(self, placeholder_id: int, new_blob: str, vault_uuid: str) -> None:
+        """Update the encrypted blob and vault_uuid for an existing encrypted placeholder."""
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE custom_placeholders SET value=?, vault_uuid=? WHERE id=?",
+                    (new_blob, vault_uuid, placeholder_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                f"Failed to update vault_uuid for placeholder {placeholder_id}: {exc}"
+            ) from exc
+
+    def get_vault_placeholders(self) -> List[Dict[str, Any]]:
+        """Return all custom_placeholders that are marked is_encrypted=1."""
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM custom_placeholders WHERE is_encrypted = 1")
+                return [dict(r) for r in cur.fetchall()]
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to get vault placeholders: {exc}") from exc
+
     def get_snippets_by_folder(self, folder: str) -> List[Dict[str, Any]]:
         """Return all snippets in the given folder path (exact match only)."""
         try:
@@ -1330,18 +1444,18 @@ class SnippetDB:
             raise DatabaseOperationError(f"Failed to bulk-update snippet content: {exc}") from exc
 
     def bulk_encrypt_folder_snippets(self, updates: list) -> None:
-        """Atomically update snippet content and is_encrypted flag for a folder move.
+        """Atomically update snippet content, is_encrypted flag, and vault_uuid for a folder move.
 
         Args:
-            updates: list of ``(snippet_id, new_content, is_encrypted_flag)`` tuples.
+            updates: list of ``(snippet_id, new_content, is_encrypted_flag, vault_uuid)`` tuples.
         """
         if not updates:
             return
         try:
             with self.managed_connection(write=True) as conn:
                 conn.executemany(
-                    "UPDATE snippets SET snippet = ?, is_encrypted = ? WHERE id = ?",
-                    [(content, 1 if flag else 0, sid) for sid, content, flag in updates],
+                    "UPDATE snippets SET snippet = ?, is_encrypted = ?, vault_uuid = ? WHERE id = ?",
+                    [(content, 1 if flag else 0, vault_uuid, sid) for sid, content, flag, vault_uuid in updates],
                 )
         except sqlite3.Error as exc:
             raise DatabaseOperationError(f"Failed to bulk-update folder snippets: {exc}") from exc
@@ -1415,6 +1529,7 @@ class SnippetDB:
 
         entry = dict(entry)  # don't mutate caller's dict
         new_is_encrypted = src_encrypted
+        new_vault_uuid = entry.get("vault_uuid")
 
         if src_encrypted and not dest_is_vault:
             # Moving out of vault - must decrypt content before storing
@@ -1422,8 +1537,10 @@ class SnippetDB:
                 raise VaultError(
                     "Vault must be unlocked to move encrypted snippets out of the vault."
                 )
-            entry["snippet"] = vault_manager.decrypt(entry["snippet"])
+            aad = (entry.get("vault_uuid") or "").encode()
+            entry["snippet"] = vault_manager.decrypt(entry["snippet"], aad=aad)
             new_is_encrypted = False
+            new_vault_uuid = None
 
         elif not src_encrypted and dest_is_vault:
             # Moving into vault - must encrypt content before storing
@@ -1431,7 +1548,9 @@ class SnippetDB:
                 raise VaultError(
                     "Vault must be unlocked to save snippets into a vault folder."
                 )
-            entry["snippet"] = vault_manager.encrypt(entry["snippet"])
+            import uuid as _uuid
+            new_vault_uuid = str(_uuid.uuid4())
+            entry["snippet"] = vault_manager.encrypt(entry["snippet"], aad=new_vault_uuid.encode())
             new_is_encrypted = True
 
         result = self.insert_snippet(entry)
@@ -1440,6 +1559,7 @@ class SnippetDB:
             snippet_id = entry.get("id")
             if snippet_id is not None:
                 self.set_snippet_encrypted(snippet_id, new_is_encrypted)
+                self.set_snippet_vault_uuid(snippet_id, new_vault_uuid)
 
         return result
 

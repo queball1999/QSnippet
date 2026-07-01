@@ -1,4 +1,5 @@
 import os, sys
+import threading
 from pathlib import Path
 from datetime import datetime
 import zipfile
@@ -1034,6 +1035,13 @@ class QSnippet(QMainWindow):
         cfg = self.vault_config()
         is_setup = vm.is_setup(cfg)
         is_unlocked = vm.is_unlocked()
+        if is_unlocked and not vm._aad_migration_done:
+            vm._aad_migration_done = True  # set before dispatch to avoid duplicate threads
+            db = self.vault_db()
+            threading.Thread(
+                target=lambda: vm.migrate_existing_vault_snippets_aad(db),
+                daemon=True,
+            ).start()
         if hasattr(self, "toolbar"):
             self.toolbar.update_vault_state(is_setup, is_unlocked)
         if hasattr(self, "menubar"):
@@ -1146,13 +1154,15 @@ class QSnippet(QMainWindow):
 
     def encrypt_and_save(self, snippet_id: int, vm) -> None:
         try:
+            import uuid as _uuid
             db = self.vault_db()
             snippet = db.get_snippet(snippet_id)
             # Always re-encrypt: the form decrypts before display, so snippet
             # content in the DB is always plaintext at this point regardless
             # of the is_encrypted flag.
-            cipher = vm.encrypt(snippet.get("snippet", ""))
-            db.update_snippet_content(snippet_id, cipher)
+            vault_uuid = str(_uuid.uuid4())
+            cipher = vm.encrypt(snippet.get("snippet", ""), aad=vault_uuid.encode())
+            db.update_snippet_vault_uuid(snippet_id, cipher, vault_uuid)
             db.set_snippet_encrypted(snippet_id, True)
             vm.reset_activity_timer()
         except Exception as exc:
@@ -1201,11 +1211,13 @@ class QSnippet(QMainWindow):
             db.add_vault_folder(folder_path)
 
             # Encrypt all existing snippets in the folder
+            import uuid as _uuid
             for snippet in existing:
                 if not snippet.get("is_encrypted"):
                     try:
-                        cipher = vm.encrypt(snippet.get("snippet", ""))
-                        db.update_snippet_content(snippet["id"], cipher)
+                        vault_uuid = str(_uuid.uuid4())
+                        cipher = vm.encrypt(snippet.get("snippet", ""), aad=vault_uuid.encode())
+                        db.update_snippet_vault_uuid(snippet["id"], cipher, vault_uuid)
                         db.set_snippet_encrypted(snippet["id"], True)
                     except Exception as exc:
                         logger.error("Failed to encrypt snippet %s: %s", snippet.get("id"), exc)
@@ -1225,6 +1237,7 @@ class QSnippet(QMainWindow):
     def insert_vault_welcome_snippet(self, db, vm, folder_path: str) -> None:
         """Insert an encrypted welcome snippet into a newly created vault folder."""
         try:
+            import uuid as _uuid
             plain = (
                 "Welcome to QSnippet Vault!\n\n"
                 "This folder is encrypted with AES-256-GCM. "
@@ -1232,7 +1245,8 @@ class QSnippet(QMainWindow):
                 "addresses, account numbers, and similar private data.\n\n"
                 "Remember: the Vault is not a replacement for a dedicated password manager."
             )
-            cipher = vm.encrypt(plain)
+            vault_uuid = str(_uuid.uuid4())
+            cipher = vm.encrypt(plain, aad=vault_uuid.encode())
             entry = {
                 "enabled": True,
                 "label": "Welcome to the Vault",
@@ -1246,6 +1260,7 @@ class QSnippet(QMainWindow):
             db.insert_snippet(entry)  # sets entry["id"] as a side effect
             if entry.get("id"):
                 db.set_snippet_encrypted(entry["id"], True)
+                db.set_snippet_vault_uuid(entry["id"], vault_uuid)
         except Exception as exc:
             logger.warning("Could not create vault welcome snippet: %s", exc)
 
@@ -1274,7 +1289,8 @@ class QSnippet(QMainWindow):
             for snippet in db.get_snippets_by_folder(folder_path):
                 if snippet.get("is_encrypted"):
                     try:
-                        plain = vm.decrypt(snippet.get("snippet", ""))
+                        aad = (snippet.get("vault_uuid") or "").encode()
+                        plain = vm.decrypt(snippet.get("snippet", ""), aad=aad)
                         db.update_snippet_content(snippet["id"], plain)
                         db.set_snippet_encrypted(snippet["id"], False)
                     except Exception as exc:
@@ -1334,7 +1350,8 @@ class QSnippet(QMainWindow):
                 expander = self.snippet_service.expander
                 try:
                     if snippet_entry.get("is_encrypted"):
-                        plain = vm.decrypt(snippet_entry.get("snippet", ""))
+                        aad = (snippet_entry.get("vault_uuid") or "").encode()
+                        plain = vm.decrypt(snippet_entry.get("snippet", ""), aad=aad)
                     else:
                         plain = snippet_entry.get("snippet", "")
                     vm.reset_activity_timer()
@@ -1362,7 +1379,8 @@ class QSnippet(QMainWindow):
                     if snippet_entry.get("is_encrypted"):
                         raw = snippet_entry.get("snippet", "")
                         try:
-                            plain = inner_vm.decrypt(raw)
+                            aad = (snippet_entry.get("vault_uuid") or "").encode()
+                            plain = inner_vm.decrypt(raw, aad=aad)
                         except Exception:
                             logger.warning("Decrypt failed for '%s'; using raw content", trigger)
                             plain = raw

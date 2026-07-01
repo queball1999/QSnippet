@@ -330,7 +330,8 @@ class PlaceholderDialog(QDialog):
                 vm = VaultManager.get_instance()
                 if vm.is_unlocked():
                     try:
-                        decrypted_value = vm.decrypt(ph["value"]) if ph else ""
+                        aad = (ph.get("vault_uuid") or "").encode() if ph else b""
+                        decrypted_value = vm.decrypt(ph["value"], aad=aad) if ph else ""
                         self.value_input.setPlainText(decrypted_value)
                         self.value_input.setReadOnly(False)
                         self.value_input.setPlaceholderText("Text that will replace {" + name + "} when a snippet is expanded...")
@@ -473,7 +474,9 @@ class PlaceholderDialog(QDialog):
                 )
                 return
             try:
-                encrypted_value = vm.encrypt(value)
+                import uuid as _uuid
+                vault_uuid = str(_uuid.uuid4())
+                encrypted_value = vm.encrypt(value, aad=vault_uuid.encode())
             except Exception as e:
                 logger.exception("Failed to encrypt placeholder value")
                 QMessageBox.critical(
@@ -481,9 +484,9 @@ class PlaceholderDialog(QDialog):
                     f"Failed to encrypt placeholder value: {e}"
                 )
                 return
-            entry = {"name": name, "value": encrypted_value, "description": desc, "is_encrypted": 1}
+            entry = {"name": name, "value": encrypted_value, "description": desc, "is_encrypted": 1, "vault_uuid": vault_uuid}
         else:
-            entry = {"name": name, "value": value, "description": desc, "is_encrypted": 0}
+            entry = {"name": name, "value": value, "description": desc, "is_encrypted": 0, "vault_uuid": None}
 
         if self.selected_row_id is None:
             # New placeholder - check for duplicate name among customs

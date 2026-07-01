@@ -75,6 +75,8 @@ class VaultManager:
         self.timer: Optional[threading.Timer] = None
         self.auto_lock_seconds: int = 15 * 60
         self.lock_callback: Optional[Callable] = None
+        self._failed_unlock_attempts: int = 0
+        self._aad_migration_done: bool = False
 
     # --State
 
@@ -114,6 +116,8 @@ class VaultManager:
             dict: Updated application config dict with ``vault`` sub-dict
             populated.  The vault is left in the unlocked state.
         """
+        if len(password) > 255:
+            raise VaultError("Password exceeds maximum length of 255 characters.")
         salt = os.urandom(32)
         key = self.derive_key(password, salt)
         verifier = self.make_verifier(key)
@@ -154,6 +158,8 @@ class VaultManager:
             bool: ``True`` on successful unlock, ``False`` on incorrect password
             or missing/malformed config.
         """
+        if len(password) > 255:
+            return False
         v = config.get("vault", {})
         try:
             salt = base64.b64decode(v["salt"])
@@ -163,11 +169,20 @@ class VaultManager:
 
         key = self.derive_key(password, salt)
         if hmac.compare_digest(self.make_verifier(key), stored):
+            self._failed_unlock_attempts = 0
             self.key = key
             self.reset_timer()
             logger.info("Vault unlocked")
             return True
-        logger.warning("Vault unlock failed: incorrect password")
+
+        for i in range(len(key)):
+            key[i] = 0
+        self._failed_unlock_attempts += 1
+        delay = min(2 ** max(0, self._failed_unlock_attempts - 5), 60)
+        if delay > 0:
+            import time
+            time.sleep(delay)
+        logger.warning("Vault unlock failed: incorrect password (attempt %d)", self._failed_unlock_attempts)
         return False
 
     def lock(self) -> None:
@@ -185,6 +200,7 @@ class VaultManager:
             for i in range(len(self.key)):
                 self.key[i] = 0
         self.key = None
+        self._aad_migration_done = False
         if self.timer:
             self.timer.cancel()
             self.timer = None
@@ -341,10 +357,12 @@ class VaultManager:
 
         for s in db.get_vault_snippets():
             try:
-                plain = self.decrypt(s["snippet"])
+                aad = (s.get("vault_uuid") or "").encode()
+                plain = self.decrypt(s["snippet"], aad=aad)
                 db.update_snippet_content(s["id"], plain)
                 db.update_snippet_folder(s["id"], target_folder)
                 db.set_snippet_encrypted(s["id"], False)
+                db.set_snippet_vault_uuid(s["id"], None)
             except Exception as exc:
                 logger.error(
                     "Decrypt failed for snippet %s during vault disable: %s",
@@ -367,11 +385,16 @@ class VaultManager:
 
     # Encrypt/Decrypt
 
-    def encrypt(self, plaintext: str) -> str:
+    def encrypt(self, plaintext: str, aad: bytes = b"") -> str:
         """AES-256-GCM encrypt a plaintext string.
 
         Args:
             plaintext: UTF-8 string to encrypt.
+            aad: Optional additional authenticated data bound to this ciphertext.
+                Pass the snippet's ``vault_uuid`` encoded as bytes to cryptographically
+                bind the blob to its row; an attacker swapping blobs between rows will
+                cause decryption to fail. Defaults to ``b""`` (no binding) for
+                backward compatibility with pre-AAD blobs.
 
         Returns:
             str: Base64-encoded ``nonce (12 B) + ciphertext + GCM tag``.
@@ -383,21 +406,24 @@ class VaultManager:
             raise VaultError("Vault is locked")
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         nonce = os.urandom(12)
-        ct = AESGCM(bytes(self.key)).encrypt(nonce, plaintext.encode("utf-8"), None)
+        ct = AESGCM(bytes(self.key)).encrypt(nonce, plaintext.encode("utf-8"), aad or None)
         return base64.b64encode(nonce + ct).decode("utf-8")
 
-    def decrypt(self, blob: str) -> str:
+    def decrypt(self, blob: str, aad: bytes = b"") -> str:
         """AES-256-GCM decrypt a ciphertext blob produced by :meth:`encrypt`.
 
         Args:
             blob: Base64-encoded string as returned by :meth:`encrypt`.
+            aad: Additional authenticated data that was passed at encryption time.
+                Must match exactly or decryption will raise an authentication error.
+                Defaults to ``b""`` for backward compatibility with pre-AAD blobs.
 
         Returns:
             str: Decrypted UTF-8 plaintext.
 
         Raises:
             VaultError: If the vault is locked (``self.key`` is ``None``).
-            Exception: If authentication fails (tampered ciphertext) or the
+            Exception: If authentication fails (tampered ciphertext, wrong AAD) or the
                 blob is malformed.
         """
         if not self.key:
@@ -405,7 +431,7 @@ class VaultManager:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         data = base64.b64decode(blob.encode("utf-8"))
         nonce, ct = data[:12], data[12:]
-        return AESGCM(bytes(self.key)).decrypt(nonce, ct, None).decode("utf-8")
+        return AESGCM(bytes(self.key)).decrypt(nonce, ct, aad or None).decode("utf-8")
 
     # Auto-lock
 
@@ -509,13 +535,14 @@ class VaultManager:
 
         decrypted: list = []
         for s in vault_snippets:
-            plain = self.decrypt(s["snippet"])
-            decrypted.append((s["id"], plain))
+            aad = (s.get("vault_uuid") or "").encode()
+            plain = self.decrypt(s["snippet"], aad=aad)
+            decrypted.append((s["id"], plain, aad))
 
         old_key = bytearray(self.key)
         self.key = new_key
         try:
-            updates = [(sid, self.encrypt(plain)) for sid, plain in decrypted]
+            updates = [(sid, self.encrypt(plain, aad=aad)) for sid, plain, aad in decrypted]
         except Exception:
             self.key = old_key
             raise
@@ -530,6 +557,44 @@ class VaultManager:
             old_key[i] = 0
 
         logger.info("Re-encrypted %d vault snippets", len(decrypted))
+
+    def migrate_existing_vault_snippets_aad(self, db) -> None:
+        """Assign a ``vault_uuid`` to encrypted snippets/placeholders that predate AAD binding.
+
+        Legacy blobs (encrypted before AAD support was added) decrypt with no
+        AAD. This one-time pass re-encrypts each such blob under a freshly
+        generated UUID, which is then bound as AES-GCM additional authenticated
+        data. Safe to call repeatedly; rows that already have a ``vault_uuid``
+        are skipped. No-op if the vault is locked.
+        """
+        if not self.is_unlocked():
+            return
+        import uuid as _uuid
+
+        for s in db.get_vault_snippets():
+            if s.get("vault_uuid"):
+                continue
+            try:
+                plain = self.decrypt(s["snippet"], aad=b"")
+                new_uuid = str(_uuid.uuid4())
+                new_blob = self.encrypt(plain, aad=new_uuid.encode())
+                db.update_snippet_vault_uuid(s["id"], new_blob, new_uuid)
+            except Exception:
+                logger.warning("AAD migration skipped for snippet id=%s", s.get("id"))
+
+        for ph in db.get_vault_placeholders():
+            if ph.get("vault_uuid"):
+                continue
+            try:
+                plain = self.decrypt(ph["value"], aad=b"")
+                new_uuid = str(_uuid.uuid4())
+                new_blob = self.encrypt(plain, aad=new_uuid.encode())
+                db.update_placeholder_vault_uuid(ph["id"], new_blob, new_uuid)
+            except Exception:
+                logger.warning("AAD migration skipped for placeholder id=%s", ph.get("id"))
+
+        self._aad_migration_done = True
+        logger.info("AAD migration pass complete")
 
     @staticmethod
     def derive_key(password: str, salt: bytes) -> bytearray:
@@ -602,7 +667,12 @@ class VaultManager:
         rec_key = self.derive_key(code, rec_salt)
         try:
             if not hmac.compare_digest(self.make_verifier(rec_key), stored_verifier):
-                logger.warning("Vault recovery failed: incorrect recovery code")
+                self._failed_unlock_attempts += 1
+                delay = min(2 ** max(0, self._failed_unlock_attempts - 5), 60)
+                if delay > 0:
+                    import time
+                    time.sleep(delay)
+                logger.warning("Vault recovery failed: incorrect recovery code (attempt %d)", self._failed_unlock_attempts)
                 return False
 
             vault_key = self.unwrap_key(key_blob, rec_key)
@@ -612,6 +682,7 @@ class VaultManager:
             for i in range(len(rec_key)):
                 rec_key[i] = 0
 
+        self._failed_unlock_attempts = 0
         self.key = vault_key
         self.reset_timer()
         logger.info("Vault unlocked via recovery code")
