@@ -7,8 +7,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, QEvent, QTimer, QSize
 from PySide6.QtGui import QTextCursor, QIcon
+from utils.file_utils import FileUtils
 from .QAnimatedSwitch import QAnimatedSwitch
 from .CheckableComboBox import CheckableComboBox
+from .password_field import svg_icon, _EYE_SVG, _EYE_OFF_SVG
+
+# Fixed-width mask shown for encrypted snippet content so the real length is never leaked
+SNIPPET_MASK = "•" * 12
 
 class SnippetForm(QWidget):
     # Signals to notify parent
@@ -233,6 +238,18 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_label.setObjectName("SnippetLabel")
         self.snippet_label.setToolTip(self.snippet_tooltip)
 
+        self.reveal_snippet_btn = QPushButton()
+        self.reveal_snippet_btn.setObjectName("RevealSnippetBtn")
+        self.reveal_snippet_btn.setCursor(Qt.PointingHandCursor)
+        self.reveal_snippet_btn.setFlat(True)
+        self.reveal_snippet_btn.setFixedSize(26, 26)
+        self.icon_eye_on = svg_icon(_EYE_SVG)
+        self.icon_eye_off = svg_icon(_EYE_OFF_SVG)
+        self.reveal_snippet_btn.setIcon(self.icon_eye_on)
+        self.reveal_snippet_btn.setToolTip("Show snippet")
+        self.reveal_snippet_btn.clicked.connect(self.on_reveal_snippet_toggled)
+        self.reveal_snippet_btn.hide()
+
         self.popout_btn = QPushButton()
         self.popout_btn.setObjectName("PopoutBtn")
         self.popout_btn.setToolTip("Open in pop-out editor")
@@ -321,6 +338,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         snippet_header.addWidget(self.snippet_label, alignment=Qt.AlignVCenter)
         snippet_header.addStretch()
         snippet_header.addWidget(self.snippet_counter, alignment=Qt.AlignVCenter)
+        snippet_header.addWidget(self.reveal_snippet_btn, alignment=Qt.AlignVCenter)
         snippet_header.addWidget(self.popout_btn, alignment=Qt.AlignVCenter)
         layout.addLayout(snippet_header, 5, 0, 1, 3)
         layout.addWidget(self.snippet_input, 6, 0, 1, 3)
@@ -355,6 +373,9 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.entry_id = None
         self.entry_is_encrypted = False
         self.original_entry = None
+        self.decrypted_snippet_cache = ""
+        self.snippet_revealed = False
+        self.reveal_snippet_btn.hide()
         self.snippet_input.setReadOnly(False)
         self.snippet_input.setPlaceholderText(
             "Text that appears when you type a shortcut. Type { to insert placeholders..."
@@ -387,6 +408,9 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.new_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
 
+        self.snippet_revealed = False
+        self.decrypted_snippet_cache = ""
+
         # Vault: decrypt if encrypted and unlocked; show placeholder if locked
         raw_snippet = entry.get('snippet', '')
         if self.entry_is_encrypted:
@@ -395,25 +419,30 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 vm = VaultManager.get_instance()
                 if vm.is_unlocked():
                     aad = (entry.get("vault_uuid") or "").encode()
-                    raw_snippet = vm.decrypt(raw_snippet, aad=aad)
+                    self.decrypted_snippet_cache = vm.decrypt(raw_snippet, aad=aad)
                     vm.reset_activity_timer()
-                    self.snippet_input.setPlaceholderText(
-                        "Text that appears when you type a shortcut. Type { to insert placeholders..."
-                    )
-                    self.snippet_input.setReadOnly(False)
+                    # Always default to hidden, even when the vault is unlocked
+                    raw_snippet = SNIPPET_MASK
+                    self.snippet_input.setReadOnly(True)
+                    self.reveal_snippet_btn.setIcon(self.icon_eye_on)
+                    self.reveal_snippet_btn.setToolTip("Show snippet")
+                    self.reveal_snippet_btn.show()
                 else:
                     raw_snippet = ""
                     self.snippet_input.setPlaceholderText(
                         "Vault locked - click the lock icon in the folder tree to unlock."
                     )
                     self.snippet_input.setReadOnly(True)
+                    self.reveal_snippet_btn.hide()
             except Exception:
                 raw_snippet = ""
+                self.reveal_snippet_btn.hide()
         else:
             self.snippet_input.setPlaceholderText(
                 "Text that appears when you type a shortcut. Type { to insert placeholders..."
             )
             self.snippet_input.setReadOnly(False)
+            self.reveal_snippet_btn.hide()
 
         self.snippet_input.setPlainText(raw_snippet)
         self.enabled_switch.setChecked(entry.get('enabled', True))
@@ -475,7 +504,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
         folder = self.folder_input.currentText().strip() or 'Default'
         label = self.new_input.text().strip()
         trigger = self.trigger_input.text().strip()
-        snippet = self.snippet_input.toPlainText()
+
+        # If the snippet is currently masked, the real plaintext lives in the
+        # cache, not in the (mask-filled) text box.
+        if getattr(self, "entry_is_encrypted", False) and not getattr(self, "snippet_revealed", False):
+            snippet = self.decrypted_snippet_cache
+        else:
+            snippet = self.snippet_input.toPlainText()
         enabled = self.enabled_switch.isChecked()
 
         # Tags
@@ -951,16 +986,36 @@ Snippets come in handy for text you enter often or for standard messages you sen
         try:
             from ui.theme_manager import ThemeManager
             tm = ThemeManager.get_instance()
-            icon = QIcon("assets/icons/new-window.svg")
+            icon = QIcon(FileUtils.icon_path("new-window.svg"))
             if tm:
                 icon = tm.recolor_icon(icon, tm.icon_color())
             self.popout_btn.setIcon(icon)
             self.popout_btn.setIconSize(QSize(14, 14))
+            self.reveal_snippet_btn.setIconSize(QSize(14, 14))
         except Exception:
             pass
 
         self.layout().invalidate()
         self.update()
+
+    def on_reveal_snippet_toggled(self) -> None:
+        """Toggle the masked/plaintext display of an encrypted snippet's content."""
+        self.snippet_revealed = not self.snippet_revealed
+        if self.snippet_revealed:
+            self.snippet_input.setPlainText(self.decrypted_snippet_cache)
+            self.snippet_input.setReadOnly(False)
+            self.snippet_input.setPlaceholderText(
+                "Text that appears when you type a shortcut. Type { to insert placeholders..."
+            )
+            self.reveal_snippet_btn.setIcon(self.icon_eye_off)
+            self.reveal_snippet_btn.setToolTip("Hide snippet")
+        else:
+            # Preserve any edits made while the snippet was revealed
+            self.decrypted_snippet_cache = self.snippet_input.toPlainText()
+            self.snippet_input.setPlainText(SNIPPET_MASK)
+            self.snippet_input.setReadOnly(True)
+            self.reveal_snippet_btn.setIcon(self.icon_eye_on)
+            self.reveal_snippet_btn.setToolTip("Show snippet")
 
     # ----- Popout Editor -----
     def open_popout(self) -> None:
@@ -968,6 +1023,8 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.popout_dialog.raise_()
             self.popout_dialog.activateWindow()
             return
+        if self.entry_is_encrypted and not self.snippet_revealed:
+            self.on_reveal_snippet_toggled()
         from .snippet_popout_dialog import SnippetPopoutDialog
         self.popout_dialog = SnippetPopoutDialog(
             snippet_text=self.snippet_input.toPlainText(),

@@ -327,21 +327,24 @@ class VaultManager:
         logger.info("Vault password force-reset after recovery")
         return True, config
 
-    def disable_vault(self, password: str, config: dict, db, target_folder: str,
-                      use_recovery: bool = False) -> tuple:
-        """Decrypt all vault snippets, move them to *target_folder*, and wipe vault config.
+    def disable_vault(self, password: str, config: dict, db, target_folder: str = "",
+                      use_recovery: bool = False, delete_data: bool = False) -> tuple:
+        """Disable the vault, either deleting or decrypting its encrypted contents.
 
         The auto-lock timer is suspended for the duration of the operation.
-        Individual decrypt failures are logged but do not abort the operation
-        (remaining snippets are still processed).
+        Individual failures are logged but do not abort the operation
+        (remaining snippets/placeholders are still processed).
 
         Args:
             password: Vault password (or recovery code when *use_recovery* is
                 ``True``) used to authenticate before decrypting.
             config: Application config dict.
             db: :class:`~utils.snippet_db.SnippetDB` instance.
-            target_folder: Destination folder for decrypted snippets.
+            target_folder: Destination folder for decrypted snippets. Ignored
+                when *delete_data* is ``True``.
             use_recovery: When ``True``, authenticate with a recovery code.
+            delete_data: When ``True``, permanently delete every encrypted
+                snippet and custom placeholder instead of decrypting them.
 
         Returns:
             tuple[bool, dict]: ``(True, updated_config)`` on success or
@@ -355,19 +358,56 @@ class VaultManager:
 
         self.pause_timer()
 
-        for s in db.get_vault_snippets():
-            try:
-                aad = (s.get("vault_uuid") or "").encode()
-                plain = self.decrypt(s["snippet"], aad=aad)
-                db.update_snippet_content(s["id"], plain)
-                db.update_snippet_folder(s["id"], target_folder)
-                db.set_snippet_encrypted(s["id"], False)
-                db.set_snippet_vault_uuid(s["id"], None)
-            except Exception as exc:
-                logger.error(
-                    "Decrypt failed for snippet %s during vault disable: %s",
-                    s.get("id"), exc,
-                )
+        if delete_data:
+            for s in db.get_vault_snippets():
+                try:
+                    db.delete_snippet(s["id"])
+                except Exception as exc:
+                    logger.error(
+                        "Failed to delete vault snippet %s: %s", s.get("id"), exc
+                    )
+            for p in db.get_all_custom_placeholders():
+                if not p.get("is_encrypted"):
+                    continue
+                try:
+                    db.delete_custom_placeholder(p["id"])
+                except Exception as exc:
+                    logger.error(
+                        "Failed to delete vault placeholder %s: %s", p.get("id"), exc
+                    )
+        else:
+            for s in db.get_vault_snippets():
+                try:
+                    aad = (s.get("vault_uuid") or "").encode()
+                    plain = self.decrypt(s["snippet"], aad=aad)
+                    db.update_snippet_content(s["id"], plain)
+                    db.update_snippet_folder(s["id"], target_folder)
+                    db.set_snippet_encrypted(s["id"], False)
+                    db.set_snippet_vault_uuid(s["id"], None)
+                except Exception as exc:
+                    logger.error(
+                        "Decrypt failed for snippet %s during vault disable: %s",
+                        s.get("id"), exc,
+                    )
+            for p in db.get_all_custom_placeholders():
+                if not p.get("is_encrypted"):
+                    continue
+                try:
+                    aad = (p.get("vault_uuid") or "").encode()
+                    plain = self.decrypt(p["value"], aad=aad)
+                    db.update_custom_placeholder({
+                        "id": p["id"],
+                        "name": p["name"],
+                        "value": plain,
+                        "description": p.get("description", ""),
+                        "is_encrypted": 0,
+                        "vault_uuid": None,
+                    })
+                except Exception as exc:
+                    logger.error(
+                        "Decrypt failed for placeholder %s during vault disable: %s",
+                        p.get("id"), exc,
+                    )
 
         db.clear_vault_folders()
 
@@ -380,7 +420,10 @@ class VaultManager:
             "auto_lock_minutes": existing_vault.get("auto_lock_minutes", 15),
         }
         self.lock()
-        logger.info("Vault disabled; snippets moved to '%s'", target_folder)
+        if delete_data:
+            logger.info("Vault disabled; encrypted data deleted")
+        else:
+            logger.info("Vault disabled; snippets moved to '%s'", target_folder)
         return True, config
 
     # Encrypt/Decrypt

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QFrame, QScrollArea
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 
 from ui.widgets.QAnimatedSwitch import QAnimatedSwitch
 
@@ -38,23 +38,25 @@ class VaultSettingsPage(QWidget):
 
         inner = QWidget()
         layout = QVBoxLayout(inner)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
 
-        header = QLabel("Vault")
-        header.setObjectName("SettingsHeader")
-        layout.addWidget(header)
+        self.header = QLabel("Vault")
+        self.header.setObjectName("SettingsHeader")
+        layout.addWidget(self.header)
+
+        # Body content is nested a bit further right than the header, matching
+        # the extra inset dynamically generated pages get from SettingsCard's
+        # own internal margin.
+        content = QVBoxLayout()
+        content.setContentsMargins(8, 0, 0, 0)
+        content.setSpacing(12)
+        layout.addLayout(content)
 
         # Status row
-        status_frame = QFrame()
-        status_frame.setObjectName("VaultStatusFrame")
-        sl = QHBoxLayout(status_frame)
-        sl.setContentsMargins(12, 8, 12, 8)
         self.status_label = QLabel("Status: Not configured")
         self.status_label.setObjectName("VaultStatusLabel")
-        sl.addWidget(self.status_label)
-        sl.addStretch()
-        layout.addWidget(status_frame)
+        content.addWidget(self.status_label)
 
         # Description
         desc = QLabel(
@@ -65,12 +67,12 @@ class VaultSettingsPage(QWidget):
         )
         desc.setObjectName("SettingsCardDescription")
         desc.setWordWrap(True)
-        layout.addWidget(desc)
+        content.addWidget(desc)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.HLine)
         sep1.setObjectName("VaultSeparator")
-        layout.addWidget(sep1)
+        content.addWidget(sep1)
 
         # Unlock on launch
         self.launch_switch = QAnimatedSwitch(
@@ -78,7 +80,7 @@ class VaultSettingsPage(QWidget):
             off_text="Prompt to unlock vault on application launch",
         )
         self.launch_switch.stateChanged.connect(self.on_launch_changed)
-        layout.addWidget(self.launch_switch)
+        content.addWidget(self.launch_switch)
 
         # Auto-lock timeout
         timeout_row = QHBoxLayout()
@@ -92,32 +94,35 @@ class VaultSettingsPage(QWidget):
         self.timeout_combo.currentIndexChanged.connect(self.on_timeout_changed)
         timeout_row.addWidget(self.timeout_combo)
         timeout_row.addStretch()
-        layout.addLayout(timeout_row)
+        content.addLayout(timeout_row)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setObjectName("VaultSeparator")
-        layout.addWidget(sep2)
+        content.addWidget(sep2)
 
         # Action buttons
         btn_row = QHBoxLayout()
         self.setup_btn = QPushButton("Set Up Vault")
         self.setup_btn.setObjectName("VaultConfirmBtn")
+        self.setup_btn.setToolTip("Configure a vault password to enable encrypted folders")
         self.setup_btn.clicked.connect(self.on_setup)
         btn_row.addWidget(self.setup_btn)
 
         self.change_btn = QPushButton("Change Password")
         self.change_btn.setObjectName("SnippetFormBtn")
+        self.change_btn.setToolTip("Change the vault password")
         self.change_btn.clicked.connect(self.on_change)
         btn_row.addWidget(self.change_btn)
 
         self.disable_btn = QPushButton("Disable Vault")
         self.disable_btn.setObjectName("SnippetFormBtn")
+        self.disable_btn.setToolTip("Disable the vault and decrypt all vault snippets")
         self.disable_btn.clicked.connect(self.on_disable)
         btn_row.addWidget(self.disable_btn)
 
         btn_row.addStretch()
-        layout.addLayout(btn_row)
+        content.addLayout(btn_row)
 
         layout.addStretch()
         scroll.setWidget(inner)
@@ -172,6 +177,7 @@ class VaultSettingsPage(QWidget):
             logger.warning("Failed to refresh vault settings page state", exc_info=True)
 
     def applyStyles(self):
+        self.apply_header_font()
         try:
             main = getattr(self.window, 'parent', None)
             if not main:
@@ -184,6 +190,19 @@ class VaultSettingsPage(QWidget):
                 self.launch_switch.applyStyles()
         except Exception:
             pass
+
+    def apply_header_font(self):
+        """Match the bold/large header font used by dynamically generated settings pages."""
+        app = getattr(self.window, "parent", None)
+        if not app:
+            return
+
+        if hasattr(app, "large_font_size_bold"):
+            self.header.setFont(getattr(app, "large_font_size_bold"))
+        elif hasattr(app, "large_font_size"):
+            font = getattr(app, "large_font_size")
+            font.setBold(True)
+            self.header.setFont(font)
 
     def on_launch_changed(self, checked: bool):
         cfg = dict(self.window.vault_config())

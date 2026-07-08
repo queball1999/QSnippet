@@ -18,7 +18,6 @@ images:
   icon_64: "icon_64x64.png"
   icon_32: "icon_32x32.png"
   icon_16: "icon_16x16.png"
-  icon: "QSnippet.icns"
-  win_icon: "QSnippet.ico"
+  icon: "QSnippet"
   snail: "snail.jpg"
   cat: "cat.jpg"

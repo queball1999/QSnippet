@@ -2,6 +2,8 @@ import logging
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QIcon
 
+from utils.file_utils import FileUtils
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -177,6 +179,15 @@ class ThemeManager(QObject):
     def icon_color(self) -> str:
         """Return the correct icon tint color for the current theme."""
         return "#ffffff" if self.is_dark else "#1c1c1c"
+
+    def icon_qss_url(self, name: str) -> str:
+        """
+        Return a QSS-safe `url(...)` value for assets/icons/<name>, resolved
+        against the PyInstaller resource dir (bundled) or working dir (dev/
+        portable) so the path is valid inside a packaged build.
+        """
+        path = FileUtils.icon_path(name).replace("\\", "/")
+        return f"url({path})"
 
     def recolor_icon(self, icon: "QIcon", color: str) -> "QIcon":
         """
@@ -368,6 +379,9 @@ class ThemeManager(QObject):
     # QSS generation
     def build_qss(self, c: dict, scale: int, btn_pad_x: int = 8, btn_pad_y: int = 6) -> str:
         arrow_variant = "white" if self.is_dark else "dark"
+        spinbox_up_icon   = self.icon_qss_url(f"spinbox-arrow-up-{arrow_variant}.svg")
+        spinbox_down_icon = self.icon_qss_url(f"spinbox-arrow-down-{arrow_variant}.svg")
+        checkbox_icon     = self.icon_qss_url("checkbox-checked-light.svg")
         s   = scale / 100.0
         r4  = max(2, round(4  * s))
         r6  = max(3, round(6  * s))
@@ -452,7 +466,7 @@ QSpinBox::up-button:pressed {{
     background-color: {c['selected']};
 }}
 QSpinBox::up-arrow {{
-    image: url(assets/icons/spinbox-arrow-up-{arrow_variant}.svg);
+    image: {spinbox_up_icon};
     width: 7px;
     height: 7px;
 }}
@@ -471,7 +485,7 @@ QSpinBox::down-button:pressed {{
     background-color: {c['selected']};
 }}
 QSpinBox::down-arrow {{
-    image: url(assets/icons/spinbox-arrow-down-{arrow_variant}.svg);
+    image: {spinbox_down_icon};
     width: 7px;
     height: 7px;
 }}
@@ -547,18 +561,18 @@ QCheckBox::indicator:unchecked:hover {{
 QCheckBox::indicator:checked {{
     background-color: {c['accent']};
     border: none;
-    image: url(assets/icons/checkbox-checked-light.svg);
+    image: {checkbox_icon};
     padding: 2px;
 }}
 QCheckBox::indicator:checked:hover {{
     background-color: {c['accent']};
     border: none;
-    image: url(assets/icons/checkbox-checked-light.svg);
+    image: {checkbox_icon};
 }}
 QCheckBox::indicator:checked:pressed {{
     background-color: {c['accent']};
     border: none;
-    image: url(assets/icons/checkbox-checked-light.svg);
+    image: {checkbox_icon};
 }}
 QCheckBox::indicator:disabled {{
     background-color: {c['input']};
@@ -852,6 +866,23 @@ QPushButton#PopoutBtn:hover {{
     border-radius: {r4}px;
 }}
 QPushButton#PopoutBtn:pressed {{
+    background-color: {c['selected']};
+    border-radius: {r4}px;
+}}
+
+/* Reveal/hide buttons for encrypted content (snippet form, placeholder dialog) */
+QPushButton#RevealSnippetBtn, QPushButton#RevealValueBtn, QPushButton#UnlockVaultBtn {{
+    background: transparent;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
+}}
+QPushButton#RevealSnippetBtn:hover, QPushButton#RevealValueBtn:hover, QPushButton#UnlockVaultBtn:hover {{
+    background-color: {c['hover']};
+    border-radius: {r4}px;
+}}
+QPushButton#RevealSnippetBtn:pressed, QPushButton#RevealValueBtn:pressed, QPushButton#UnlockVaultBtn:pressed {{
     background-color: {c['selected']};
     border-radius: {r4}px;
 }}

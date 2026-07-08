@@ -4,14 +4,16 @@ import logging
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QFrame, QCheckBox, QApplication, QStackedWidget, QWidget
+    QPushButton, QFrame, QCheckBox, QComboBox, QApplication, QStackedWidget, QWidget
 )
-from PySide6.QtCore import Signal, Qt, QThread
+from PySide6.QtCore import Signal, Qt, QThread, QSize
 
 from PySide6.QtGui import QKeySequence, QShortcut, QFont, QIcon
 
+from utils.file_utils import FileUtils
 from utils.vault_manager import VaultManager
 from .password_field import PasswordField
+from .QAnimatedSwitch import QAnimatedSwitch
 from .settings.settings_toast import SettingsToast
 
 logger = logging.getLogger(__name__)
@@ -144,7 +146,7 @@ class VaultSetupDialog(QDialog):
         icon_lbl.setAlignment(Qt.AlignCenter)
         try:
             from ui.theme_manager import ThemeManager
-            svg_icon = QIcon("assets/icons/lock.svg")
+            svg_icon = QIcon(FileUtils.icon_path("lock.svg"))
             tm = ThemeManager.get_instance()
             if not svg_icon.isNull():
                 display_icon = tm.recolor_icon(svg_icon, tm.icon_color()) if tm else svg_icon
@@ -594,8 +596,8 @@ class VaultSetupDialog(QDialog):
         layout.addWidget(self.title_label)
 
         self.desc_label = QLabel(
-            "Enter your vault password and choose a destination folder. "
-            "All vault snippets will be decrypted and moved there."
+            "Enter your vault password, then choose what happens to your encrypted "
+            "snippets and placeholders."
         )
         self.desc_label.setObjectName("VaultDialogDesc")
         self.desc_label.setWordWrap(True)
@@ -605,14 +607,10 @@ class VaultSetupDialog(QDialog):
         warn_frame.setObjectName("VaultWarningBox")
         wl = QVBoxLayout(warn_frame)
         wl.setContentsMargins(12, 8, 12, 8)
-        warn_text = QLabel(
-            "WARNING: All vault snippets will be permanently decrypted and moved "
-            "to a standard folder. Anyone with access to your device will be able "
-            "to read them."
-        )
-        warn_text.setObjectName("VaultWarningText")
-        warn_text.setWordWrap(True)
-        wl.addWidget(warn_text)
+        self.disable_warn_text = QLabel()
+        self.disable_warn_text.setObjectName("VaultWarningText")
+        self.disable_warn_text.setWordWrap(True)
+        wl.addWidget(self.disable_warn_text)
         layout.addWidget(warn_frame)
 
         sep = QFrame()
@@ -653,20 +651,38 @@ class VaultSetupDialog(QDialog):
         self.disable_rec_section.hide()
         layout.addWidget(self.disable_rec_section)
 
-        self.add_field(layout, "Destination Folder:", "target_folder",
-                        placeholder="Folder for decrypted snippets",
-                        is_password=False)
+        self.delete_data_toggle = QAnimatedSwitch(
+            objectName="delete_data_toggle",
+            on_text="Delete Permanently",
+            off_text="Convert to Plaintext",
+            text_position="left",
+            toggle_size=QSize(50, 30),
+            start_state="off",
+            parent=self,
+        )
+        self.delete_data_toggle.stateChanged.connect(self.on_delete_data_toggled)
+        layout.addWidget(self.delete_data_toggle, alignment=Qt.AlignLeft)
+
+        self.target_folder_row = QWidget()
+        tf_layout = QHBoxLayout(self.target_folder_row)
+        tf_layout.setContentsMargins(0, 0, 0, 0)
+        tf_label = QLabel("Destination Folder:")
+        tf_label.setObjectName("VaultFieldLabel")
+        tf_label.setMinimumWidth(150)
+        self.target_folder = QComboBox()
+        self.target_folder.setObjectName("VaultField")
+        self.target_folder.setEditable(False)
+        tf_layout.addWidget(tf_label)
+        tf_layout.addWidget(self.target_folder)
+        layout.addWidget(self.target_folder_row)
+        self.populate_target_folder_combo()
+        self.on_delete_data_toggled(self.delete_data_toggle.isChecked())
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("VaultErrorLabel")
         self.error_label.setWordWrap(True)
         self.error_label.hide()
         layout.addWidget(self.error_label)
-
-        self.confirm_check = QCheckBox("I understand my vault snippets will be decrypted.")
-        self.confirm_check.setObjectName("VaultConfirmCheck")
-        self.confirm_check.toggled.connect(self.update_confirm_btn)
-        layout.addWidget(self.confirm_check)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -676,13 +692,45 @@ class VaultSetupDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         self.confirm_btn = QPushButton("Disable Vault")
         self.confirm_btn.setObjectName("VaultConfirmBtn")
-        self.confirm_btn.setEnabled(False)
         self.confirm_btn.clicked.connect(self.do_disable)
         btn_row.addWidget(self.confirm_btn)
         layout.addLayout(btn_row)
 
         shortcut = QShortcut(QKeySequence("Return"), self)
         shortcut.activated.connect(self.do_disable)
+
+    def populate_target_folder_combo(self) -> None:
+        """Populate the destination-folder dropdown with non-vault folders, defaulting to 'Default'."""
+        try:
+            all_folders = set(self.db.get_all_folders() or [])
+            vault_folders = set(self.db.get_vault_folders() or [])
+        except Exception:
+            all_folders, vault_folders = set(), set()
+
+        folders = sorted(all_folders - vault_folders, key=str.lower)
+        if "Default" not in folders:
+            folders.insert(0, "Default")
+
+        self.target_folder.clear()
+        self.target_folder.addItems(folders)
+        default_idx = self.target_folder.findText("Default")
+        if default_idx >= 0:
+            self.target_folder.setCurrentIndex(default_idx)
+
+    def on_delete_data_toggled(self, checked: bool) -> None:
+        """Show the destination-folder picker only when converting to plaintext."""
+        self.target_folder_row.setVisible(not checked)
+        if checked:
+            self.disable_warn_text.setText(
+                "WARNING: All encrypted snippets and placeholders will be permanently "
+                "deleted. This cannot be undone."
+            )
+        else:
+            self.disable_warn_text.setText(
+                "WARNING: All encrypted snippets and placeholders will be permanently "
+                "decrypted and moved to the selected folder. Anyone with access to your "
+                "device will be able to read them."
+            )
 
     def set_disable_recovery_mode(self, enabled: bool) -> None:
         self.disable_recovery_mode = enabled
@@ -693,9 +741,6 @@ class VaultSetupDialog(QDialog):
             self.disable_rec_code.setFocus()
         else:
             self.current_pw.setFocus()
-
-    def update_confirm_btn(self, checked: bool) -> None:
-        self.confirm_btn.setEnabled(checked)
 
     def do_disable(self) -> None:
         use_recovery = getattr(self, "_disable_recovery_mode", False)
@@ -716,18 +761,19 @@ class VaultSetupDialog(QDialog):
                 self.show_error("Enter your vault password to confirm.")
                 return
 
-        folder = self.target_folder.text().strip()
-        if not folder:
-            self.show_error("Enter a destination folder name.")
-            return
+        delete_data = self.delete_data_toggle.isChecked()
+        folder = ""
+        if not delete_data:
+            folder = self.target_folder.currentText().strip() or "Default"
 
         self.confirm_btn.setEnabled(False)
-        self.confirm_btn.setText("Decrypting…")
+        self.confirm_btn.setText("Deleting..." if delete_data else "Decrypting...")
 
         self.worker = VaultWorker(
             self.vm.disable_vault,
             credential, self.config, self.db, folder,
             use_recovery=use_recovery,
+            delete_data=delete_data,
         )
         _use_recovery = use_recovery
         self.worker.finished.connect(
@@ -866,8 +912,6 @@ class VaultSetupDialog(QDialog):
                     lbl.setFont(sf)
                 for lbl in self.findChildren(QLabel, "VaultHintPass"):
                     lbl.setFont(sf)
-                if hasattr(self, "confirm_check"):
-                    self.confirm_check.setFont(sf)
                 if hasattr(self, "recovery_ack"):
                     self.recovery_ack.setFont(sf)
                 if hasattr(self, "copy_toast"):

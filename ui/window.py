@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 import zipfile
-import platform, psutil
+import platform
 import logging
 
 # Only import subprocess on non-Windows platforms
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QLabel, QPushButton
 )
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QEvent
 
 # Import custom modules
 from utils import FileUtils, AppLogger
@@ -59,11 +59,14 @@ class QSnippet(QMainWindow):
         self.state = "stopped"
 
         self.setWindowTitle(self.parent.program_name)
-        self.setWindowIcon(QIcon(self.parent.images["icon"]))
+
+        # Load window icon with fallback handling
+        icon = self.load_icon_with_fallback()
+        self.setWindowIcon(icon)
 
         # Set application-level metadata
         # This fixes app icon missing on linux taskbar
-        self.app.setWindowIcon(QIcon(self.parent.images["icon"]))
+        self.app.setWindowIcon(icon)
         self.app.setApplicationName(self.parent.program_name)
         self.app.setDesktopFileName(self.parent.program_name)
 
@@ -84,6 +87,36 @@ class QSnippet(QMainWindow):
         self.start_service()
 
         logger.info("QSnippet Main Window initialized successfully")
+
+    def load_icon_with_fallback(self) -> QIcon:
+        """
+        Load the application icon with intelligent fallback handling.
+
+        Uses pre-resolved icon path from fix_image_paths() which implements:
+        - External assets/images/ (development)
+        - Bundled PyInstaller resources (production)
+
+        Returns:
+            QIcon: Loaded icon, or empty icon if loading fails.
+        """
+        icon_path = self.parent.images.get("icon", "")
+
+        if not icon_path:
+            logger.warning("No icon path configured after asset resolution")
+            return QIcon()
+
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+            if not icon.isNull():
+                logger.debug(f"Successfully loaded icon: {icon_path}")
+                return icon
+            else:
+                logger.warning(f"Icon file exists but failed to load: {icon_path}")
+        else:
+            logger.warning(f"Icon file not found: {icon_path}")
+
+        logger.warning("Icon load failed; using empty icon")
+        return QIcon()
 
     def initUI(self) -> None:
         """
@@ -167,8 +200,6 @@ class QSnippet(QMainWindow):
         self.editor.trigger_snippet_deleted.connect(lambda sid: self.snippet_service.remove_snippet(sid))
 
         # Vault: connect folder signals from the snippet table
-        self.editor.table.markFolderAsVault.connect(self.on_mark_folder_as_vault)
-        self.editor.table.removeFolderVault.connect(self.on_remove_folder_vault)
         self.editor.table.vaultFolderClicked.connect(self.on_vault_folder_clicked)
 
         # Vault: locked trigger → main-thread dialog via Signal (thread-safe queued connection)
@@ -243,9 +274,10 @@ class QSnippet(QMainWindow):
 
     def init_tray_menu(self) -> None:
         """
-        Initialize the application toolbar.
+        Initialize the application system tray menu.
 
-        Creates the toolbar and adds it to the main window.
+        Creates the tray icon with the OS-appropriate format and adds its context menu
+        to the main window. The icon format is selected at runtime based on the OS.
 
         Returns:
             None
@@ -254,11 +286,6 @@ class QSnippet(QMainWindow):
 
         try:
             icon_path = self.parent.images.get("icon")
-            
-            # Fix icon for windows os
-            if sys.platform == "win32":
-                icon_path = self.parent.images.get("win_icon")
-
             logger.debug("Tray icon path: %s", icon_path)
 
             icon = QIcon(icon_path)
@@ -377,21 +404,23 @@ class QSnippet(QMainWindow):
 
     def check_service_status(self) -> None:
         """
-        Update the status bar based on the current service state.
+        Update the status bar based on the current, authoritative service state.
+
+        Reads status directly from the snippet service rather than the cached
+        self.state so the status bar reliably reflects reality (e.g. paused-while-
+        running is otherwise indistinguishable from running via self.state alone).
 
         Returns:
             None
         """
         logger.debug("Checking service status")
 
-        if self.snippet_service.active():
-            self.update_status_bar("Running")
-        elif self.state == "paused":
-            self.update_status_bar("Paused")
-        elif self.state == "stopped":
+        if not self.snippet_service.active():
             self.update_status_bar("Stopped")
+        elif self.snippet_service.is_paused():
+            self.update_status_bar("Paused")
         else:
-            self.update_status_bar("Error")
+            self.update_status_bar("Running")
 
     def update_status_bar(self, status: str) -> None:
         """
@@ -430,16 +459,8 @@ class QSnippet(QMainWindow):
             # Set tooltip with full path on the status bar
             status_bar.setToolTip(f"Database: {db_path}")
 
-            # Clear message after 10 seconds and restore service status
-            def restore_status():
-                if self.state == "running":
-                    self.update_status_bar("Running")
-                elif self.state == "paused":
-                    self.update_status_bar("Paused")
-                elif self.state == "stopped":
-                    self.update_status_bar("Stopped")
-
-            QTimer.singleShot(5000, restore_status)
+            # Clear message after a few seconds and restore the real service status
+            QTimer.singleShot(5000, self.check_service_status)
 
         except Exception as e:
             logger.exception(f"Failed to show snippets loaded message: {e}")
@@ -731,9 +752,10 @@ class QSnippet(QMainWindow):
 
     def handle_show_info(self) -> None:
         """
-        Display the About dialog.
+        Display the About dialog with scrollable content.
 
-        Builds application information and shows it in a Qt message box.
+        Builds application information and shows it in a custom dialog
+        with a scroll area for better UX with long content.
 
         Returns:
             None
@@ -749,12 +771,36 @@ class QSnippet(QMainWindow):
             )
             return
 
-        box = QMessageBox(self)
-        box.setWindowTitle(f"About {self.parent.program_name}")
-        box.setTextFormat(Qt.RichText)
-        box.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        box.setText(info["html"])
-        box.exec()
+        from PySide6.QtWidgets import QDialog, QScrollArea, QLabel
+        from PySide6.QtWidgets import QVBoxLayout
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"About {self.parent.program_name}")
+        dialog.resize(600, 500)
+        dialog.setMaximumWidth(600)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        # Title (outside scroll area)
+        title_label = QLabel(f"<h2>{self.parent.program_name}</h2>")
+        title_label.setTextFormat(Qt.RichText)
+        layout.addWidget(title_label)
+
+        # Scrollable content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        content_label = QLabel(info["html"])
+        content_label.setTextFormat(Qt.RichText)
+        content_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        content_label.setOpenExternalLinks(True)
+        content_label.setWordWrap(True)
+        content_label.setMargin(10)
+
+        scroll.setWidget(content_label)
+        layout.addWidget(scroll)
+
+        dialog.exec()
 
     def build_about_info(self) -> dict | bool:
         """
@@ -807,69 +853,83 @@ class QSnippet(QMainWindow):
             # System info
             os_name = platform.system()
             os_version = platform.version()
-            cpu_count = psutil.cpu_count(logical=True)
-            ram_gb = round(psutil.virtual_memory().total / (1024**3), 2)
 
             # Bundle mode
             bundled = hasattr(sys, "_MEIPASS")
             bundle_mode = "PyInstaller Bundle" if bundled else "Source / Development"
 
+            # Asset paths
+            icons_path = parent.images_path.parent / "icons"
+            images_path = parent.images_path
+
             # ----- HTML VERSION -----
             html = f"""
-            <h2>{name}</h2>
+            <b>Build Information</b><br>
             Version: {BUILD_VERSION}<br>
             Build Date: {BUILD_DATE}<br>
             Commit: {BUILD_COMMIT}<br>
             Estimated Install Date: {install_date}<br><br>
 
-            <b>Support Information</b><br>
-            Email: <a href="mailto:{support_email}">{support_email}</a><br>
-            Website: <a href="{support_site}">{support_site}</a><br><br>
+            <b>Environment</b><br>
+            Runtime Mode: {bundle_mode}<br>
+            Python: {platform.python_version()}<br>
+            OS: {os_name} ({os_version})<br><br>
 
             <b>Application Directories</b><br>
             App Data: <a href="file:///{parent.app_data_dir}">{parent.app_data_dir}</a><br>
             Logs: <a href="file:///{parent.logs_dir}">{parent.logs_dir}</a><br>
             Total Log Size: {log_size_mb} MB<br><br>
 
+            <b>Asset Directories</b><br>
+            Icons: <a href="file:///{icons_path}">{icons_path}</a><br>
+            Images: <a href="file:///{images_path}">{images_path}</a><br><br>
+
             <b>Config Files</b><br>
             Config: <a href="file:///{config_file}">{config_file}</a><br>
             Settings: <a href="file:///{settings_file}">{settings_file}</a><br><br>
 
-            <b>Environment</b><br>
-            Runtime Mode: {bundle_mode}<br>
-            Python: {platform.python_version()}<br>
-            OS: {os_name} ({os_version})<br>
-            CPU Cores: {cpu_count}<br>
-            RAM: {ram_gb} GB<br><br>
+            <b>Support Information</b><br>
+            Email: <a href="mailto:{support_email}">{support_email}</a><br>
+            Website: <a href="{support_site}">{support_site}</a><br><br>
 
             <b>License</b><br>
             GPLv3 © 2026 Queball1999<br>
             License: <a href="file:///{license_file}">{license_file}</a><br><br>
+
+            <b>Icon Attribution</b><br>
+            Icons provided by <a href="https://pictogrammers.com/">Pictogrammers</a> (Apache 2.0 License)<br><br>
             """
 
             # ----- TEXT VERSION (for logs ZIP) -----
             text = (
-                f"{name}\n"
+                f"{name}\n\n"
+                f"Build Information\n"
                 f"Version: {BUILD_VERSION}\n"
                 f"Build Date: {BUILD_DATE}\n"
                 f"Commit: {BUILD_COMMIT}\n"
                 f"Estimated Install Date: {install_date}\n\n"
-                f"Support Information\n"
-                f"Email: {support_email}\n"
-                f"Website: {support_site}\n\n"
+                f"Environment\n"
+                f"Runtime Mode: {bundle_mode}\n"
+                f"Python: {platform.python_version()}\n"
+                f"OS: {os_name} ({os_version})\n\n"
                 f"Application Directories\n"
                 f"App Data: {parent.app_data_dir}\n"
                 f"Logs: {parent.logs_dir}\n"
                 f"Total Log Size: {log_size_mb} MB\n\n"
+                f"Asset Directories\n"
+                f"Icons: {icons_path}\n"
+                f"Images: {images_path}\n\n"
                 f"Config Files\n"
                 f"Config: {config_file}\n"
                 f"Settings: {settings_file}\n\n"
-                f"Environment\n"
-                f"Runtime Mode: {bundle_mode}\n"
-                f"Python: {platform.python_version()}\n"
-                f"OS: {os_name} ({os_version})\n"
-                f"CPU Cores: {cpu_count}\n"
-                f"RAM: {ram_gb} GB\n"
+                f"Support Information\n"
+                f"Email: {support_email}\n"
+                f"Website: {support_site}\n\n"
+                f"License\n"
+                f"GPLv3 © 2026 Queball1999\n"
+                f"License: {license_file}\n\n"
+                f"Icon Attribution\n"
+                f"Icons provided by Pictogrammers (https://pictogrammers.com/) - Apache 2.0 License\n"
             )
 
             return {"html": html, "text": text}
@@ -1121,15 +1181,27 @@ class QSnippet(QMainWindow):
             snippet_id = entry.get("id")
             vm = self.vault_manager()
 
-            if db.is_vault_folder(folder):
+            logger.debug("on_snippet_saved_vault: id=%s folder=%s", snippet_id, folder)
+
+            if db.is_under_vault_folder(folder):
+                logger.info("Snippet %s saved to vault folder '%s'; proceeding with encryption", snippet_id, folder)
                 if not vm.is_unlocked():
+                    logger.debug("Vault locked; showing unlock dialog")
                     self.show_vault_unlock(
                         message="Unlock vault to save to this folder.",
                         on_success=lambda: self.encrypt_and_save(snippet_id, vm)
                     )
                     return
-                self.encrypt_and_save(snippet_id, vm)
+                ok = self.encrypt_and_save(snippet_id, vm)
+                if not ok:
+                    logger.error("Encryption failed for snippet %s", snippet_id)
+                    self.parent.message_box.warning(
+                        "Snippet was saved but encryption failed. "
+                        "Please unlock the vault and try saving again.",
+                        title="Encryption Failed",
+                    )
             else:
+                logger.debug("Snippet %s not in vault folder; checking if previously encrypted", snippet_id)
                 # The form wrote plaintext to the DB. If the snippet was previously
                 # encrypted (moved out of a vault folder), clear the flag only.
                 # No decrypt is needed - the form already provides plaintext.
@@ -1149,56 +1221,40 @@ class QSnippet(QMainWindow):
                         )
 
             self.snippet_service.refresh_snippet(entry)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Unexpected error in on_snippet_saved_vault: %s", exc)
             self.snippet_service.refresh_snippet(entry)
 
-    def encrypt_and_save(self, snippet_id: int, vm) -> None:
+    def encrypt_and_save(self, snippet_id: int, vm) -> bool:
+        """Encrypt and save a snippet in the vault. Returns True if successful."""
         try:
             import uuid as _uuid
             db = self.vault_db()
             snippet = db.get_snippet(snippet_id)
+            if not snippet:
+                logger.error("Snippet %s not found in database for encryption", snippet_id)
+                return False
             # Always re-encrypt: the form decrypts before display, so snippet
             # content in the DB is always plaintext at this point regardless
             # of the is_encrypted flag.
             vault_uuid = str(_uuid.uuid4())
+            logger.debug("Encrypting snippet %s with vault_uuid %s", snippet_id, vault_uuid)
             cipher = vm.encrypt(snippet.get("snippet", ""), aad=vault_uuid.encode())
             db.update_snippet_vault_uuid(snippet_id, cipher, vault_uuid)
             db.set_snippet_encrypted(snippet_id, True)
             vm.reset_activity_timer()
+
+            # Verify it was marked encrypted
+            verify = db.get_snippet(snippet_id)
+            if verify and verify.get("is_encrypted"):
+                logger.info("Snippet %s successfully encrypted and marked in database", snippet_id)
+                return True
+            else:
+                logger.error("Snippet %s encryption flag not set after encryption!", snippet_id)
+                return False
         except Exception as exc:
             logger.error("Failed to encrypt snippet %s: %s", snippet_id, exc)
-
-    def on_mark_folder_as_vault(self, folder_item) -> None:
-        from PySide6.QtCore import QTimer as _QTimer
-        data = folder_item.data(Qt.UserRole) if folder_item else {}
-        folder_path = data.get("path", "") if isinstance(data, dict) else ""
-        if not folder_path:
-            return
-
-        vm = self.vault_manager()
-        cfg = self.vault_config()
-
-        if not vm.is_setup(cfg):
-            # First time - run setup dialog
-            from ui.widgets.vault_setup_dialog import VaultSetupDialog
-            dlg = VaultSetupDialog(cfg, self.vault_db(), mode="setup", parent=self)
-            dlg.vaultConfigured.connect(lambda updated: self.after_vault_setup(updated, folder_path))
-            dlg.exec()
-            return
-
-        if not vm.is_unlocked():
-            self.show_vault_unlock(
-                message=f"Unlock vault to protect folder: {folder_path}",
-                on_success=lambda: self.mark_folder_vault(folder_path)
-            )
-            return
-
-        self.mark_folder_vault(folder_path)
-
-    def after_vault_setup(self, updated_config: dict, folder_path: str) -> None:
-        self.parent.cfg = updated_config
-        self.update_vault_ui()
-        self.mark_folder_vault(folder_path)
+            return False
 
     def mark_folder_vault(self, folder_path: str) -> None:
         try:
@@ -1263,45 +1319,6 @@ class QSnippet(QMainWindow):
                 db.set_snippet_vault_uuid(entry["id"], vault_uuid)
         except Exception as exc:
             logger.warning("Could not create vault welcome snippet: %s", exc)
-
-    def on_remove_folder_vault(self, folder_item) -> None:
-        data = folder_item.data(Qt.UserRole) if folder_item else {}
-        folder_path = data.get("path", "") if isinstance(data, dict) else ""
-        if not folder_path:
-            return
-
-        vm = self.vault_manager()
-        if not vm.is_unlocked():
-            self.show_vault_unlock(
-                message=f"Unlock vault to remove protection from: {folder_path}",
-                on_success=lambda: self.unmark_folder_vault(folder_path)
-            )
-            return
-
-        self.unmark_folder_vault(folder_path)
-
-    def unmark_folder_vault(self, folder_path: str) -> None:
-        try:
-            db = self.vault_db()
-            vm = self.vault_manager()
-            db.remove_vault_folder(folder_path)
-
-            for snippet in db.get_snippets_by_folder(folder_path):
-                if snippet.get("is_encrypted"):
-                    try:
-                        aad = (snippet.get("vault_uuid") or "").encode()
-                        plain = vm.decrypt(snippet.get("snippet", ""), aad=aad)
-                        db.update_snippet_content(snippet["id"], plain)
-                        db.set_snippet_encrypted(snippet["id"], False)
-                    except Exception as exc:
-                        logger.error("Failed to decrypt snippet %s: %s", snippet.get("id"), exc)
-
-            self.refresh_vault_folder_icons()
-            self.update_vault_ui()
-            self.editor.load_snippets()
-            self.snippet_service.refresh()
-        except Exception as exc:
-            logger.error("Failed to unmark folder vault: %s", exc)
 
     def on_vault_folder_clicked(self, folder_path: str) -> None:
         """Open setup wizard if vault not configured; otherwise show unlock dialog when locked."""
@@ -1429,10 +1446,10 @@ class QSnippet(QMainWindow):
             self.apply_vault_timeout_from_config()
             self.update_vault_ui()
             if is_first_setup:
-                # Create a default "Vault" folder so it immediately appears in the tree
-                db = self.vault_db()
-                if not db.get_vault_folders():
-                    QTimer.singleShot(0, lambda: self.mark_folder_vault("Vault"))
+                # "Vault" is already registered automatically (see SnippetDB
+                # init), but nothing has encrypted its existing snippets or
+                # seeded the welcome snippet yet until a password exists.
+                QTimer.singleShot(0, lambda: self.mark_folder_vault("Vault"))
 
         dlg.vaultConfigured.connect(on_vault_configured)
         dlg.exec()
@@ -1560,7 +1577,7 @@ class QSnippet(QMainWindow):
             return False
         if clicked == save_btn:
             self.editor.on_save()
-            # If form is still showing, save failed — cancel the close
+            # If form is still showing, save failed - cancel the close
             if self.editor.stack.currentWidget() is self.editor.form:
                 return False
             return True
@@ -1591,9 +1608,16 @@ class QSnippet(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if (
-            hasattr(self, "editor")
-            and self.editor.stack.currentWidget() is self.editor.form
-            and getattr(self.editor.form, "entry_id", None) is None
-        ):
+        if hasattr(self, "editor") and self.editor.stack.currentWidget() is self.editor.form:
             self.editor.start_inactivity_timer()
+
+    def changeEvent(self, event) -> None:
+        """
+        Treat window (re)activation as user activity for the snippet form's
+        inactivity timer, so clicking back into focus (e.g. alt-tab) reliably
+        resets the countdown instead of relying only on text-field edits.
+        """
+        super().changeEvent(event)
+        if event.type() == QEvent.ActivationChange and self.isActiveWindow():
+            if hasattr(self, "editor") and self.editor.stack.currentWidget() is self.editor.form:
+                self.editor.reset_inactivity_timer()

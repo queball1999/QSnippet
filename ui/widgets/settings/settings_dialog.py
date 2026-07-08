@@ -69,7 +69,7 @@ class SettingsDialog(QDialog):
         left.setContentsMargins(0, 0, 0, 0)
         left_container = QWidget()
         left_container.setLayout(left)
-        left_container.setFixedWidth(260)
+        left_container.setFixedWidth(220)
 
         self.search = QLineEdit(clearButtonEnabled=True)
         self.search.setObjectName("SettingsSearch")

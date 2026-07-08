@@ -64,6 +64,12 @@ $exePath     = Join-Path $DIST_DIR "$APP_NAME.exe"
 $portableDir = Join-Path $DIST_DIR "QSnippet-$VERSION-windows-portable"
 $portableZip = Join-Path $DIST_DIR "$APP_NAME-$VERSION-windows-portable.zip"
 
+# Remove existing portable zip if it exists
+if (Test-Path $portableZip) {
+    Write-Host "Removing existing portable zip: $portableZip" -ForegroundColor Yellow
+    Remove-Item $portableZip -Force
+}
+
 # Create temporary directory for packaging
 if (Test-Path $portableDir) {
     Remove-Item $portableDir -Recurse -Force
@@ -81,7 +87,13 @@ if (Test-Path $exePath) {
 $configDest = Join-Path $portableDir "config"
 Copy-Item "config" $configDest -Recurse -Force
 Remove-Item (Join-Path $configDest "__pycache__") -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $configDest "build_info.py") -Force -ErrorAction SilentlyContinue
+$buildInfoPath = Join-Path $configDest "build_info.py"
+if (Test-Path $buildInfoPath) {
+    Remove-Item $buildInfoPath -Force -ErrorAction SilentlyContinue
+}
+
+# Copy assets folder (icons, images required for bundled app)
+Copy-Item "assets" (Join-Path $portableDir "assets") -Recurse -Force
 
 # Copy notices folder
 Copy-Item "notices" (Join-Path $portableDir "notices") -Recurse -Force

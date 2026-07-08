@@ -602,35 +602,98 @@ class main():
 
     def fix_image_paths(self) -> None:
         """
-        Update image paths to use the resolved images and icons directories.
+        Resolve all image/icon asset paths with intelligent fallback.
 
-        Prefixes configured image filenames with the absolute images or icons path,
-        depending on whether the file is an icon or regular image.
+        Resolution strategy for icons (assets/icons/):
+        1. External assets/icons/ folder (development priority)
+        2. Bundled resources (PyInstaller) - only if external missing AND in PyInstaller
+
+        Resolution strategy for images (assets/images/):
+        1. External assets/images/ folder (development priority)
+        2. Bundled resources (PyInstaller) - only if external missing AND in PyInstaller
+
+        For development mode (not in PyInstaller): raises error if critical assets missing
+        to prevent runaway app with missing tray icon.
+
+        Uses OS-specific icon format (*.ico on Windows, *.icns on macOS/Linux).
 
         Returns:
             None
+
+        Raises:
+            SystemExit: If in development and required assets cannot be resolved.
         """
         icon_names = {"QSnippet.ico", "QSnippet.icns"}
         icon_prefixes = ("icon_",)
+        critical_assets = {"icon"}
 
-        # Get icons path
-        icons_path = FileUtils.resolve_icons_path(self) if hasattr(self, 'working_dir') else None
+        logger.info("Resolving image/icon asset paths")
 
-        for image in self.images:
-            old_val = self.images[image]
+        # Get the resolved images path (already determined during init)
+        images_path = self.images_path
+        icons_path = images_path.parent / "icons"  # assets/icons/
+
+        missing_critical = []
+
+        for image_key in self.images:
+            old_val = self.images[image_key]
+
+            # Handle generic "QSnippet" icon name with OS-specific resolution
+            if old_val == "QSnippet":
+                old_val = FileUtils.get_os_specific_icon()
+                logger.debug(f"Resolved generic 'QSnippet' icon to OS-specific: {old_val}")
 
             # Determine if this is an icon file
             is_icon = (old_val in icon_names or
                       any(old_val.startswith(prefix) for prefix in icon_prefixes))
 
-            if is_icon and icons_path:
-                self.images[image] = os.path.join(str(icons_path), old_val)
+            # Build the primary path based on asset type
+            if is_icon:
+                primary_path = os.path.join(str(icons_path), old_val)
             else:
-                self.images[image] = os.path.join(self.images_path, old_val)
+                primary_path = os.path.join(str(images_path), old_val)
 
-        logger.debug(f"Images Path: {self.images_path}")
-        if icons_path:
-            logger.debug(f"Icons Path: {icons_path}")
+            # Try primary path first (external development assets)
+            if os.path.exists(primary_path):
+                logger.info(f"Asset '{image_key}' ({old_val}) resolved to: {primary_path}")
+                self.images[image_key] = primary_path
+            else:
+                # Only try fallback if in PyInstaller environment
+                if FileUtils.is_running_in_pyinstaller():
+                    asset_dir = "icons" if is_icon else "images"
+                    fallback_path = FileUtils.resolve_asset_with_fallback(old_val, asset_dir=asset_dir)
+                    if fallback_path:
+                        logger.info(f"Asset '{image_key}' ({old_val}) resolved to bundled: {fallback_path}")
+                        self.images[image_key] = fallback_path
+                    else:
+                        logger.warning(f"Asset '{image_key}' ({old_val}) not found in primary or bundled")
+                        self.images[image_key] = ""
+                else:
+                    # In development, fail loudly on missing critical assets
+                    asset_type = "icon" if is_icon else "image"
+                    asset_dir = "assets/icons" if is_icon else "assets/images"
+                    logger.warning(f"Asset '{image_key}' ({old_val}) not found at: {primary_path}")
+                    if image_key in critical_assets:
+                        logger.error(f"Critical {asset_type} '{image_key}' missing in development mode")
+                        missing_critical.append((image_key, old_val, asset_dir))
+                    self.images[image_key] = ""
+
+        # In development mode, fail loudly if critical assets are missing
+        # (prevents runaway app with no tray icon in taskbar)
+        if missing_critical:
+            msg = (
+                "Critical application assets are missing.\n\n"
+                "The following required files could not be found:\n"
+            )
+            for key, filename, asset_dir in missing_critical:
+                msg += f"  • {key}: {asset_dir}/{filename}\n"
+            msg += (
+                "\nMake sure the assets/ directory structure exists in the project root "
+                "with all required files."
+            )
+            logger.critical(msg)
+            self.QMessageBox.critical(None, "Missing Assets Error", msg)
+            sys.exit(1)
 
     def scale_width(self, original_width, screen_geometry) -> int:
         """
@@ -995,10 +1058,16 @@ if __name__ == '__main__':
         ex = main()
         sys.exit(ex.app.exec())
     except Exception as e:
-        # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon("assets/icons/QSnippet.ico")) # fallback location
+        try:
+            from utils.file_utils import FileUtils
+            icon_name = FileUtils.get_os_specific_icon()
+            icon_path = FileUtils.resolve_asset_with_fallback(icon_name, asset_dir="images")
+            if icon_path:
+                msg.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()

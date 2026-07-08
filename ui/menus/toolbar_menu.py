@@ -1,6 +1,8 @@
 from PySide6.QtWidgets import QToolBar
 from PySide6.QtGui import QIcon, QAction
 
+from utils.file_utils import FileUtils
+
 
 class ToolbarMenu(QToolBar):
     """
@@ -15,9 +17,9 @@ class ToolbarMenu(QToolBar):
         super().__init__("Main Toolbar", parent)
         self.parent = parent
         self.icon_sources: dict[QAction, QIcon] = {}
-        self.vault_lock_icon = QIcon("assets/icons/lock.svg")
-        self.vault_open_icon = QIcon("assets/icons/lock-open.svg")
-        self.settings_icon = QIcon("assets/icons/settings.svg")
+        self.vault_lock_icon = QIcon(FileUtils.icon_path("lock.svg"))
+        self.vault_open_icon = QIcon(FileUtils.icon_path("lock-open.svg"))
+        self.settings_icon = QIcon(FileUtils.icon_path("settings-outline.svg"))
         self.init_actions()
         self.update_icons()
         self.connect_theme()
@@ -25,10 +27,10 @@ class ToolbarMenu(QToolBar):
     def init_actions(self):
         self.editor = self.parent.editor
 
-        self.make_action("go-home",       "Home",           self.editor.show_home_widget)
-        self.make_action("document-new",  "New Snippet",    self.editor.show_new_form)
-        self.make_action("document-save", "Save Snippet",   self.editor.on_save)
-        self.make_action("edit-delete",   "Delete Snippet", self.editor.on_delete)
+        self.make_action("home-variant-outline", "Home",           self.editor.show_home_widget)
+        self.make_action("note-plus-outline",     "New Snippet",    self.editor.show_new_form)
+        self.make_action("content-save-outline",  "Save Snippet",   self.editor.on_save)
+        self.make_action("delete-outline",        "Delete Snippet", self.editor.on_delete)
 
         self.addSeparator()
         self.vault_action = QAction("Vault", self)
@@ -74,8 +76,8 @@ class ToolbarMenu(QToolBar):
         if hasattr(self.parent, "show_settings_window"):
             self.parent.show_settings_window()
 
-    def make_action(self, theme_name: str, label: str, slot) -> QAction:
-        icon   = QIcon.fromTheme(theme_name)
+    def make_action(self, icon_name: str, label: str, slot) -> QAction:
+        icon   = QIcon(FileUtils.icon_path(f"{icon_name}.svg"))
         action = QAction(label, self)
         action.triggered.connect(slot)
         self.addAction(action)

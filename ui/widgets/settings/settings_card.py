@@ -13,7 +13,7 @@ class SettingsCard(QWidget):
 
         root = QVBoxLayout(self)
         root.setSpacing(0)
-        root.setContentsMargins(16, 14, 16, 14)
+        root.setContentsMargins(8, 14, 16, 14)
 
         title_label = QLabel(title)
         title_label.setObjectName("SettingsCardTitle")

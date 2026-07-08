@@ -3,9 +3,10 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QSpacerItem, QSizePolicy,
     QHBoxLayout, QPushButton, QFrame, QStyledItemDelegate
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QPainter
+from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtGui import QFont, QPainter, QIcon
 
+from utils.file_utils import FileUtils
 from ui.widgets import QAnimatedSwitch
 from .settings_card import SettingsCard
 from .settings_subcategory_card import SettingsSubCategoryCard
@@ -88,10 +89,11 @@ class SettingsCategoryPage(QWidget):
 
     def initUI(self):
         outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        #scroll.setFrameShape(QFrame.NoFrame)    # Remove border
+        scroll.setFrameShape(QFrame.NoFrame)
         outer.addWidget(scroll)
 
         body = QWidget()
@@ -248,18 +250,34 @@ class SettingsCategoryPage(QWidget):
         Create a small reset button for a setting.
         Visible only when current value differs from the default.
         """
-        btn = QPushButton("↺")
+        btn = QPushButton()
         btn.setObjectName("SettingsResetBtn")
         btn.setFixedSize(24, 24)
+        btn.setIconSize(QSize(14, 14))
         btn.setCursor(Qt.PointingHandCursor)
         btn.setToolTip("Restore default")
         btn.clicked.connect(lambda: self.reset_setting(key))
+        self.apply_reset_button_icon(btn)
 
         has_default = "default" in meta
         is_changed = has_default and meta.get("value") != meta.get("default")
         btn.setVisible(is_changed)
 
         return btn
+
+    def apply_reset_button_icon(self, btn: QPushButton) -> None:
+        """ Tint the reset button's undo icon to match the current theme. """
+        from ui.theme_manager import ThemeManager
+        icon = QIcon(FileUtils.icon_path("undo-arrow.svg"))
+        tm = ThemeManager.get_instance()
+        if tm:
+            icon = tm.recolor_icon(icon, tm.icon_color())
+        btn.setIcon(icon)
+
+    def applyStyles(self) -> None:
+        """ Re-tint reset button icons when the theme changes. """
+        for _, reset_btn, _ in self.controls.values():
+            self.apply_reset_button_icon(reset_btn)
 
     def update_reset_visibility(self, key: str, current_value):
         """ Show or hide the reset button based on whether value differs from default. """

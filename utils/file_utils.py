@@ -148,6 +148,133 @@ def validate_snippets_list(data: dict) -> list:
 
 
 class FileUtils:
+    icons_dir_cache: Path | None = None
+
+    @classmethod
+    def resolve_icons_path(cls) -> Path:
+        """
+        Resolve and return the valid assets/icons directory path.
+
+        Checks the PyInstaller resource directory first (where --add-data
+        bundled files are extracted to at runtime for onefile builds), then
+        falls back to the executable's working directory (dev runs and
+        portable installs where assets/ sits next to the script/exe).
+
+        Never raises: if no candidate directory exists, falls back to a
+        relative "assets/icons" path so callers can still attempt to load
+        (Qt will just show a missing icon rather than crash).
+
+        Returns:
+            Path: The resolved assets/icons directory path.
+        """
+        if cls.icons_dir_cache is not None:
+            return cls.icons_dir_cache
+
+        default_paths = cls.get_default_paths()
+        candidates = [
+            Path(default_paths["resource_dir"]) / "assets" / "icons",
+            Path(default_paths["working_dir"]) / "assets" / "icons",
+        ]
+
+        for path in candidates:
+            if path.is_dir():
+                cls.icons_dir_cache = path
+                return path
+
+        logger.warning(
+            "No valid assets/icons directory found at %s or %s; "
+            "falling back to relative path. Icons may fail to load on installed systems.",
+            candidates[0], candidates[1]
+        )
+        cls.icons_dir_cache = Path("assets/icons")
+        return cls.icons_dir_cache
+
+    @classmethod
+    def icon_path(cls, name: str) -> str:
+        """
+        Return the resolved absolute path (as a string) to assets/icons/<name>.
+
+        Use this instead of hardcoding "assets/icons/<name>" so icons resolve
+        correctly both from source and inside a PyInstaller onefile bundle.
+        """
+        return str(cls.resolve_icons_path() / name)
+
+    @classmethod
+    def get_os_specific_icon(cls) -> str:
+        """
+        Return the OS-appropriate icon filename at runtime.
+
+        Returns:
+            str: "QSnippet.ico" on Windows, "QSnippet.icns" on macOS/Linux.
+        """
+        if sys.platform == "win32":
+            return "QSnippet.ico"
+        else:
+            return "QSnippet.icns"
+
+    @classmethod
+    def is_running_in_pyinstaller(cls) -> bool:
+        """
+        Detect if app is running inside a PyInstaller bundle.
+
+        Returns:
+            bool: True if running in PyInstaller, False if in development.
+        """
+        return hasattr(sys, "_MEIPASS")
+
+    @classmethod
+    def resolve_asset_with_fallback(cls, asset_name: str, asset_dir: str = "images") -> str:
+        """
+        Resolve an asset path with intelligent fallback to bundled resources.
+
+        Priority:
+        1. External assets/images directory (preferred for development)
+        2. Bundled resources (PyInstaller) - only if external not found and running in PyInstaller
+
+        If running in development and external assets not found, returns empty string
+        to trigger error handling (prevents runaway app with missing icons).
+
+        Args:
+            asset_name (str): Filename (e.g., "QSnippet.ico", "cat.jpg")
+            asset_dir (str): Asset subdirectory within assets/ (default: "images")
+
+        Returns:
+            str: Resolved path to the asset, or empty string if not found.
+        """
+        in_pyinstaller = cls.is_running_in_pyinstaller()
+
+        # Try external assets folder first (development priority)
+        default_paths = cls.get_default_paths()
+        external_asset_dir = Path(default_paths["working_dir"]) / "assets" / asset_dir
+        external_path = str(external_asset_dir / asset_name)
+
+        if os.path.exists(external_path):
+            logger.debug(f"Found asset '{asset_name}' in external assets: {external_path}")
+            return external_path
+
+        # If in development (not PyInstaller) and external assets missing, fail loudly
+        if not in_pyinstaller:
+            logger.warning(
+                f"Asset '{asset_name}' not found in external assets/{asset_dir}/ "
+                "and running in development mode (not PyInstaller)"
+            )
+            return ""
+
+        # Only fall back to bundled if we're in PyInstaller AND external not found
+        logger.debug(
+            f"External assets not found and running in PyInstaller; "
+            f"attempting to load '{asset_name}' from bundled resources"
+        )
+        bundled_path = cls.icon_path(asset_name) if asset_dir == "icons" else str(
+            Path(cls.resolve_icons_path()).parent / asset_dir / asset_name
+        )
+        if os.path.exists(bundled_path):
+            logger.debug(f"Falling back to bundled asset: {bundled_path}")
+            return bundled_path
+
+        logger.warning(f"Asset '{asset_name}' not found in external or bundled resources")
+        return ""
+
     def resolve_images_path(self) -> Path:
         """
         Resolve and return the valid assets/images directory path.
@@ -193,34 +320,6 @@ class FileUtils:
             "\n\n"
             f"Location: {path}"
             ""
-        )
-
-    def resolve_icons_path(self) -> Path:
-        """
-        Resolve and return the valid assets/icons directory path.
-
-        Searches for an assets/icons directory in the resource directory and
-        working directory, in that order.
-
-        Returns:
-            Path: The resolved assets/icons directory path.
-
-        Raises:
-            FileNotFoundError: If no valid assets/icons directory is found.
-        """
-        candidates = [
-            Path(self.resource_dir) / "assets" / "icons",
-            Path(self.working_dir) / "assets" / "icons",
-        ]
-
-        for path in candidates:
-            if path.exists() and path.is_dir():
-                logger.info(f"Using icons directory: {path}")
-                return path
-
-        raise FileNotFoundError(
-            "No valid assets/icons directory found. "
-            "Checked resource_dir and working_dir."
         )
 
     # Utility class for common file and directory operations.

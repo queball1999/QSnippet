@@ -43,6 +43,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#SourcePath}\output\windows\{#MyAppExeName}"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
+Source: "{#SourcePath}\assets\icons\*"; DestDir: "{app}\assets\icons"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}\assets\images\*"; DestDir: "{app}\assets\images"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\LICENSE"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
 Source: "{#SourcePath}\README.md"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion

@@ -189,6 +189,15 @@ class SnippetService():
         logger.info("Resuming SnippetService...")
         self.expander.resume()
 
+    def is_paused(self) -> bool:
+        """
+        Check whether the snippet expander is currently paused.
+
+        Returns:
+            bool: True if expansion is paused, otherwise False.
+        """
+        return self.expander.disabled
+
     def active(self) -> bool:
         """
         Check whether the snippet service is currently active.

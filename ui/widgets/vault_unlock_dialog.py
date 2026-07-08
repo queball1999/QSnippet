@@ -26,7 +26,7 @@ class VaultUnlockDialog(QDialog):
 
         self.setWindowTitle("Unlock Vault")
         self.setWindowModality(Qt.ApplicationModal)
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(420)
         self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
 
         self.build_ui(message)
@@ -37,18 +37,22 @@ class VaultUnlockDialog(QDialog):
 
     def build_ui(self, message: str) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setContentsMargins(20, 24, 24, 20)
         layout.setSpacing(14)
 
         self.title_label = QLabel("Vault Locked")
         self.title_label.setObjectName("VaultDialogTitle")
+        self.title_label.setAlignment(Qt.AlignLeft)
         layout.addWidget(self.title_label)
 
         body_text = message if message else "Enter your vault password to access encrypted snippets."
         self.body_label = QLabel(body_text)
         self.body_label.setObjectName("VaultDialogDesc")
         self.body_label.setWordWrap(True)
-        layout.addWidget(self.body_label)
+        body_layout = QVBoxLayout()
+        body_layout.setContentsMargins(8, 0, 0, 0)
+        body_layout.addWidget(self.body_label)
+        layout.addLayout(body_layout)
 
         # Password auth section
         self.pw_section = QWidget()
@@ -103,12 +107,22 @@ class VaultUnlockDialog(QDialog):
         rec_layout.addWidget(self.pw_link)
 
         self.rec_section.hide()
-        layout.addWidget(self.rec_section)
+
+        # Wrap password and recovery sections with left margin
+        sections_layout = QVBoxLayout()
+        sections_layout.setContentsMargins(8, 0, 0, 0)
+        sections_layout.setSpacing(0)
+        sections_layout.addWidget(self.pw_section)
+        sections_layout.addWidget(self.rec_section)
+        layout.addLayout(sections_layout)
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("VaultErrorLabel")
         self.error_label.hide()
-        layout.addWidget(self.error_label)
+        error_layout = QVBoxLayout()
+        error_layout.setContentsMargins(8, 0, 0, 0)
+        error_layout.addWidget(self.error_label)
+        layout.addLayout(error_layout)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -120,7 +134,11 @@ class VaultUnlockDialog(QDialog):
         self.unlock_btn.setObjectName("VaultConfirmBtn")
         self.unlock_btn.clicked.connect(self.attempt_unlock)
         btn_row.addWidget(self.unlock_btn)
-        layout.addLayout(btn_row)
+
+        btn_layout = QVBoxLayout()
+        btn_layout.setContentsMargins(8, 0, 0, 0)
+        btn_layout.addLayout(btn_row)
+        layout.addLayout(btn_layout)
 
     def set_recovery_mode(self, enabled: bool) -> None:
         self.recovery_mode = enabled

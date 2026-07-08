@@ -7,13 +7,20 @@ from PySide6.QtWidgets import (
     QLineEdit, QHBoxLayout, QComboBox, QPushButton, QSizePolicy
 )
 from PySide6.QtGui import QStandardItem, QPixmap, QShortcut
-from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QSize
+from PySide6.QtGui import QIcon
+
+from utils.file_utils import FileUtils
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
 from .home_widget   import HomeWidget
 
 logger = logging.getLogger(__name__)
+
+# How long before the inactivity timeout fires that the status bar should
+# start showing a countdown warning.
+INACTIVITY_COUNTDOWN_WINDOW_MS = 15000
 
 
 class TextEditFocusFilter(QObject):
@@ -82,10 +89,18 @@ class SnippetEditor(QWidget):
         self.reload_timer.setInterval(50)  # 50ms delay to ensure DB operations complete
         self.reload_timer.timeout.connect(self.perform_reload)
 
-        # Inactivity timer for new snippet form
+        # Inactivity timer for the snippet form (new or editing an existing entry)
         self.inactivity_timer = QTimer(self)
         self.inactivity_timer.setSingleShot(True)
         self.inactivity_timer.timeout.connect(self.on_inactivity_timeout)
+
+        # Ticks while the inactivity timer is running so the status bar can
+        # show a countdown warning as the timeout approaches.
+        self.inactivity_countdown_timer = QTimer(self)
+        self.inactivity_countdown_timer.setInterval(500)
+        self.inactivity_countdown_timer.timeout.connect(self.update_inactivity_countdown)
+        self._inactivity_countdown_showing = False
+        self._inactivity_countdown_last_seconds = None
 
         # Track expand state before search started (None = not in search mode)
         self.pre_search_expanded = None
@@ -93,6 +108,19 @@ class SnippetEditor(QWidget):
         self.initUI()
         # Lazy load the snippets; loads as soon as UI is fully rendered
         QTimer.singleShot(0, self.load_snippets)
+
+        # Reset the inactivity timer on any key/mouse activity or window
+        # refocus while the form is open - not just edits to the tracked
+        # text fields - so the countdown reliably clears on real activity.
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if self.inactivity_timer.isActive() and event.type() in (
+            QEvent.KeyPress, QEvent.MouseButtonPress, QEvent.WindowActivate,
+        ):
+            self.reset_inactivity_timer()
+        return super().eventFilter(obj, event)
 
     def initUI(self):
         """
@@ -127,13 +155,15 @@ class SnippetEditor(QWidget):
         self.filter_dropdown.setMaximumWidth(150)
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
-        arrow = "↓" if not self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
-        self.toggle_collapse_button = QPushButton(arrow)
+        is_expanded = self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False)
+        self.toggle_collapse_button = QPushButton()
         self.toggle_collapse_button.setObjectName("ToggleCollapseBtn")
         self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
         self.toggle_collapse_button.setFixedSize(30, 40)
+        self.toggle_collapse_button.setIconSize(QSize(16, 16))
         self.toggle_collapse_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.toggle_collapse_button.clicked.connect(self.toggle_collapse_folders)
+        self.set_collapse_button_state(is_expanded)
 
         search_layout = QHBoxLayout()
         search_layout.addWidget(self.search_bar)
@@ -222,11 +252,16 @@ class SnippetEditor(QWidget):
         self.parent.statusBar().showMessage("Loading snippets...")
 
         # Always pre-load vault folder set so lock icons render correctly.
-        # "Vault" is always included so the folder is visible even before setup.
+        # Only force "Vault" into the set as a pre-setup default when no vault
+        # folder has ever been registered - once any real registration exists,
+        # trust the database exclusively. Otherwise, if "Vault" itself ever
+        # gets desynced from vault_folders (e.g. removed by a bug or a manual
+        # DB edit), the UI would keep rendering it as protected forever and
+        # hide the "Mark as Vault Folder" menu action needed to fix it.
         try:
             vault_folders = list(self.main.snippet_db.get_vault_folders())
-            if "Vault" not in vault_folders:
-                vault_folders.append("Vault")
+            if not vault_folders:
+                vault_folders = ["Vault"]
             self.table.set_vault_folders(vault_folders)
         except Exception:
             pass
@@ -283,11 +318,15 @@ class SnippetEditor(QWidget):
             None
         """
         if entry:
+            # Pause expansion while editing an existing snippet too, not just
+            # while composing a new one, so its own trigger can't fire mid-edit.
+            self.pause_service()
             self.form.clear_form()
             self.stack.setCurrentWidget(self.form)
             self.form.load_entry(entry)
+            self.start_inactivity_timer()
         else:
-            self.stack.setCurrentWidget(self.home_widget)
+            self.show_home_widget()
 
     def on_folder_selected(self, folder_path: str) -> None:
         """Update the form's folder field when a folder row is clicked.
@@ -347,10 +386,30 @@ class SnippetEditor(QWidget):
         """
         if self.table.isAnyFolderExpanded():
             self.table.collapseAll()
-            self.toggle_collapse_button.setText("↓")
+            self.set_collapse_button_state(False)
         else:
             self.table.expandAll()
-            self.toggle_collapse_button.setText("↑")
+            self.set_collapse_button_state(True)
+
+    def set_collapse_button_state(self, expanded: bool) -> None:
+        """
+        Update the collapse/expand toggle button's icon to reflect current state.
+
+        Args:
+            expanded (bool): True if folders are currently expanded (button
+                will collapse them next click); False otherwise.
+
+        Returns:
+            None
+        """
+        self._collapse_expanded = expanded
+        icon_name = "arrow-collapse.svg" if expanded else "arrow-expand.svg"
+        icon = QIcon(FileUtils.icon_path(icon_name))
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.get_instance()
+        if tm:
+            icon = tm.recolor_icon(icon, tm.icon_color())
+        self.toggle_collapse_button.setIcon(icon)
 
     # ----- Handlers -----
     def on_save(self, *_):
@@ -489,6 +548,13 @@ class SnippetEditor(QWidget):
         if not ok or not name.strip():
             return
 
+        if name.strip().lower() == "vault":
+            self.main.message_box.error(
+                '"Vault" is a reserved folder name. Choose a different name.',
+                title="Reserved Folder Name"
+            )
+            return
+
         new_folder = name.strip()
         # If triggered from a folder context menu, make the new folder a sub-folder
         if parent_item is not None:
@@ -529,6 +595,12 @@ class SnippetEditor(QWidget):
         parts[-1] = new_last.strip()
         new = "/".join(parts)
         if new == old:
+            return
+        if new_last.strip().lower() == "vault":
+            self.main.message_box.error(
+                '"Vault" is a reserved folder name. Choose a different name.',
+                title="Reserved Folder Name"
+            )
             return
         db = self.main.snippet_db
         db.rename_folder(old, new)
@@ -1040,7 +1112,7 @@ class SnippetEditor(QWidget):
 
         # On transition into search mode: save current expand state
         if is_searching and self.pre_search_expanded is None:
-            self.pre_search_expanded = self.toggle_collapse_button.text() == "↑"
+            self.pre_search_expanded = self._collapse_expanded
 
         # On transition out of search mode: capture restore target and reset state
         restore_expanded = None
@@ -1085,14 +1157,14 @@ class SnippetEditor(QWidget):
         if expand_on_search:
             if is_searching:
                 self.table.expandAll()
-                self.toggle_collapse_button.setText("↑")
+                self.set_collapse_button_state(True)
             elif restore_expanded is not None:
                 if restore_expanded:
                     self.table.expandAll()
-                    self.toggle_collapse_button.setText("↑")
+                    self.set_collapse_button_state(True)
                 else:
                     self.table.collapseAll()
-                    self.toggle_collapse_button.setText("↓")
+                    self.set_collapse_button_state(False)
 
         # Easter Egg
         # If user types "cat" in search, show cat dialog
@@ -1147,27 +1219,60 @@ class SnippetEditor(QWidget):
     def start_inactivity_timer(self):
         timeout_ms = self.get_inactivity_timeout_ms()
         if timeout_ms is None:
+            self.inactivity_countdown_timer.stop()
+            self._clear_inactivity_countdown()
             return
         self.inactivity_timer.start(timeout_ms)
+        self.inactivity_countdown_timer.start()
 
     def stop_inactivity_timer(self):
         self.inactivity_timer.stop()
+        self.inactivity_countdown_timer.stop()
+        self._clear_inactivity_countdown()
 
     def reset_inactivity_timer(self):
-        """Restart the timer only when it is already active (i.e. new form is open)."""
+        """Restart the timer only when it is already active (i.e. the form is open)."""
         if self.inactivity_timer.isActive():
+            self._clear_inactivity_countdown()
             self.start_inactivity_timer()
 
-    def on_inactivity_timeout(self):
-        """Called when the inactivity timer fires while the new snippet form is open."""
-        if self.stack.currentWidget() is not self.form:
+    def _clear_inactivity_countdown(self):
+        """Drop any countdown warning currently overwriting the status bar."""
+        if self._inactivity_countdown_showing:
+            self._inactivity_countdown_showing = False
+            self._inactivity_countdown_last_seconds = None
+            self.parent.check_service_status()
+
+    def update_inactivity_countdown(self):
+        """Show a countdown warning in the status bar as the inactivity timeout nears."""
+        if not self.inactivity_timer.isActive():
+            self.inactivity_countdown_timer.stop()
+            self._clear_inactivity_countdown()
             return
-        # Only act on new (unsaved) snippets
-        if getattr(self.form, "entry_id", None) is not None:
+
+        remaining_ms = self.inactivity_timer.remainingTime()
+        if remaining_ms > INACTIVITY_COUNTDOWN_WINDOW_MS:
+            return
+
+        seconds_left = max(1, round(remaining_ms / 1000))
+        self._inactivity_countdown_showing = True
+        if seconds_left != self._inactivity_countdown_last_seconds:
+            self._inactivity_countdown_last_seconds = seconds_left
+            logger.debug("Inactivity detected - countdown: %ss remaining", seconds_left)
+            self.parent.statusBar().showMessage(
+                f"Inactivity detected ({seconds_left}s)"
+            )
+
+    def on_inactivity_timeout(self):
+        """Called when the inactivity timer fires while the snippet form is open."""
+        self.inactivity_countdown_timer.stop()
+        self._clear_inactivity_countdown()
+
+        if self.stack.currentWidget() is not self.form:
             return
 
         if not self.form.has_unsaved_changes():
-            logger.debug("Inactivity timeout: empty new form closed automatically")
+            logger.debug("Inactivity timeout: idle form with no changes closed automatically")
             self.show_home_widget()
             return
 
@@ -1175,7 +1280,7 @@ class SnippetEditor(QWidget):
         box = QMessageBox(self)
         box.setWindowTitle("Inactivity Detected")
         box.setText(
-            "The new snippet form has been idle.\n\n"
+            "The snippet form has been idle.\n\n"
             "Would you like to save your changes or discard them?"
         )
         save_btn = box.addButton("Save", QMessageBox.AcceptRole)
@@ -1206,24 +1311,27 @@ class SnippetEditor(QWidget):
         self.home_widget.applyStyles()
         self.form.applyStyles()
         self.table.applyStyles()
+        self.set_collapse_button_state(self._collapse_expanded)
         self.update()
 
-    def showStatus(self, msg=""):
+    def showStatus(self, msg="", duration_ms=5000):
         """
         Display a temporary status message.
 
-        Shows the provided message in the status bar and restores
-        the previous message after a delay.
+        Shows the provided message in the status bar, then restores the real
+        service status (rather than whatever text happened to be showing
+        before) so the status bar can't get stuck on a stale message.
 
         Args:
             msg (str): Message to display.
+            duration_ms (int): How long to show the message before restoring
+                the service status.
 
         Returns:
             None
         """
-        original_msg = self.parent.statusBar().currentMessage() or ""
         self.parent.statusBar().showMessage(msg)
-        QTimer.singleShot(5000, lambda: self.parent.statusBar().showMessage(original_msg))
+        QTimer.singleShot(duration_ms, self.parent.check_service_status)
 
     def navigate_home(self):
         """
@@ -1241,25 +1349,21 @@ class SnippetEditor(QWidget):
 
     def pause_service(self):
         """
-        Pause the snippet service.
-
-        Updates the status bar and pauses the background snippet service.
+        Pause the snippet service via the main window so state and the
+        status bar stay in sync with the single source of truth.
 
         Returns:
             None
         """
-        self.parent.statusBar().showMessage(f"Service status: Paused")
-        self.parent.snippet_service.pause()
+        self.parent.pause_service()
 
     def resume_service(self):
         """
-        Resume the snippet service.
-
-        Updates the status bar and resumes the background snippet service.
+        Resume the snippet service via the main window so state and the
+        status bar stay in sync with the single source of truth.
 
         Returns:
             None
         """
-        self.parent.statusBar().showMessage(f"Service status: Running")
-        self.parent.snippet_service.resume()
+        self.parent.resume_service()
 

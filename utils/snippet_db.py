@@ -134,6 +134,12 @@ class SnippetDB:
         self.create_indexes()
         self.setup_fts()
         self.create_vault_folders_table()
+        # "Vault" is the one reserved, always-protected folder - register it
+        # automatically on every startup (idempotent) so it's never possible
+        # for it to end up unregistered (and thus silently unencrypted) as a
+        # result of a bug, a manual DB edit, or a removed UI action. Nothing
+        # else should ever need to "mark" this specific folder as a vault.
+        self.add_vault_folder("Vault")
         self.create_custom_placeholders_table()
         self.migrate_custom_placeholders_vault_schema()
         self.migrate_aad_binding_schema()
@@ -526,6 +532,7 @@ class SnippetDB:
                         )
                         update_entry = dict(entry)
                         update_entry["id"] = trigger_row[0]
+                        entry["id"] = trigger_row[0]  # populate id for callers relying on this side effect
                         cur.execute("""
                             UPDATE snippets
                             SET
@@ -1197,22 +1204,36 @@ class SnippetDB:
         Returns:
             bool: True on success, False on error.
         """
-        logger.info("Updating custom placeholder id=%s", entry.get("id"))
+        placeholder_id = entry.get("id")
+        is_encrypted_val = entry.get("is_encrypted", 0)
+        vault_uuid_val = entry.get("vault_uuid")
+        logger.info("Updating custom placeholder id=%s: is_encrypted=%s, vault_uuid=%s",
+                   placeholder_id, is_encrypted_val, vault_uuid_val)
         try:
             with self.managed_connection(write=True) as conn:
                 conn.execute(
                     "UPDATE custom_placeholders SET name=:name, value=:value, description=:description, "
                     "is_encrypted=:is_encrypted, vault_uuid=:vault_uuid WHERE id=:id",
                     {
-                        "id": entry.get("id"),
+                        "id": placeholder_id,
                         "name": entry.get("name"),
                         "value": entry.get("value", ""),
                         "description": entry.get("description", ""),
-                        "is_encrypted": entry.get("is_encrypted", 0),
-                        "vault_uuid": entry.get("vault_uuid"),
+                        "is_encrypted": is_encrypted_val,
+                        "vault_uuid": vault_uuid_val,
                     },
                 )
-            logger.info("Custom placeholder updated successfully")
+            # Verify the update
+            cur = conn.cursor()
+            cur.execute("SELECT is_encrypted, vault_uuid FROM custom_placeholders WHERE id=?", (placeholder_id,))
+            row = cur.fetchone()
+            if row:
+                actual_encrypted, actual_uuid = row
+                if bool(actual_encrypted) != bool(is_encrypted_val):
+                    logger.warning("Encryption flag mismatch after update: expected=%s, actual=%s",
+                                 is_encrypted_val, actual_encrypted)
+                logger.info("Custom placeholder id=%s updated successfully (is_encrypted=%s)",
+                           placeholder_id, actual_encrypted)
             return True
         except sqlite3.Error as e:
             logger.exception("Failed to update custom placeholder")

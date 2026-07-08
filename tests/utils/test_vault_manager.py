@@ -238,6 +238,21 @@ class TestDisableVault:
             def set_snippet_encrypted(self, sid, flag):
                 self.encrypted[sid] = flag
 
+            def set_snippet_vault_uuid(self, sid, vault_uuid):
+                pass
+
+            def delete_snippet(self, sid):
+                self.rows = [r for r in self.rows if r["id"] != sid]
+
+            def get_all_custom_placeholders(self):
+                return []
+
+            def update_custom_placeholder(self, entry):
+                return True
+
+            def delete_custom_placeholder(self, placeholder_id):
+                return True
+
             def clear_vault_folders(self):
                 self.vault_folders_cleared = True
 
@@ -285,6 +300,21 @@ class TestDisableVault:
         db = self.make_db(vm, [])
         vm.disable_vault("correct-password", setup_config, db, "Safe")
         assert vm.is_unlocked() is False
+
+    def test_disable_delete_data_deletes_snippets_instead_of_decrypting(self, vm, setup_config):
+        snippets = [{"id": 1, "snippet": vm.encrypt("x"), "is_encrypted": True}]
+        db = self.make_db(vm, snippets)
+
+        ok, _ = vm.disable_vault(
+            "correct-password", setup_config, db, "", delete_data=True
+        )
+        assert ok is True
+        assert db.rows == []
+
+    def test_disable_delete_data_still_clears_vault_folders(self, vm, setup_config):
+        db = self.make_db(vm, [])
+        vm.disable_vault("correct-password", setup_config, db, "", delete_data=True)
+        assert db.vault_folders_cleared is True
 
 
 class TestExportEncryption:

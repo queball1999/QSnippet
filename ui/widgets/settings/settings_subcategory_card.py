@@ -17,7 +17,7 @@ class SettingsSubCategoryCard(QWidget):
 
         root = QHBoxLayout(self)
         root.setSpacing(0)
-        root.setContentsMargins(16, 14, 16, 14)
+        root.setContentsMargins(8, 14, 16, 14)
 
         text_container = QWidget()
         text_container.setMinimumWidth(300)

@@ -94,13 +94,21 @@ class DbSettingsPage(QWidget):
 
         inner = QWidget()
         layout = QVBoxLayout(inner)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
 
         # Header
-        header = QLabel("Database Storage")
-        header.setObjectName("SettingsHeader")
-        layout.addWidget(header)
+        self.header = QLabel("Database Storage")
+        self.header.setObjectName("SettingsHeader")
+        layout.addWidget(self.header)
+
+        # Body content is nested a bit further right than the header, matching
+        # the extra inset dynamically generated pages get from SettingsCard's
+        # own internal margin.
+        content = QVBoxLayout()
+        content.setContentsMargins(8, 0, 0, 0)
+        content.setSpacing(12)
+        layout.addLayout(content)
 
         # Description
         desc = QLabel(
@@ -111,33 +119,33 @@ class DbSettingsPage(QWidget):
         )
         desc.setObjectName("SettingsCardDescription")
         desc.setWordWrap(True)
-        layout.addWidget(desc)
+        content.addWidget(desc)
 
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.HLine)
         sep1.setObjectName("VaultSeparator")
-        layout.addWidget(sep1)
+        content.addWidget(sep1)
 
         # Current effective location
         current_lbl = QLabel("Current location:")
         current_lbl.setObjectName("SettingsCardTitle")
-        layout.addWidget(current_lbl)
+        content.addWidget(current_lbl)
 
         self.current_path_label = QLabel()
         self.current_path_label.setObjectName("SettingsCardDescription")
         self.current_path_label.setWordWrap(True)
         self.current_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self.current_path_label)
+        content.addWidget(self.current_path_label)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setObjectName("VaultSeparator")
-        layout.addWidget(sep2)
+        content.addWidget(sep2)
 
         # Directory picker
         dir_lbl = QLabel("Custom database directory:")
         dir_lbl.setObjectName("SettingsCardTitle")
-        layout.addWidget(dir_lbl)
+        content.addWidget(dir_lbl)
 
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit()
@@ -148,33 +156,36 @@ class DbSettingsPage(QWidget):
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.setObjectName("SnippetFormBtn")
         self.browse_btn.setCursor(Qt.PointingHandCursor)
+        self.browse_btn.setToolTip("Choose a directory for the snippets database file")
         self.browse_btn.clicked.connect(self.on_browse)
         path_row.addWidget(self.browse_btn)
 
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setObjectName("SnippetFormBtn")
         self.clear_btn.setCursor(Qt.PointingHandCursor)
+        self.clear_btn.setToolTip("Clear the custom directory and use the default app data location")
         self.clear_btn.clicked.connect(self.on_clear)
         path_row.addWidget(self.clear_btn)
 
-        layout.addLayout(path_row)
+        content.addLayout(path_row)
 
         # Apply button
         btn_row = QHBoxLayout()
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.setObjectName("VaultConfirmBtn")
         self.apply_btn.setCursor(Qt.PointingHandCursor)
+        self.apply_btn.setToolTip("Apply the database directory change")
         self.apply_btn.clicked.connect(self.on_apply)
         btn_row.addWidget(self.apply_btn)
         btn_row.addStretch()
-        layout.addLayout(btn_row)
+        content.addLayout(btn_row)
 
         # Inline status label
         self.status_label = QLabel()
         self.status_label.setObjectName("SettingsCardDescription")
         self.status_label.setWordWrap(True)
         self.status_label.hide()
-        layout.addWidget(self.status_label)
+        content.addWidget(self.status_label)
 
         layout.addStretch()
 
@@ -443,4 +454,17 @@ class DbSettingsPage(QWidget):
     # ------------------------------------------------------------------
 
     def applyStyles(self):
-        pass
+        self.apply_header_font()
+
+    def apply_header_font(self):
+        """Match the bold/large header font used by dynamically generated settings pages."""
+        app = getattr(self.window, "parent", None)
+        if not app:
+            return
+
+        if hasattr(app, "large_font_size_bold"):
+            self.header.setFont(getattr(app, "large_font_size_bold"))
+        elif hasattr(app, "large_font_size"):
+            font = getattr(app, "large_font_size")
+            font.setBold(True)
+            self.header.setFont(font)

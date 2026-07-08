@@ -3,6 +3,8 @@ from PySide6.QtGui import QIcon, QAction, QActionGroup
 from PySide6.QtCore import Signal, QUrl
 from PySide6.QtGui import QDesktopServices
 
+from utils.file_utils import FileUtils
+
 class MenuBar(QMenuBar):
     """
     MenuBar is the main menu bar for the application, providing access to file, edit,
@@ -48,13 +50,13 @@ class MenuBar(QMenuBar):
         # ----- File Menu -----
         file_menu = self.addMenu("&File")
 
-        new_icon = QIcon.fromTheme("document-new")
+        new_icon = QIcon(FileUtils.icon_path("note-plus-outline.svg"))
         new_act = QAction(new_icon, "New Snippet", self)
         new_act.setShortcut("Ctrl+N")
         new_act.triggered.connect(self.editor.show_new_form)
         file_menu.addAction(new_act)
 
-        save_icon = QIcon.fromTheme("document-save")
+        save_icon = QIcon(FileUtils.icon_path("content-save-outline.svg"))
         save_act = QAction(save_icon, "Save Snippet", self)
         save_act.setShortcut("Ctrl+S")
         save_act.triggered.connect(self.editor.on_save)
@@ -63,13 +65,13 @@ class MenuBar(QMenuBar):
         file_menu.addSeparator()
 
         # --- Import/Export actions ---
-        import_icon = QIcon.fromTheme("document-open")
+        import_icon = QIcon(FileUtils.icon_path("file-import-outline.svg"))
         import_act = QAction(import_icon, "Import", self)
         import_act.setShortcut("Ctrl+I")
         import_act.triggered.connect(self.importAction.emit)
         file_menu.addAction(import_act)
 
-        export_icon = QIcon.fromTheme("folder-open")
+        export_icon = QIcon(FileUtils.icon_path("file-export-outline.svg"))
         export_act = QAction(export_icon, "Export", self)
         export_act.setShortcut("Ctrl+E")
         export_act.triggered.connect(self.exportAction.emit)
@@ -77,13 +79,13 @@ class MenuBar(QMenuBar):
 
         file_menu.addSeparator()
 
-        close_icon = QIcon.fromTheme("window-close")
-        close_icon = QAction(close_icon, "Close", self)
-        close_icon.setShortcut("Ctrl+Q")
-        close_icon.triggered.connect(self.parent.close)
-        file_menu.addAction(close_icon)
-        
-        exit_icon = QIcon.fromTheme("system-shutdown")
+        close_icon = QIcon(FileUtils.icon_path("close.svg"))
+        close_act = QAction(close_icon, "Close", self)
+        close_act.setShortcut("Ctrl+Q")
+        close_act.triggered.connect(self.parent.close)
+        file_menu.addAction(close_act)
+
+        exit_icon = QIcon(FileUtils.icon_path("quit.svg"))
         exit_act = QAction(exit_icon, "Exit", self)
         exit_act.setShortcut("Ctrl+Shift+Q")
         exit_act.triggered.connect(self.parent.exit)
@@ -92,13 +94,13 @@ class MenuBar(QMenuBar):
         # ----- Edit Menu -----
         edit_menu = self.addMenu("Edit")
 
-        undo_icon = QIcon.fromTheme("edit-undo")
+        undo_icon = QIcon(FileUtils.icon_path("undo-arrow.svg"))
         undo_act = QAction(undo_icon, "Undo", self)
         undo_act.setShortcut("Ctrl+Z")
         undo_act.triggered.connect(lambda: self.do_edit_action("undo"))
         edit_menu.addAction(undo_act)
 
-        redo_icon = QIcon.fromTheme("edit-redo")
+        redo_icon = QIcon(FileUtils.icon_path("redo-arrow.svg"))
         redo_act = QAction(redo_icon, "Redo", self)
         redo_act.setShortcut("Ctrl+Y")
         redo_act.triggered.connect(lambda: self.do_edit_action("redo"))
@@ -106,32 +108,33 @@ class MenuBar(QMenuBar):
 
         edit_menu.addSeparator()
 
-        cut_icon = QIcon.fromTheme("edit-cut")
+        cut_icon = QIcon(FileUtils.icon_path("content-cut.svg"))
         cut_act = QAction(cut_icon, "Cut", self)
         cut_act.setShortcut("Ctrl+X")
         cut_act.triggered.connect(lambda: self.do_edit_action("cut"))
         edit_menu.addAction(cut_act)
 
-        copy_icon = QIcon.fromTheme("edit-copy")
+        copy_icon = QIcon(FileUtils.icon_path("content-copy.svg"))
         copy_act = QAction(copy_icon, "Copy", self)
         copy_act.setShortcut("Ctrl+C")
         copy_act.triggered.connect(lambda: self.do_edit_action("copy"))
         edit_menu.addAction(copy_act)
 
-        paste_icon = QIcon.fromTheme("edit-paste")
+        paste_icon = QIcon(FileUtils.icon_path("content-paste.svg"))
         paste_act = QAction(paste_icon, "Paste", self)
         paste_act.setShortcut("Ctrl+V")
         paste_act.triggered.connect(lambda: self.do_edit_action("paste"))
         edit_menu.addAction(paste_act)
 
         edit_menu.addSeparator()
-        rename_act = QAction("Rename", self)
+        rename_icon = QIcon(FileUtils.icon_path("rename.svg"))
+        rename_act = QAction(rename_icon, "Rename", self)
         rename_act.setShortcut("F2")
         rename_act.triggered.connect(lambda: self.do_edit_action("rename"))
         edit_menu.addAction(rename_act)
 
         edit_menu.addSeparator()
-        settings_icon = QIcon.fromTheme("preferences-system")
+        settings_icon = QIcon(FileUtils.icon_path("settings-outline.svg"))
         settings_act = QAction(settings_icon, "Settings", self)
         settings_act.setShortcut("Ctrl+,")
         settings_act.triggered.connect(self.show_settings.emit)
@@ -141,9 +144,8 @@ class MenuBar(QMenuBar):
         tools_menu = self.addMenu("Tools")
 
         # Create top-level submenus with icons
-        # FIXME: Need to set icon here
-        datetime_icon = QIcon.fromTheme("")
-        context_icon = QIcon.fromTheme("preferences-desktop-locale")
+        datetime_icon = QIcon(FileUtils.icon_path("calendar-clock-outline.svg"))
+        context_icon = QIcon(FileUtils.icon_path("earth.svg"))
 
         datetime_menu = tools_menu.addMenu(datetime_icon, "Date/Time")
         context_menu  = tools_menu.addMenu(context_icon, "Context")
@@ -175,7 +177,7 @@ class MenuBar(QMenuBar):
                 menu.addAction(act)
 
         # Custom placeholders submenu
-        custom_icon = QIcon.fromTheme("user-bookmarks")
+        custom_icon = QIcon(FileUtils.icon_path("card-text-outline.svg"))
         self.custom_ph_menu = tools_menu.addMenu(custom_icon, "Custom")
         self.custom_ph_items_start = None  # separator before dynamic items
         self.build_custom_placeholder_menu_static()
@@ -185,7 +187,7 @@ class MenuBar(QMenuBar):
         help_menu.setMinimumWidth(150)
 
         # Collect Logs
-        logs_icon = QIcon.fromTheme("folder-open")
+        logs_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
         collect_logs_act = QAction(logs_icon, "Collect Logs", self)
         collect_logs_act.setShortcut("F7")
         collect_logs_act.setStatusTip("Export logs to Downloads folder")
@@ -193,7 +195,8 @@ class MenuBar(QMenuBar):
         help_menu.addAction(collect_logs_act)
 
         # Report a Bug
-        report_bug_act = QAction("Report a Bug", self)
+        bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))
+        report_bug_act = QAction(bug_icon, "Report a Bug", self)
         report_bug_act.setStatusTip("Open the GitHub bug report form")
         report_bug_act.triggered.connect(
             lambda: QDesktopServices.openUrl(
@@ -203,7 +206,7 @@ class MenuBar(QMenuBar):
         help_menu.addAction(report_bug_act)
 
         # Log Level submenu
-        debug_icon = QIcon.fromTheme("document-properties")
+        debug_icon = QIcon(FileUtils.icon_path("wrench-outline.svg"))
         log_level_menu = help_menu.addMenu(debug_icon, "Log Level")
         log_level_menu.setStatusTip("Set log level within application")
 
@@ -228,7 +231,7 @@ class MenuBar(QMenuBar):
 
 
         # About App
-        about_icon = QIcon.fromTheme("help-about")
+        about_icon = QIcon(FileUtils.icon_path("information-outline.svg"))
         about_act = QAction(about_icon, "About", self)
         about_act.setShortcut("F12")
         about_act.setStatusTip("View information about your installation")

@@ -14,6 +14,7 @@ from ui.menus import (
     FolderContextMenu,
     EmptyContextMenu
 )
+from utils.file_utils import FileUtils
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,6 @@ class SnippetTable(QTreeView):
     folderMoved = Signal(str, str)   # old_path, new_path
     snippetMoved = Signal(dict, str) # entry dict, new_folder_path
     # Vault signals
-    markFolderAsVault = Signal(object)    # folder QStandardItem
-    removeFolderVault = Signal(object)    # folder QStandardItem
     vaultFolderClicked = Signal(str)      # folder path - emitted when a vault folder is clicked
     def __init__(self, main, parent=None):
         """
@@ -251,6 +250,26 @@ class SnippetTable(QTreeView):
             if vault_path not in self.folders:
                 self.get_or_create_folder(vault_path)
 
+        # Defensive check: warn about unencrypted snippets in vault folders
+        vault_folder_set = getattr(self, "vault_folder_set", set())
+        if vault_folder_set and self.main:
+            unencrypted_in_vault = []
+            for entry in entries:
+                folder = entry.get('folder', 'Default') or 'Default'
+                is_encrypted = bool(entry.get("is_encrypted"))
+                in_vault = folder in vault_folder_set or any(
+                    folder.startswith(vf + "/") for vf in vault_folder_set
+                )
+                if in_vault and not is_encrypted:
+                    unencrypted_in_vault.append(entry.get('label', '(untitled)'))
+            if unencrypted_in_vault:
+                logger.warning(
+                    "Found %d unencrypted snippets in vault folders: %s. "
+                    "Edit and save them to trigger encryption.",
+                    len(unencrypted_in_vault),
+                    ", ".join(unencrypted_in_vault[:5])
+                )
+
         # Restore previous expansion state
         if previous_expansion_state:
             logger.info("Restoring previous folder expansion state")
@@ -368,7 +387,8 @@ class SnippetTable(QTreeView):
             is_locked = getattr(self, "vault_locked", True)
             is_setup = getattr(self, "vault_is_setup", False)
             # Show open lock only when vault is configured AND currently unlocked
-            svg = "assets/icons/lock-open.svg" if (is_setup and not is_locked) else "assets/icons/lock.svg"
+            icon_name = "lock-open.svg" if (is_setup and not is_locked) else "lock.svg"
+            svg = FileUtils.icon_path(icon_name)
             tm = ThemeManager.get_instance()
             icon = QIcon(svg)
             if tm:
@@ -504,18 +524,13 @@ class SnippetTable(QTreeView):
             # Clicked on a folder; show folder context menu
             proxy_idx0 = proxy_idx.sibling(proxy_idx.row(), 0)
             is_expanded = self.isExpanded(proxy_idx0)
-            folder_path = data.get("path", "")
-            vault_set = getattr(self, "vault_folder_set", set())
-            is_vault = folder_path in vault_set
-            menu = FolderContextMenu(item, is_expanded, is_vault, self)
+            menu = FolderContextMenu(item, is_expanded, self)
             menu.addItemRequested.connect(self.addSnippet.emit)
             menu.addFolderRequested.connect(self.addFolder.emit)
             menu.renameRequested.connect(self.renameFolder.emit)
             menu.deleteRequested.connect(self.deleteFolder.emit)
             menu.expandRequested.connect(lambda: self.setExpanded(proxy_idx0, True))
             menu.collapseRequested.connect(lambda: self.setExpanded(proxy_idx0, False))
-            menu.markAsVaultRequested.connect(self.markFolderAsVault.emit)
-            menu.removeVaultRequested.connect(self.removeFolderVault.emit)
         else:
             # Clicked on a snippet; show snippet context menu
             menu = SnippetContextMenu(data, self)
