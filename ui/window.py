@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 class QSnippet(QMainWindow):
     # Emitted from the pynput background thread; Qt delivers it to the main thread via queued connection.
     vault_trigger_signal = Signal(str, object, str, bool)
+    trigger_detected_signal = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         """
@@ -57,6 +58,13 @@ class QSnippet(QMainWindow):
         self.cfg = parent.cfg
         self.app = parent.app
         self.state = "stopped"
+
+        # Live countdown for the "Detected Trigger" status bar notification
+        self.trigger_countdown_timer = QTimer(self)
+        self.trigger_countdown_timer.timeout.connect(self.tick_trigger_countdown)
+        self.trigger_countdown_remaining_ms = 0
+        self.trigger_countdown_step_ms = 1000
+        self.trigger_countdown_char = ""
 
         self.setWindowTitle(self.parent.program_name)
 
@@ -205,6 +213,10 @@ class QSnippet(QMainWindow):
         # Vault: locked trigger → main-thread dialog via Signal (thread-safe queued connection)
         self.vault_trigger_signal.connect(self.handle_vault_trigger_main)
         self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
+
+        # Trigger detection → status bar notification via Signal (thread-safe queued connection)
+        self.trigger_detected_signal.connect(self.on_trigger_detected)
+        self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
 
         # Vault: auto-lock fires from a background thread - dispatch UI update to main thread
         from utils.vault_manager import VaultManager
@@ -372,6 +384,7 @@ class QSnippet(QMainWindow):
 
         self.snippet_service = SnippetService(new_path, settings_provider=lambda: self.parent.settings)
         self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
+        self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
 
         if was_running:
             self.start_service()
@@ -464,6 +477,89 @@ class QSnippet(QMainWindow):
 
         except Exception as e:
             logger.exception(f"Failed to show snippets loaded message: {e}")
+
+    def on_trigger_detected_from_expander(self, prefix_char: str, timeout_seconds) -> None:
+        """
+        Called from the expander's keyboard-listener thread when a
+        trigger-prefix character starts a new potential trigger. Re-emits as
+        a Qt signal so the status bar update happens on the main thread.
+
+        Args:
+            prefix_char (str): The special character that started the
+                potential trigger (e.g. "/").
+            timeout_seconds (float | None): The configured trigger timeout,
+                or None when disabled.
+
+        Returns:
+            None
+        """
+        self.trigger_detected_signal.emit(prefix_char, timeout_seconds)
+
+    def on_trigger_detected(self, prefix_char: str, timeout_seconds) -> None:
+        """
+        Show a status bar notification for a detected trigger prefix
+        character, counting down to when the trigger buffer will expire
+        from inactivity.
+
+        Restores the real service status once the countdown reaches zero
+        (or after a fixed display period when the timeout is disabled).
+
+        Args:
+            prefix_char (str): The special character that started the
+                potential trigger (e.g. "/").
+            timeout_seconds (float | None): The configured trigger timeout,
+                or None when disabled.
+
+        Returns:
+            None
+        """
+        try:
+            self.trigger_countdown_timer.stop()
+            self.trigger_countdown_char = prefix_char
+
+            if timeout_seconds is None:
+                self.statusBar().showMessage(f"Detected Trigger: {prefix_char} (Off)")
+                QTimer.singleShot(3000, self.check_service_status)
+                return
+
+            # Whole-second countdowns tick once a second; sub-second
+            # ("500ms"-style) timeouts tick more finely so the countdown
+            # is still visible.
+            self.trigger_countdown_step_ms = 1000 if timeout_seconds >= 1 else 100
+            self.trigger_countdown_remaining_ms = round(timeout_seconds * 1000)
+
+            self.show_trigger_countdown()
+            self.trigger_countdown_timer.start(self.trigger_countdown_step_ms)
+        except Exception:
+            logger.exception("Failed to show trigger detected message")
+
+    def show_trigger_countdown(self) -> None:
+        """
+        Render the current trigger countdown state to the status bar.
+
+        Returns:
+            None
+        """
+        from utils.keyboard_utils import format_duration_seconds
+        label = format_duration_seconds(self.trigger_countdown_remaining_ms / 1000.0)
+        self.statusBar().showMessage(f"Detected Trigger: {self.trigger_countdown_char} ({label})")
+
+    def tick_trigger_countdown(self) -> None:
+        """
+        Advance the trigger countdown by one step, updating the status bar.
+
+        Stops the countdown and restores the real service status once the
+        remaining time reaches zero.
+
+        Returns:
+            None
+        """
+        self.trigger_countdown_remaining_ms -= self.trigger_countdown_step_ms
+        if self.trigger_countdown_remaining_ms <= 0:
+            self.trigger_countdown_timer.stop()
+            self.check_service_status()
+            return
+        self.show_trigger_countdown()
 
     # Handlers
     def handle_startup_signal(self, enabled: bool) -> None:

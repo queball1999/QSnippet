@@ -1,12 +1,17 @@
 import sys
 import threading
+import time
 import types
 from contextlib import nullcontext
 from unittest.mock import MagicMock
 
 import pytest
 
-from utils.keyboard_utils import SnippetExpander
+from utils.keyboard_utils import (
+    SnippetExpander,
+    format_duration_seconds,
+    parse_duration_seconds,
+)
 
 
 class DummyKeyValue:
@@ -117,6 +122,142 @@ def expander(dummy_pynput):
             }
         },
     )
+
+@pytest.mark.parametrize(
+    "raw_value, expected_seconds",
+    [
+        ("500ms", 0.5),
+        ("5s", 5.0),
+        ("5", 5.0),
+        ("2.5s", 2.5),
+        ("off", None),
+        ("OFF", None),
+        ("disabled", None),
+        (None, 5.0),
+    ],
+)
+def test_parse_duration_seconds(raw_value, expected_seconds):
+    """Duration strings should parse to seconds, honoring units and 'off'."""
+    assert parse_duration_seconds(raw_value, default_seconds=5.0) == expected_seconds
+
+
+def test_parse_duration_seconds_falls_back_on_invalid_input():
+    """Unparseable values should fall back to the provided default."""
+    assert parse_duration_seconds("banana", default_seconds=5.0) == 5.0
+
+
+@pytest.mark.parametrize(
+    "seconds, expected_label",
+    [
+        (None, "Off"),
+        (0.5, "500ms"),
+        (5.0, "5s"),
+        (2.5, "2.5s"),
+    ],
+)
+def test_format_duration_seconds(seconds, expected_label):
+    """Formatted durations should use ms below one second and s otherwise."""
+    assert format_duration_seconds(seconds) == expected_label
+
+
+def test_get_trigger_timeout_seconds_reads_settings(dummy_pynput):
+    """The expander should read the configured trigger timeout from settings."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = []
+
+    expander = SnippetExpander(
+        snippets_db=db,
+        parent=MagicMock(),
+        settings_provider=lambda: {
+            "general": {
+                "keyboard_behavior": {
+                    "trigger_timeout": {"value": "250ms"}
+                }
+            }
+        },
+    )
+
+    assert expander.get_trigger_timeout_seconds() == 0.25
+
+
+def test_get_trigger_timeout_seconds_off_disables_inactivity_clear(dummy_pynput):
+    """Buffer should survive long inactivity gaps when the timeout is 'off'."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = [
+        {"id": 1, "trigger": "/sig", "paste_style": "Clipboard", "return_press": False}
+    ]
+    db.get_snippet_by_trigger.return_value = {}
+
+    expander = SnippetExpander(
+        snippets_db=db,
+        parent=MagicMock(),
+        settings_provider=lambda: {
+            "general": {
+                "keyboard_behavior": {
+                    "trigger_timeout": {"value": "off"}
+                }
+            }
+        },
+    )
+
+    class DummyCharKey:
+        def __init__(self, char):
+            self.char = char
+
+    expander.buffer = "/s"
+    expander.cursor_pos = len(expander.buffer)
+    expander.last_keypress_at = time.monotonic() - 9999
+
+    expander.on_key_press(DummyCharKey("x"))
+
+    # If the inactivity timeout fired, the buffer would have been cleared
+    # before "x" was appended, leaving just "x" instead of "/sx".
+    assert expander.buffer == "/sx"
+
+
+def test_trigger_detected_callback_invoked_on_prefix_char(expander):
+    """The trigger-detected callback should fire once, for the prefix character only."""
+    calls = []
+    expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
+    expander.expand = MagicMock()
+
+    for char in "/sig":
+        expander.handle_char(char)
+
+    # Fires only for "/" (the fresh, single-char buffer matching a known
+    # trigger prefix) - not again for "s", "i", "g", and not the full "/sig".
+    assert calls == [("/", 5.0)]
+
+
+def test_trigger_detected_callback_not_invoked_for_non_prefix_chars(expander):
+    """Typing ordinary text that never starts with a trigger prefix should not notify."""
+    calls = []
+    expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
+
+    for char in "hello":
+        expander.handle_char(char)
+
+    assert calls == []
+
+
+def test_trigger_detected_callback_refires_after_buffer_clear(expander):
+    """The prefix notification should fire again once the buffer resets and a new trigger starts."""
+    calls = []
+    expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
+    expander.expand = MagicMock()
+
+    for char in "/sig":
+        expander.handle_char(char)
+
+    expander.clear_buffer()
+
+    for char in "/sig":
+        expander.handle_char(char)
+
+    assert calls == [("/", 5.0), ("/", 5.0)]
+
 
 def test_handle_char_uses_suffix_trigger_matching(expander):
     """Typing a trigger should use the optimized suffix matcher."""

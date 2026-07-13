@@ -629,6 +629,14 @@ class main():
 
         logger.info("Resolving image/icon asset paths")
 
+        # Work on a private copy. self.images started out as the *same* dict
+        # object as self.cfg["images"], and self.cfg gets written back to
+        # config.yaml verbatim elsewhere (e.g. handle_log_level, vault settings
+        # saves). Resolving in place would leak absolute, run-specific paths
+        # (including PyInstaller's ephemeral _MEI* temp dir) into the persisted
+        # config, permanently overwriting the real filenames on disk.
+        self.images = dict(self.images)
+
         # Get the resolved images path (already determined during init)
         images_path = self.images_path
         icons_path = images_path.parent / "icons"  # assets/icons/
@@ -637,6 +645,15 @@ class main():
 
         for image_key in self.images:
             old_val = self.images[image_key]
+
+            # Nothing configured (or already-corrupted empty value) - treat as missing
+            # rather than resolving os.path.join(dir, "") down to the bare directory.
+            if not old_val:
+                logger.warning(f"Asset '{image_key}' has no configured filename; treating as missing")
+                if image_key in critical_assets:
+                    missing_critical.append((image_key, old_val, "assets/icons"))
+                self.images[image_key] = ""
+                continue
 
             # Handle generic "QSnippet" icon name with OS-specific resolution
             if old_val == "QSnippet":
@@ -653,8 +670,9 @@ class main():
             else:
                 primary_path = os.path.join(str(images_path), old_val)
 
-            # Try primary path first (external development assets)
-            if os.path.exists(primary_path):
+            # Try primary path first (external development assets).
+            # isfile (not exists) so a bare directory is never mistaken for a resolved asset.
+            if os.path.isfile(primary_path):
                 logger.info(f"Asset '{image_key}' ({old_val}) resolved to: {primary_path}")
                 self.images[image_key] = primary_path
             else:

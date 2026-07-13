@@ -33,6 +33,8 @@ Write-Host "`n[2/4] Loading version info..." -ForegroundColor Cyan
 $VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])"
 Write-Host "Version: $VERSION" -ForegroundColor Green
 
+$distDir = "output\windows"
+
 # Step 3: Build Windows binaries (PyInstaller)
 Write-Host "`n[3/4] Building Windows binaries with PyInstaller..." -ForegroundColor Cyan
 & .\tools\build.ps1
@@ -132,8 +134,6 @@ if ($gpgPath) {
     $response = Read-Host
 
     if ($response -eq "y" -or $response -eq "Y") {
-        $distDir = "output\windows"
-
         # Generate SHA256 checksums
         Write-Host "Generating SHA256SUMS..." -ForegroundColor Cyan
         $sha256Output = @()
@@ -175,3 +175,8 @@ Write-Host "Build Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "Installer: output\windows\QSnippet-$VERSION-windows-installer.exe" -ForegroundColor Cyan
 Write-Host "Portable:  output\windows\QSnippet-$VERSION-windows-portable.exe" -ForegroundColor Cyan
+
+$openFolder = Read-Host "Open output folder in File Explorer? (y/n)"
+if ($openFolder -match '^[Yy]') {
+    explorer.exe (Resolve-Path $distDir)
+}

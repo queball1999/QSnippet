@@ -248,7 +248,7 @@ class FileUtils:
         external_asset_dir = Path(default_paths["working_dir"]) / "assets" / asset_dir
         external_path = str(external_asset_dir / asset_name)
 
-        if os.path.exists(external_path):
+        if os.path.isfile(external_path):
             logger.debug(f"Found asset '{asset_name}' in external assets: {external_path}")
             return external_path
 
@@ -268,7 +268,7 @@ class FileUtils:
         bundled_path = cls.icon_path(asset_name) if asset_dir == "icons" else str(
             Path(cls.resolve_icons_path()).parent / asset_dir / asset_name
         )
-        if os.path.exists(bundled_path):
+        if os.path.isfile(bundled_path):
             logger.debug(f"Falling back to bundled asset: {bundled_path}")
             return bundled_path
 

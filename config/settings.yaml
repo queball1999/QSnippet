@@ -176,6 +176,18 @@ general:
       default: true
       description: Automatically expand all folder views when a search is performed.
 
+  keyboard_behavior:
+    description: Configure snippet trigger detection while typing.
+    trigger_timeout:
+      type: string
+      value: "5s"
+      default: "5s"
+      description: >
+        How long you can pause mid-trigger before QSnippet forgets what you've
+        typed so far. Accepts a plain number of seconds, or a value with units
+        such as "500ms" or "5s". Set to "off" to disable the timeout so a
+        partially-typed trigger never expires from inactivity.
+
   clipboard_behavior:
     description: Control how and when clipboard contents are cleared after copying a snippet.
     clipboard_timeout:

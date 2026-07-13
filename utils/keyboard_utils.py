@@ -15,6 +15,63 @@ if platform.system() == "Windows":
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TRIGGER_TIMEOUT_SECONDS = 5.0
+
+_DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*$")
+
+
+def parse_duration_seconds(raw_value, default_seconds: float) -> float | None:
+    """
+    Parse a duration setting into seconds.
+
+    Accepts a bare number (seconds), a number suffixed with "ms" or "s",
+    or "off" to disable the timeout entirely.
+
+    Args:
+        raw_value (Any): The raw setting value (e.g. "500ms", "5s", "off").
+        default_seconds (float): Value to fall back to when parsing fails.
+
+    Returns:
+        float | None: The duration in seconds, or None when disabled.
+    """
+    if raw_value is None:
+        return default_seconds
+
+    text = str(raw_value).strip().lower()
+    if text in ("off", "disabled", "none"):
+        return None
+
+    match = _DURATION_PATTERN.match(text)
+    if not match:
+        logger.warning("Invalid duration %r. Falling back to %.3fs", raw_value, default_seconds)
+        return default_seconds
+
+    amount = float(match.group(1))
+    unit = match.group(2) or "s"
+    seconds = amount / 1000.0 if unit == "ms" else amount
+
+    return seconds if seconds > 0 else None
+
+
+def format_duration_seconds(seconds) -> str:
+    """
+    Format a duration in seconds for display (e.g. "500ms", "5s", "Off").
+
+    Args:
+        seconds (float | None): The duration in seconds, or None when disabled.
+
+    Returns:
+        str: The human-readable duration.
+    """
+    if seconds is None:
+        return "Off"
+    if seconds < 1:
+        return f"{round(seconds * 1000)}ms"
+    if float(seconds).is_integer():
+        return f"{int(seconds)}s"
+    return f"{seconds:g}s"
+
+
 class SnippetExpander:
     def __init__(self, snippets_db: SnippetDB, parent, settings_provider=None) -> None:
         """
@@ -49,7 +106,6 @@ class SnippetExpander:
         self.cursor_pos = 0
         self.max_trigger_len = 1
         self.trigger_flag = False
-        self.buffer_inactivity_timeout = 5.0
         self.last_keypress_at = 0.0
         self.last_event_processed_at = 0.0
         self.keyboard_debounce_ms = 20  # Minimum milliseconds between event processing
@@ -60,7 +116,9 @@ class SnippetExpander:
         self.last_managed_clipboard = None
         self.trigger_map = {}
         self.trigger_trie = {}
+        self.trigger_prefixes: set = set()  # first character of every enabled trigger
         self.vault_unlock_callback = None  # Callable[[trigger, entry, style, return_press], None]
+        self.trigger_detected_callback = None  # Callable[[prefix_char, timeout_seconds], None]
         self.vault_folder_set: set = set()  # paths of vault-protected folders
 
         self.refresh_snippets()
@@ -98,6 +156,7 @@ class SnippetExpander:
             node["__trigger__"] = trigger
 
         self.max_trigger_len = max((len(trigger) for trigger in self.trigger_map), default=1)
+        self.trigger_prefixes = {trigger[0] for trigger in self.trigger_map if trigger}
 
         logger.debug("Trigger map size: %d", len(self.trigger_map))
         logger.debug("Maximum trigger length: %d", self.max_trigger_len)
@@ -149,6 +208,7 @@ class SnippetExpander:
             node["__trigger__"] = trigger
         self.trigger_trie = trie
         self.max_trigger_len = max((len(t) for t in self.trigger_map), default=1)
+        self.trigger_prefixes = {t[0] for t in self.trigger_map if t}
 
     def update_trigger_entry(self, snippet_meta: dict) -> None:
         """
@@ -266,6 +326,22 @@ class SnippetExpander:
 
         settings = getattr(self.parent, "settings", None)
         return settings or {}
+
+    def get_trigger_timeout_seconds(self) -> float | None:
+        """
+        Read the trigger buffer inactivity timeout from settings.
+
+        Returns:
+            float | None: The timeout in seconds, or None when disabled.
+        """
+        settings = self.get_settings()
+        raw_value = (
+            settings.get("general", {})
+            .get("keyboard_behavior", {})
+            .get("trigger_timeout", {})
+            .get("value", DEFAULT_TRIGGER_TIMEOUT_SECONDS)
+        )
+        return parse_duration_seconds(raw_value, default_seconds=DEFAULT_TRIGGER_TIMEOUT_SECONDS)
 
     def get_clipboard_timeout_seconds(self) -> int | None:
         """
@@ -509,7 +585,12 @@ class SnippetExpander:
                 return
             self.last_event_processed_at = now
 
-            if self.last_keypress_at and (time.monotonic() - self.last_keypress_at) > self.buffer_inactivity_timeout:
+            trigger_timeout = self.get_trigger_timeout_seconds()
+            if (
+                trigger_timeout is not None
+                and self.last_keypress_at
+                and (time.monotonic() - self.last_keypress_at) > trigger_timeout
+            ):
                 logger.debug("Clearing buffer due to inactivity timeout")
                 self.clear_buffer()
 
@@ -612,12 +693,13 @@ class SnippetExpander:
         """
         Append a character to the buffer and attempt trigger matching.
 
-        Updates the internal buffer, enforces maximum length, and
-        expands the snippet if a trigger match is detected.
+        Updates the internal buffer, enforces maximum length, notifies when
+        a fresh trigger-prefix character starts a new potential trigger, and
+        expands the snippet if a full trigger match is detected.
 
         Args:
             char (str): The character to append.
-        
+
         Returns:
             None
         """
@@ -634,7 +716,18 @@ class SnippetExpander:
                 self.cursor_pos = max(0, self.cursor_pos - overflow)
 
             logger.debug("Buffer length: %d Cursor: %d", len(self.buffer), self.cursor_pos)
+
+            # A fresh, single-character buffer that matches a known trigger
+            # prefix (e.g. "/") means the user just started a potential
+            # trigger - not that one fully matched yet.
+            is_fresh_trigger_prefix = len(self.buffer) == 1 and self.buffer in self.trigger_prefixes
             trigger = self.match_trigger_suffix()
+
+        if is_fresh_trigger_prefix and callable(self.trigger_detected_callback):
+            try:
+                self.trigger_detected_callback(char, self.get_trigger_timeout_seconds())
+            except Exception:
+                logger.exception("trigger_detected_callback raised")
 
         if trigger:
             snippet_meta = self.trigger_map.get(trigger, {})
