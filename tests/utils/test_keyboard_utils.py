@@ -219,8 +219,79 @@ def test_get_trigger_timeout_seconds_off_disables_inactivity_clear(dummy_pynput)
     assert expander.buffer == "/sx"
 
 
+def test_backspace_refreshes_trigger_timeout_clock(expander, monkeypatch):
+    """
+    Regression: editing keys (backspace/delete/arrows) must reset the
+    inactivity clock, same as character keys do.
+
+    Previously only handle_char() updated last_keypress_at, so a sequence of
+    edits that were each individually well within the timeout window could
+    still get wiped out because the elapsed-time check kept comparing
+    against the last *character* typed instead of the last edit.
+    """
+    # Base the fake clock at a realistic non-zero offset. self.last_keypress_at
+    # doubles as an "unset" sentinel via `and self.last_keypress_at` truthiness
+    # checks, so a literal 0.0 timestamp would bypass the timeout check
+    # entirely regardless of the fix and defeat this regression test.
+    fake_now = [100.0]
+    monkeypatch.setattr("utils.keyboard_utils.time.monotonic", lambda: fake_now[0])
+
+    expander.buffer = "/txt"
+    expander.cursor_pos = len(expander.buffer)
+    expander.last_keypress_at = 100.0  # last real character was typed at t=100
+
+    # First backspace at t=103s - well within the 5s default timeout.
+    fake_now[0] = 103.0
+    expander.on_key_press(expander.keyboard.Key.backspace)
+    assert expander.buffer == "/tx"
+
+    # Second backspace at t=106s: only 3s after the previous edit, but 6s
+    # after the original character. Without the fix, last_keypress_at would
+    # still be the stale t=100, so (106 - 100) > 5s would wipe the buffer.
+    fake_now[0] = 106.0
+    expander.on_key_press(expander.keyboard.Key.backspace)
+    assert expander.buffer == "/t"
+
+
+def test_backspace_and_arrows_refresh_status_bar_countdown(expander):
+    """
+    Backspace/delete/arrow keys must also restart the on-screen trigger
+    countdown, not just the internal inactivity clock, so the displayed
+    count stays accurate whenever last_keypress_at is refreshed.
+    """
+    calls = []
+    expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
+
+    expander.buffer = "/sig"
+    expander.cursor_pos = len(expander.buffer)
+
+    # Reset the 20ms event debounce before each call - back-to-back calls in
+    # a tight test loop can otherwise land under keyboard_debounce_ms and get
+    # skipped, since real wall-clock time between statements is often <20ms.
+    expander.on_key_press(expander.keyboard.Key.left)
+    expander.last_event_processed_at = 0.0
+    expander.on_key_press(expander.keyboard.Key.backspace)
+    expander.last_event_processed_at = 0.0
+    expander.on_key_press(expander.keyboard.Key.delete)
+
+    assert calls == [("/", 5.0)] * 3
+
+
+def test_arrow_past_active_prefix_does_not_refresh_countdown(expander):
+    """Navigation on an empty/inactive buffer should not spuriously notify the status bar."""
+    calls = []
+    expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
+
+    expander.buffer = ""
+    expander.cursor_pos = 0
+
+    expander.on_key_press(expander.keyboard.Key.left)
+
+    assert calls == []
+
+
 def test_trigger_detected_callback_invoked_on_prefix_char(expander):
-    """The trigger-detected callback should fire once, for the prefix character only."""
+    """The trigger-detected callback should fire on every keystroke while a trigger prefix is active."""
     calls = []
     expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
     expander.expand = MagicMock()
@@ -228,9 +299,10 @@ def test_trigger_detected_callback_invoked_on_prefix_char(expander):
     for char in "/sig":
         expander.handle_char(char)
 
-    # Fires only for "/" (the fresh, single-char buffer matching a known
-    # trigger prefix) - not again for "s", "i", "g", and not the full "/sig".
-    assert calls == [("/", 5.0)]
+    # Fires for every keystroke of "/sig" ("/", "/s", "/si", "/sig" all
+    # start with the "/" prefix), so the on-screen countdown keeps
+    # restarting in step with last_keypress_at instead of only firing once.
+    assert calls == [("/", 5.0)] * 4
 
 
 def test_trigger_detected_callback_not_invoked_for_non_prefix_chars(expander):
@@ -245,7 +317,7 @@ def test_trigger_detected_callback_not_invoked_for_non_prefix_chars(expander):
 
 
 def test_trigger_detected_callback_refires_after_buffer_clear(expander):
-    """The prefix notification should fire again once the buffer resets and a new trigger starts."""
+    """The prefix notification should keep firing after the buffer resets and a new trigger starts."""
     calls = []
     expander.trigger_detected_callback = lambda char, timeout: calls.append((char, timeout))
     expander.expand = MagicMock()
@@ -258,7 +330,7 @@ def test_trigger_detected_callback_refires_after_buffer_clear(expander):
     for char in "/sig":
         expander.handle_char(char)
 
-    assert calls == [("/", 5.0), ("/", 5.0)]
+    assert calls == [("/", 5.0)] * 8
 
 
 def test_handle_char_uses_suffix_trigger_matching(expander):

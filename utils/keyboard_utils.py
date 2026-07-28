@@ -650,6 +650,7 @@ class SnippetExpander:
                 self.clear_buffer()
 
             if self.handle_navigation_and_deletion(key):
+                self.last_keypress_at = now
                 return
 
             if self.should_clear_on(key):
@@ -673,32 +674,36 @@ class SnippetExpander:
         Handle cursor navigation and deletion keys.
 
         Updates the buffer and cursor position when left, right,
-        backspace, or delete keys are pressed.
+        backspace, or delete keys are pressed. Also refreshes the
+        on-screen trigger countdown (see refresh_trigger_countdown), since
+        editing/moving within an active trigger buffer is activity just
+        like typing a character is.
 
         Args:
             key (Any): The key event.
-        
+
         Returns:
             bool: True if the key was handled, otherwise False.
         """
         if key == self.keyboard.Key.left:
             if self.cursor_pos > 0:
                 self.cursor_pos -= 1
-            return True
         elif key == self.keyboard.Key.right:
             if self.cursor_pos < len(self.buffer):
                 self.cursor_pos += 1
-            return True
         elif key == self.keyboard.Key.backspace:
             if self.cursor_pos > 0:
                 self.buffer = self.buffer[:self.cursor_pos - 1] + self.buffer[self.cursor_pos:]
                 self.cursor_pos -= 1
-            return True
         elif key == self.keyboard.Key.delete:
             if self.cursor_pos < len(self.buffer):
                 self.buffer = self.buffer[:self.cursor_pos] + self.buffer[self.cursor_pos + 1:]
-            return True
-        return False
+        else:
+            return False
+
+        active_prefix_char = self.buffer[0] if self.buffer and self.buffer[0] in self.trigger_prefixes else None
+        self.refresh_trigger_countdown(active_prefix_char)
+        return True
 
     def should_clear_on(self, key) -> bool:
         """
@@ -744,13 +749,37 @@ class SnippetExpander:
         key_name = getattr(key, "name", "")
         return bool(key_name and key_name.startswith("f"))
 
+    def refresh_trigger_countdown(self, prefix_char: str | None) -> None:
+        """
+        Re-notify trigger_detected_callback so the status bar countdown
+        restarts from the full configured timeout.
+
+        Called on every keystroke that touches an active trigger buffer
+        (typing, backspace/delete, arrow movement) so the on-screen count
+        stays in sync with last_keypress_at, which those same keys refresh
+        (see on_key_press / handle_navigation_and_deletion).
+
+        Args:
+            prefix_char (str | None): The buffer's leading trigger-prefix
+                character, or None when the buffer holds no active trigger.
+
+        Returns:
+            None
+        """
+        if not prefix_char or not callable(self.trigger_detected_callback):
+            return
+        try:
+            self.trigger_detected_callback(prefix_char, self.get_trigger_timeout_seconds())
+        except Exception:
+            logger.exception("trigger_detected_callback raised")
+
     def handle_char(self, char: str) -> None:
         """
         Append a character to the buffer and attempt trigger matching.
 
-        Updates the internal buffer, enforces maximum length, notifies when
-        a fresh trigger-prefix character starts a new potential trigger, and
-        expands the snippet if a full trigger match is detected.
+        Updates the internal buffer, enforces maximum length, refreshes the
+        on-screen trigger countdown while a potential trigger is being typed,
+        and expands the snippet if a full trigger match is detected.
 
         Args:
             char (str): The character to append.
@@ -772,17 +801,13 @@ class SnippetExpander:
 
             logger.debug("Buffer length: %d Cursor: %d", len(self.buffer), self.cursor_pos)
 
-            # A fresh, single-character buffer that matches a known trigger
-            # prefix (e.g. "/") means the user just started a potential
-            # trigger - not that one fully matched yet.
-            is_fresh_trigger_prefix = len(self.buffer) == 1 and self.buffer in self.trigger_prefixes
+            # A buffer starting with a known trigger-prefix character (e.g.
+            # "/") is a potential trigger still being typed, whether this is
+            # the first character or a later one.
+            active_prefix_char = self.buffer[0] if self.buffer and self.buffer[0] in self.trigger_prefixes else None
             trigger = self.match_trigger_suffix()
 
-        if is_fresh_trigger_prefix and callable(self.trigger_detected_callback):
-            try:
-                self.trigger_detected_callback(char, self.get_trigger_timeout_seconds())
-            except Exception:
-                logger.exception("trigger_detected_callback raised")
+        self.refresh_trigger_countdown(active_prefix_char)
 
         if trigger:
             snippet_meta = self.trigger_map.get(trigger, {})
