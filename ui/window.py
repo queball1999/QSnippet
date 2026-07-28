@@ -1,4 +1,5 @@
 import os, sys
+import html
 import threading
 from pathlib import Path
 from datetime import datetime
@@ -35,6 +36,8 @@ class QSnippet(QMainWindow):
     # Emitted from the pynput background thread; Qt delivers it to the main thread via queued connection.
     vault_trigger_signal = Signal(str, object, str, bool)
     trigger_detected_signal = Signal(str, object)
+    dynamic_placeholder_signal = Signal(str, object, str, bool)
+    migration_backup_signal = Signal(object, object)
 
     def __init__(self, parent=None) -> None:
         """
@@ -218,6 +221,16 @@ class QSnippet(QMainWindow):
         self.trigger_detected_signal.connect(self.on_trigger_detected)
         self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
 
+        # Dynamic [[placeholder]] fields → main-thread input dialog via Signal
+        self.dynamic_placeholder_signal.connect(self.handle_dynamic_placeholder_main)
+        self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
+
+        # Database migration backup notice → main-thread dialog via Signal
+        # (fired from a background thread by the vault-unlock migration pass)
+        self.migration_backup_signal.connect(self.show_migration_backup_notice)
+        self._migration_notice_shown = False
+        QTimer.singleShot(500, self.check_startup_migration_backup)
+
         # Vault: auto-lock fires from a background thread - dispatch UI update to main thread
         from utils.vault_manager import VaultManager
         def on_vault_locked():
@@ -261,6 +274,7 @@ class QSnippet(QMainWindow):
         self.menubar.exportAction.connect(self.handle_export_action)
         self.menubar.renameAction.connect(self.handle_rename_action)
         self.menubar.collectLogsRequested.connect(self.handle_collect_logs)
+        self.menubar.viewBackupHistoryRequested.connect(self.handle_view_backup_history)
         self.menubar.logLevelChanged.connect(self.handle_log_level)
         self.menubar.showAppInfo.connect(self.handle_show_info)
         self.menubar.show_settings.connect(self.show_settings_window)
@@ -385,6 +399,7 @@ class QSnippet(QMainWindow):
         self.snippet_service = SnippetService(new_path, settings_provider=lambda: self.parent.settings)
         self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
         self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
+        self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
 
         if was_running:
             self.start_service()
@@ -1198,6 +1213,13 @@ class QSnippet(QMainWindow):
                 target=lambda: vm.migrate_existing_vault_snippets_aad(db),
                 daemon=True,
             ).start()
+        if is_unlocked and not vm._brace_migration_done:
+            vm._brace_migration_done = True  # set before dispatch to avoid duplicate threads
+            db = self.vault_db()
+            threading.Thread(
+                target=lambda: self._run_vault_brace_migration(vm, db),
+                daemon=True,
+            ).start()
         if hasattr(self, "toolbar"):
             self.toolbar.update_vault_state(is_setup, is_unlocked)
         if hasattr(self, "menubar"):
@@ -1220,6 +1242,139 @@ class QSnippet(QMainWindow):
                 QApplication.clipboard().clear()
             except Exception:
                 pass
+
+    def _run_vault_brace_migration(self, vm, db) -> None:
+        """Background-thread worker: run the vault-unlock placeholder-brace
+        migration, then notify the main thread if it took a backup."""
+        vm.migrate_existing_vault_snippets_braces(db)
+        if db.pending_migration_backup_path or db.pending_migration_export_path:
+            self.migration_backup_signal.emit(
+                db.pending_migration_backup_path, db.pending_migration_export_path
+            )
+
+    def check_startup_migration_backup(self) -> None:
+        """Show the migration-backup notice if SnippetDB backed up data at startup."""
+        db = getattr(self.parent, "snippet_db", None)
+        if db is None:
+            return
+        backup_path = getattr(db, "pending_migration_backup_path", None)
+        export_path = getattr(db, "pending_migration_export_path", None)
+        if backup_path or export_path:
+            self.show_migration_backup_notice(backup_path, export_path)
+
+    def show_migration_backup_notice(self, backup_path, export_path) -> None:
+        """Inform the user that a database update backed up their snippets first."""
+        if self._migration_notice_shown:
+            return
+        self._migration_notice_shown = True
+        try:
+            self.record_migration_backup(backup_path, export_path)
+            self.show_backup_links_dialog(
+                "Database Updated",
+                "QSnippet updated its snippet database for this version.\n"
+                "Before making any changes, a backup was saved:",
+                [{"timestamp": datetime.now().isoformat(timespec="seconds"),
+                  "db_backup_path": str(backup_path) if backup_path else None,
+                  "export_path": str(export_path) if export_path else None}],
+            )
+        except Exception:
+            logger.exception("Failed to show migration backup notice")
+
+    def record_migration_backup(self, backup_path, export_path) -> None:
+        """Persist a migration-backup entry so it can be recalled later from
+        Help > Backup History, even if the one-time notice was dismissed."""
+        try:
+            backups = self.parent.settings.setdefault("backups", {})
+            entry = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "db_backup_path": str(backup_path) if backup_path else None,
+                "export_path": str(export_path) if export_path else None,
+            }
+            history = list(backups.get("database_backups", {}).get("value", []))
+            history.append(entry)
+            history = history[-20:]  # keep it bounded; migrations are rare
+
+            if "database_backups" in backups:
+                backups["database_backups"]["value"] = history
+            else:
+                backups["database_backups"] = {
+                    "type": "list",
+                    "value": history,
+                    "hidden": True,
+                    "description": "History of automatic pre-migration database backups.",
+                }
+
+            FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
+        except Exception:
+            logger.exception("Failed to record migration backup history")
+
+    def handle_view_backup_history(self) -> None:
+        """Help menu action: show every automatic pre-migration backup on record."""
+        history = (
+            self.parent.settings.get("backups", {})
+            .get("database_backups", {})
+            .get("value", [])
+        )
+        if not history:
+            self.parent.message_box.info(
+                "No automatic database backups have been made yet.",
+                title="Backup History",
+            )
+            return
+        self.show_backup_links_dialog(
+            "Backup History",
+            "Automatic backups QSnippet has made before database updates:",
+            list(reversed(history)),
+        )
+
+    def show_backup_links_dialog(self, title: str, intro: str, entries: list) -> None:
+        """Show *entries* (each with timestamp/db_backup_path/export_path) as a
+        rich-text message box with clickable links that reveal each file in
+        the OS file manager."""
+        rows = []
+        for entry in entries:
+            parts = [f"<b>{entry.get('timestamp', '')}</b>"]
+            db_path = entry.get("db_backup_path")
+            export_path = entry.get("export_path")
+            if db_path:
+                safe = html.escape(db_path)
+                parts.append(f"Database copy: <a href=\"{safe}\">{safe}</a>")
+            if export_path:
+                safe = html.escape(export_path)
+                parts.append(f"Snippet export: <a href=\"{safe}\">{safe}</a>")
+            rows.append("<br>".join(parts))
+        body = html.escape(intro).replace("\n", "<br>") + "<br><br>" + "<br><br>".join(rows)
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle(title)
+        box.setTextFormat(Qt.RichText)
+        box.setText(body)
+        box.setStandardButtons(QMessageBox.Ok)
+
+        label = box.findChild(QLabel, "qt_msgbox_label") or box.findChild(QLabel)
+        if label:
+            label.setTextInteractionFlags(Qt.TextBrowserInteraction | Qt.LinksAccessibleByMouse)
+            label.setOpenExternalLinks(False)
+            label.linkActivated.connect(self.reveal_in_file_manager)
+
+        box.exec()
+
+    def reveal_in_file_manager(self, path_str: str) -> None:
+        """Open the OS file manager, selecting *path_str* if the platform supports it."""
+        try:
+            path = Path(path_str)
+            if sys.platform == "win32":
+                import subprocess
+                subprocess.run(["explorer", f"/select,{path}"])
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.call(["open", "-R", str(path)])
+            else:
+                import subprocess
+                subprocess.call(["xdg-open", str(path.parent)])
+        except Exception:
+            logger.exception("Failed to reveal %s in file manager", path_str)
 
     def toggle_vault_lock(self) -> None:
         """Lock if unlocked; unlock if locked; set up if not configured."""
@@ -1448,6 +1603,58 @@ class QSnippet(QMainWindow):
         dlg.vaultConfigured.connect(on_configured)
         dlg.exec()
 
+    def on_dynamic_placeholder_triggered(self, trigger: str, snippet_entry: dict,
+                                          style: str, return_press: bool) -> None:
+        """Called from expander background thread when a snippet has [[name]] fields to fill in."""
+        self.dynamic_placeholder_signal.emit(trigger, snippet_entry, style, return_press)
+
+    def handle_dynamic_placeholder_main(self, trigger: str, snippet_entry: dict,
+                                         style: str, return_press: bool) -> None:
+        try:
+            expander = self.snippet_service.expander
+            plain = snippet_entry.get("snippet", "")
+            self._expand_with_dynamic_placeholders(expander, trigger, plain, style, return_press)
+        except Exception as exc:
+            logger.error("handle_dynamic_placeholder_main failed: %s", exc)
+
+    def _expand_with_dynamic_placeholders(self, expander, trigger: str, plain_text: str,
+                                           style: str, return_press: bool) -> None:
+        """
+        Expand a snippet, prompting for any [[name]] fields it needs first.
+
+        If the snippet has no dynamic placeholders, expands immediately.
+        Otherwise shows an input dialog (single form or step-by-step,
+        per the configured setting); cancelling aborts the paste entirely.
+        """
+        names = expander.get_dynamic_placeholder_names(plain_text)
+        if not names:
+            with expander.buffer_lock:
+                expander.buffer = trigger
+                expander.cursor_pos = len(trigger)
+            expander.expand(trigger, plain_text, style, return_press)
+            expander.clear_buffer()
+            return
+
+        from ui.widgets.dynamic_placeholder_dialog import DynamicPlaceholderDialog
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtWidgets import QDialog
+        mode = expander.get_dynamic_placeholder_dialog_mode()
+        dlg = DynamicPlaceholderDialog(names, mode=mode, parent=self)
+        # Stay on top even when the main window is hidden (minimized to tray)
+        dlg.setWindowFlags(dlg.windowFlags() | _Qt.WindowStaysOnTopHint)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        if dlg.exec() != QDialog.Accepted:
+            expander.clear_buffer()
+            return
+
+        with expander.buffer_lock:
+            expander.buffer = trigger
+            expander.cursor_pos = len(trigger)
+        expander.expand(trigger, plain_text, style, return_press, dynamic_values=dlg.values)
+        expander.clear_buffer()
+
     def on_vault_snippet_triggered(self, trigger: str, snippet_entry: dict,
                                     style: str, return_press: bool) -> None:
         """Called from expander background thread when a locked vault snippet is triggered."""
@@ -1468,11 +1675,7 @@ class QSnippet(QMainWindow):
                     else:
                         plain = snippet_entry.get("snippet", "")
                     vm.reset_activity_timer()
-                    with expander.buffer_lock:
-                        expander.buffer = trigger
-                        expander.cursor_pos = len(trigger)
-                    expander.expand(trigger, plain, style, return_press)
-                    expander.clear_buffer()
+                    self._expand_with_dynamic_placeholders(expander, trigger, plain, style, return_press)
                 except Exception as exc:
                     logger.error("Direct vault expand failed: %s", exc)
                 return
@@ -1504,16 +1707,13 @@ class QSnippet(QMainWindow):
                     expander = self.snippet_service.expander
 
                     def do_expand():
-                        # Buffer was cleared before dialog; restore trigger so
-                        # expand() knows how many chars to backspace.
-                        with expander.buffer_lock:
-                            expander.buffer = trigger
-                            expander.cursor_pos = len(trigger)
-                        expander.expand(trigger, plain, style, return_press)
-                        expander.clear_buffer()
+                        # Buffer was cleared before dialog; restore happens
+                        # inside _expand_with_dynamic_placeholders itself.
+                        self._expand_with_dynamic_placeholders(expander, trigger, plain, style, return_press)
 
                     # Delay so the dialog fully closes and the OS returns focus
-                    # to the original application before backspaces are sent.
+                    # to the original application before backspaces are sent
+                    # (or the [[placeholder]] dialog opens, if needed).
                     QTimer.singleShot(150, do_expand)
                 except Exception as exc:
                     logger.error("Failed to decrypt and expand vault snippet: %s", exc)

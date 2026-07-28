@@ -14,6 +14,7 @@ class MenuBar(QMenuBar):
     exportAction = Signal()
     renameAction = Signal()
     collectLogsRequested = Signal()
+    viewBackupHistoryRequested = Signal()
     logLevelChanged = Signal(str)
     showAppInfo = Signal()
     show_settings = Signal()
@@ -193,6 +194,13 @@ class MenuBar(QMenuBar):
         collect_logs_act.setStatusTip("Export logs to Downloads folder")
         collect_logs_act.triggered.connect(self.collectLogsRequested.emit)
         help_menu.addAction(collect_logs_act)
+
+        # Backup History
+        backup_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
+        backup_history_act = QAction(backup_icon, "Backup History", self)
+        backup_history_act.setStatusTip("View automatic database backups made before updates")
+        backup_history_act.triggered.connect(self.viewBackupHistoryRequested.emit)
+        help_menu.addAction(backup_history_act)
 
         # Report a Bug
         bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))

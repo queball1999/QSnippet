@@ -72,6 +72,45 @@ def format_duration_seconds(seconds) -> str:
     return f"{seconds:g}s"
 
 
+_DYNAMIC_PLACEHOLDER_PATTERN = re.compile(r"\[\[([^\[\]\r\n]+?)\]\]")
+
+
+def extract_dynamic_placeholder_names(text: str) -> list[str]:
+    """
+    Find [[name]] dynamic placeholder tokens in text.
+
+    Args:
+        text (str): The text to scan.
+
+    Returns:
+        list[str]: Unique placeholder names, in first-seen order.
+    """
+    seen = set()
+    names = []
+    for match in _DYNAMIC_PLACEHOLDER_PATTERN.finditer(text):
+        name = match.group(1).strip()
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def substitute_dynamic_placeholders(text: str, values: dict) -> str:
+    """
+    Replace [[name]] tokens in text with user-supplied values.
+
+    Args:
+        text (str): The text containing [[name]] tokens.
+        values (dict): Mapping of placeholder name to its replacement value.
+
+    Returns:
+        str: The text with all known [[name]] tokens substituted.
+    """
+    for name, value in values.items():
+        text = text.replace(f"[[{name}]]", value)
+    return text
+
+
 class SnippetExpander:
     def __init__(self, snippets_db: SnippetDB, parent, settings_provider=None) -> None:
         """
@@ -119,6 +158,7 @@ class SnippetExpander:
         self.trigger_prefixes: set = set()  # first character of every enabled trigger
         self.vault_unlock_callback = None  # Callable[[trigger, entry, style, return_press], None]
         self.trigger_detected_callback = None  # Callable[[prefix_char, timeout_seconds], None]
+        self.dynamic_placeholder_callback = None  # Callable[[trigger, entry, style, return_press], None]
         self.vault_folder_set: set = set()  # paths of vault-protected folders
 
         self.refresh_snippets()
@@ -182,7 +222,7 @@ class SnippetExpander:
     def has_encrypted_placeholders(self, text: str) -> bool:
         """Check if snippet text contains any vault-encrypted placeholders."""
         return any(
-            ph.get("is_encrypted") and f"{{{ph['name']}}}" in text
+            ph.get("is_encrypted") and f"{{{{{ph['name']}}}}}" in text
             for ph in self.custom_placeholders
         )
 
@@ -368,6 +408,21 @@ class SnippetExpander:
             return 30
 
         return timeout_seconds if timeout_seconds > 0 else 30
+
+    def get_dynamic_placeholder_dialog_mode(self) -> str:
+        """
+        Read how [[placeholder]] input prompts should be shown from settings.
+
+        Returns:
+            str: "single_form" or "sequential".
+        """
+        settings = self.get_settings()
+        return (
+            settings.get("general", {})
+            .get("dynamic_placeholders", {})
+            .get("dialog_mode", {})
+            .get("value", "single_form")
+        )
 
     def cancel_clipboard_timer(self) -> None:
         """
@@ -799,6 +854,25 @@ class SnippetExpander:
                     self.clear_buffer()
                     return
 
+            # By this point snippet_text is guaranteed plaintext (either it
+            # was never encrypted, or the vault checks above already
+            # resolved/deferred it). Check for [[name]] fields that need a
+            # value from the user before pasting.
+            names = self.get_dynamic_placeholder_names(snippet_text)
+            if names:
+                if hasattr(self, "dynamic_placeholder_callback") and self.dynamic_placeholder_callback:
+                    cb = self.dynamic_placeholder_callback
+                    trig = trigger
+                    se = snippet_entry
+                    st = style
+                    rp = return_press
+                    threading.Thread(
+                        target=lambda: cb(trig, se, st, rp),
+                        daemon=True,
+                    ).start()
+                self.clear_buffer()
+                return
+
             logger.info("Trigger matched: %s", trigger)
             try:
                 self.expand(trigger, snippet_text, style, return_press)
@@ -886,7 +960,8 @@ class SnippetExpander:
         t = threading.Thread(target=type_snippet, daemon=True)
         t.start()
 
-    def expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool) -> None:
+    def expand(self, trigger: str, snippet: str, paste_style: str, return_press: bool,
+               dynamic_values: dict | None = None) -> None:
         """
         Remove the trigger text and insert the expanded snippet.
 
@@ -900,7 +975,12 @@ class SnippetExpander:
             paste_style (str): The expansion method ("Clipboard" or other).
             return_press (bool): Whether to simulate an additional
                 return key press after expansion.
-        
+            dynamic_values (dict | None): User-supplied values for any
+                [[name]] placeholders, collected via an input dialog before
+                this call. Substituted after all other placeholder/nested
+                resolution so it also reaches [[name]] tokens pulled in
+                from nested snippets.
+
         Returns:
             None
         """
@@ -908,6 +988,8 @@ class SnippetExpander:
 
         # Preprocess for placeholders and nested snippets
         snippet = self.process_snippet_text(snippet)
+        if dynamic_values:
+            snippet = substitute_dynamic_placeholders(snippet, dynamic_values)
 
         trigger_len = len(trigger)
         trigger_start = self.buffer.rfind(trigger)
@@ -942,6 +1024,24 @@ class SnippetExpander:
             # expand_keystrokes runs on a background thread and owns the
             # self.disabled lifecycle   it re-enables when typing is done.
             self.expand_keystrokes(snippet, return_press=return_press)
+
+    def get_dynamic_placeholder_names(self, snippet_text: str) -> list[str]:
+        """
+        Determine which [[name]] fields a snippet needs filled in before pasting.
+
+        Runs the snippet through the same placeholder/nested-snippet
+        resolution used at expansion time, then scans the fully-flattened
+        result for [[name]] tokens - so placeholders pulled in from a
+        nested {/trigger} reference are found too, not just top-level ones.
+
+        Args:
+            snippet_text (str): The raw (already-decrypted) snippet body.
+
+        Returns:
+            list[str]: Unique placeholder names, in first-seen order.
+        """
+        flattened = self.process_snippet_text(snippet_text)
+        return extract_dynamic_placeholder_names(flattened)
 
     def process_snippet_text(self, text: str, depth: int = 0, seen=None) -> str:
         """
@@ -982,22 +1082,22 @@ class SnippetExpander:
 
         replacements = {
             # Dates
-            "{date}": now.strftime("%Y-%m-%d"),           # 2025-09-04
-            "{date_long}": now.strftime("%B %d, %Y"),     # September 04, 2025
-            "{weekday}": now.strftime("%A"),              # Thursday
-            "{month}": now.strftime("%B"),                # September
-            "{year}": now.strftime("%Y"),                 # 2025
+            "{{date}}": now.strftime("%Y-%m-%d"),           # 2025-09-04
+            "{{date_long}}": now.strftime("%B %d, %Y"),     # September 04, 2025
+            "{{weekday}}": now.strftime("%A"),              # Thursday
+            "{{month}}": now.strftime("%B"),                # September
+            "{{year}}": now.strftime("%Y"),                 # 2025
 
             # Times
-            "{time}": now.strftime("%H:%M"),              # 14:35
-            "{time_ampm}": now.strftime("%I:%M %p"),      # 02:35 PM
-            "{hour}": now.strftime("%H"),                 # 14
-            "{minute}": now.strftime("%M"),               # 35
-            "{second}": now.strftime("%S"),               # 07
-            "{datetime}": now.strftime("%Y-%m-%d %H:%M"), # 2025-09-04 14:35
+            "{{time}}": now.strftime("%H:%M"),              # 14:35
+            "{{time_ampm}}": now.strftime("%I:%M %p"),      # 02:35 PM
+            "{{hour}}": now.strftime("%H"),                 # 14
+            "{{minute}}": now.strftime("%M"),               # 35
+            "{{second}}": now.strftime("%S"),               # 07
+            "{{datetime}}": now.strftime("%Y-%m-%d %H:%M"), # 2025-09-04 14:35
 
             # Contextual
-            "{greeting}": greeting,                       # Good afternoon
+            "{{greeting}}": greeting,                       # Good afternoon
         }
         for key, val in replacements.items():
             text = text.replace(key, val)
@@ -1015,10 +1115,12 @@ class SnippetExpander:
                     val = ""
             else:
                 val = ph["value"]
-            text = text.replace(f"{{{ph['name']}}}", val)
+            text = text.replace(f"{{{{{ph['name']}}}}}", val)
 
-        # --    Nested snippets ---
-        nested_pattern = re.compile(r"\{\W(.+?)\}")
+        # --    Nested snippets --- ([^\w{] excludes "{" so a stray/typo'd
+        # {{name}} that didn't match a known placeholder above is left
+        # literal instead of being misread as a nested-snippet reference.
+        nested_pattern = re.compile(r"\{[^\w{](.+?)\}")
         matches = list(nested_pattern.finditer(text))
 
         if not matches:

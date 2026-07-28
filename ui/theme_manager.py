@@ -29,7 +29,11 @@ THEMES: dict[str, dict[str, str]] = {
         "accent":          "#9c0000",          # fallback only
         "accent_hover":    "rgba(96,205,255,0.15)",
         "border_focus":    "#60cdff",
-        "selected":        "#393939",
+        # #393939 (same as "hover") is nearly invisible here: QTextEdit/
+        # QLineEdit's "input" background is a translucent white (6%) over
+        # the panel, which composites to ~#383838 - almost identical to
+        # #393939, so selected text showed no visible highlight.
+        "selected":        "#585858",
         "highlight":       "rgba(96,205,255,0.18)",
         "danger":          "#fc4f4f",
         "danger_hover":    "rgba(252, 79, 79, 0.15)",

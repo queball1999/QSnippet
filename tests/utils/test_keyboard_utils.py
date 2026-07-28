@@ -9,8 +9,10 @@ import pytest
 
 from utils.keyboard_utils import (
     SnippetExpander,
+    extract_dynamic_placeholder_names,
     format_duration_seconds,
     parse_duration_seconds,
+    substitute_dynamic_placeholders,
 )
 
 
@@ -522,3 +524,165 @@ def test_rapid_schedule_and_clear_cycles_stress(dummy_pynput, monkeypatch):
     assert errors == []
     assert expander.clipboard_generation > 0
     assert len(clear_calls) > 0
+
+
+@pytest.mark.parametrize(
+    "text, expected_names",
+    [
+        ("Hi [[name]], welcome to [[place]]!", ["name", "place"]),
+        ("[[a]] and [[a]] again", ["a"]),
+        ("No placeholders here", []),
+        ("[[ spaced out ]]", ["spaced out"]),
+    ],
+)
+def test_extract_dynamic_placeholder_names(text, expected_names):
+    """[[name]] tokens should be found in first-seen order, deduped, and trimmed."""
+    assert extract_dynamic_placeholder_names(text) == expected_names
+
+
+def test_substitute_dynamic_placeholders_replaces_known_tokens():
+    """Known [[name]] tokens are replaced; unknown ones are left untouched."""
+    result = substitute_dynamic_placeholders(
+        "Hi [[name]], re: [[project]]. Unused: [[other]]",
+        {"name": "Alex", "project": "QSnippet"},
+    )
+    assert result == "Hi Alex, re: QSnippet. Unused: [[other]]"
+
+
+def test_get_dynamic_placeholder_names_finds_nested_fields(dummy_pynput):
+    """A [[name]] living inside a nested {/trigger} reference should still be detected."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = [
+        {"id": 1, "trigger": "/sig", "paste_style": "Clipboard", "return_press": False},
+        {"id": 2, "trigger": "/nested", "paste_style": "Clipboard", "return_press": False},
+    ]
+    snippets_by_trigger = {
+        "/sig": {"id": 1, "trigger": "/sig", "snippet": "Hi {/nested}", "paste_style": "Clipboard", "return_press": False},
+        "/nested": {"id": 2, "trigger": "/nested", "snippet": "there, [[name]]!", "paste_style": "Clipboard", "return_press": False},
+    }
+    db.get_snippet_by_trigger.side_effect = lambda trigger: snippets_by_trigger[trigger]
+
+    dynamic_expander = SnippetExpander(
+        snippets_db=db,
+        parent=MagicMock(),
+        settings_provider=lambda: {},
+    )
+
+    assert dynamic_expander.get_dynamic_placeholder_names("Hi {/nested}") == ["name"]
+
+
+def test_get_dynamic_placeholder_names_no_placeholders_returns_empty(expander):
+    """A snippet with no [[name]] fields should report no placeholders to fill in."""
+    assert expander.get_dynamic_placeholder_names("Regards") == []
+
+
+def test_handle_char_notifies_dynamic_placeholder_callback_and_skips_expand(expander):
+    """A snippet with [[name]] fields should notify via callback instead of expanding synchronously."""
+    expander.snippets_db.get_snippet_by_trigger.return_value = {
+        "id": 1,
+        "trigger": "/sig",
+        "snippet": "Hi [[name]]",
+        "paste_style": "Clipboard",
+        "return_press": False,
+        "enabled": True,
+    }
+
+    calls = []
+    ready = threading.Event()
+
+    def on_dynamic(trigger, snippet_entry, style, return_press):
+        calls.append((trigger, snippet_entry, style, return_press))
+        ready.set()
+
+    expander.dynamic_placeholder_callback = on_dynamic
+    expander.expand = MagicMock()
+
+    for char in "/sig":
+        expander.handle_char(char)
+
+    assert ready.wait(timeout=1.0)
+    trigger, snippet_entry, style, return_press = calls[0]
+    assert (trigger, snippet_entry["snippet"], style, return_press) == ("/sig", "Hi [[name]]", "Clipboard", False)
+    expander.expand.assert_not_called()
+
+
+def test_expand_applies_dynamic_values_after_processing(expander):
+    """expand() should substitute dynamic_values into the fully-processed snippet text."""
+    expander.expand_clipboard = MagicMock()
+    expander.buffer = "/sig"
+    expander.cursor_pos = len("/sig")
+
+    expander.expand("/sig", "Hi [[name]]", "Clipboard", False, dynamic_values={"name": "Alex"})
+
+    expander.expand_clipboard.assert_called_once()
+    (pasted_text,), _ = expander.expand_clipboard.call_args
+    assert pasted_text == "Hi Alex"
+
+
+def test_process_snippet_text_substitutes_double_brace_system_placeholders(expander):
+    """System placeholders use {{name}} syntax and resolve to real values."""
+    result = expander.process_snippet_text("Sent on {{date}} - {{greeting}}!")
+    assert "{{date}}" not in result
+    assert "{{greeting}}" not in result
+    assert result.startswith("Sent on ")
+
+
+def test_process_snippet_text_no_longer_substitutes_legacy_single_brace(expander):
+    """Legacy single-brace {date} is a clean break - it must paste literally now."""
+    result = expander.process_snippet_text("Sent on {date}")
+    assert result == "Sent on {date}"
+
+
+def test_process_snippet_text_substitutes_double_brace_custom_placeholder(dummy_pynput):
+    """Custom placeholders substitute via {{name}}, not the legacy {name}."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = [
+        {"name": "email", "value": "me@example.com", "is_encrypted": False}
+    ]
+    db.get_enabled_trigger_index.return_value = []
+
+    custom_expander = SnippetExpander(snippets_db=db, parent=MagicMock(), settings_provider=lambda: {})
+
+    assert custom_expander.process_snippet_text("Reach me at {{email}}") == "Reach me at me@example.com"
+    assert custom_expander.process_snippet_text("Reach me at {email}") == "Reach me at {email}"
+
+
+def test_process_snippet_text_nested_snippet_still_uses_single_brace(dummy_pynput):
+    """Nested {/trigger} references are a different, unrelated syntax and must be unaffected."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = [
+        {"id": 1, "trigger": "/sig", "paste_style": "Clipboard", "return_press": False},
+        {"id": 2, "trigger": "/nested", "paste_style": "Clipboard", "return_press": False},
+    ]
+    bodies = {
+        "/sig": {"id": 1, "trigger": "/sig", "snippet": "Regards, {/nested}"},
+        "/nested": {"id": 2, "trigger": "/nested", "snippet": "Alex"},
+    }
+    db.get_snippet_by_trigger.side_effect = lambda trigger: bodies[trigger]
+
+    nested_expander = SnippetExpander(snippets_db=db, parent=MagicMock(), settings_provider=lambda: {})
+
+    assert nested_expander.process_snippet_text("Regards, {/nested}") == "Regards, Alex"
+
+
+def test_process_snippet_text_unknown_double_brace_left_literal(expander):
+    """An unrecognized/typo'd {{name}} must not be misread as a nested-snippet reference."""
+    result = expander.process_snippet_text("Hi {{typo_name}}")
+    assert result == "Hi {{typo_name}}"
+    assert "Error" not in result
+
+
+def test_has_encrypted_placeholders_checks_double_brace_form(dummy_pynput):
+    """has_encrypted_placeholders() must key off {{name}}, matching the new substitution syntax."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = [
+        {"name": "secret", "value": "cipher", "is_encrypted": True}
+    ]
+    db.get_enabled_trigger_index.return_value = []
+
+    enc_expander = SnippetExpander(snippets_db=db, parent=MagicMock(), settings_provider=lambda: {})
+
+    assert enc_expander.has_encrypted_placeholders("Value: {{secret}}") is True
+    assert enc_expander.has_encrypted_placeholders("Value: {secret}") is False

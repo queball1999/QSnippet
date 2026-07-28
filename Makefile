@@ -25,6 +25,12 @@ endif
 run:
 	$(PYTHON) $(MAIN)
 
+test:
+	$(PYTHON) -m pytest
+
+benchmark:
+	$(PYTHON) -m pytest --benchmark
+
 build:
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\local_build.ps1"

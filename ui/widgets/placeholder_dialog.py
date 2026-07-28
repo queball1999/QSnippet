@@ -271,7 +271,7 @@ class PlaceholderDialog(QDialog):
 
     def set_value_placeholder_hint(self, placeholder_name: str | None = None):
         """Set context-aware hint text for the replacement value field."""
-        token = f"{{{placeholder_name}}}" if placeholder_name else "{placeholder}"
+        token = f"{{{{{placeholder_name}}}}}" if placeholder_name else "{{placeholder}}"
         self.value_input.setPlaceholderText(
             f"Text that will replace {token} when a snippet is expanded..."
         )
@@ -345,7 +345,7 @@ class PlaceholderDialog(QDialog):
             # Show system placeholder info (read-only)
             ph = next((p for p in SYSTEM_PLACEHOLDERS if p["name"] == name), None)
             value_preview = ph["value"] if ph else ""
-            self.editor_title.setText(f"Placeholder: {{{name}}}")
+            self.editor_title.setText(f"Placeholder: {{{{{name}}}}}")
             self.set_value_placeholder_hint(name)
             self.system_notice.show()
             self.name_input.setText(name)
@@ -365,7 +365,7 @@ class PlaceholderDialog(QDialog):
             logger.debug("on_row_selected: placeholder '%s' (id=%s) is_encrypted=%s from DB",
                         name, self.selected_row_id, is_encrypted)
 
-            self.editor_title.setText(f"Placeholder: {{{name}}}")
+            self.editor_title.setText(f"Placeholder: {{{{{name}}}}}")
             self.set_value_placeholder_hint(name)
             self.system_notice.hide()
             self.name_input.setText(name)
@@ -480,7 +480,7 @@ class PlaceholderDialog(QDialog):
         if not hasattr(window, "show_vault_unlock"):
             return
         name = self.name_input.text().strip()
-        message = f"Unlock the vault to view {{{name}}}" if name else "Unlock the vault to view this placeholder"
+        message = f"Unlock the vault to view {{{{{name}}}}}" if name else "Unlock the vault to view this placeholder"
         window.show_vault_unlock(message=message, on_success=self.on_row_selected)
 
     def validate_name(self, text: str):
@@ -521,7 +521,7 @@ class PlaceholderDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Delete Placeholder",
-            f"Delete the custom placeholder {{{name}}}?\n\nThis cannot be undone.",
+            f"Delete the custom placeholder {{{{{name}}}}}?\n\nThis cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -599,7 +599,7 @@ class PlaceholderDialog(QDialog):
             if any(p["name"] == name for p in existing):
                 QMessageBox.warning(
                     self, "Duplicate Name",
-                    f"A custom placeholder named {{{name}}} already exists.\n"
+                    f"A custom placeholder named {{{{{name}}}}} already exists.\n"
                     "Please choose a different name or edit the existing one."
                 )
                 return
@@ -612,7 +612,7 @@ class PlaceholderDialog(QDialog):
             if conflict:
                 QMessageBox.warning(
                     self, "Duplicate Name",
-                    f"Another custom placeholder named {{{name}}} already exists."
+                    f"Another custom placeholder named {{{{{name}}}}} already exists."
                 )
                 return
             entry["id"] = self.selected_row_id

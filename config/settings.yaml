@@ -188,6 +188,20 @@ general:
         such as "500ms" or "5s". Set to "off" to disable the timeout so a
         partially-typed trigger never expires from inactivity.
 
+  dynamic_placeholders:
+    description: Configure how [[placeholder]] input prompts are shown before pasting.
+    dialog_mode:
+      type: string
+      value: "single_form"
+      default: "single_form"
+      options:
+        - "single_form"
+        - "sequential"
+      description: >
+        When a snippet contains [[placeholder]] fields, show them all at
+        once in a single form ("single_form") or one at a time as a
+        step-by-step wizard ("sequential").
+
   clipboard_behavior:
     description: Control how and when clipboard contents are cleared after copying a snippet.
     clipboard_timeout:
@@ -232,6 +246,17 @@ notices:
     default: []
     hidden: true
     description: List of notices that have been dismissed by the user.
+
+backups:
+  database_backups:
+    type: list
+    value: []
+    default: []
+    hidden: true
+    description: >
+      History of automatic pre-migration database backups (timestamp and
+      file paths), so a backup notice can be recalled later from
+      Help > Backup History even if its dialog was dismissed.
 
 saving:
   navigate_home_after_save:

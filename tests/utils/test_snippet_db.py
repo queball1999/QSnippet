@@ -2,7 +2,13 @@ import pytest
 import sqlite3
 from pathlib import Path
 
-from utils.snippet_db import SnippetDB, validate_snippet_entry, DatabaseValidationError
+from utils.snippet_db import (
+    SnippetDB,
+    validate_snippet_entry,
+    DatabaseValidationError,
+    SCHEMA_MIGRATION_VERSION,
+    rewrite_legacy_placeholder_braces,
+)
 from utils.vault_manager import VaultManager, VaultError
 
 
@@ -545,8 +551,12 @@ class TestVaultSchema:
         row = next(s for s in db.get_all_snippets() if s["trigger"] == "/vt")
         assert row["is_encrypted"] is False
 
-    def test_migrate_adds_column_to_existing_db(self, tmp_path):
+    def test_migrate_adds_column_to_existing_db(self, tmp_path, monkeypatch):
         """A database created without is_encrypted gets the column added."""
+        # This file has a real row and predates schema-version tracking, so
+        # opening it below legitimately triggers the pre-migration backup -
+        # redirect it away from the real user profile for this test.
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
         db_path = tmp_path / "legacy.db"
 
         conn = sqlite3.connect(db_path)
@@ -590,7 +600,8 @@ class TestVaultFolders:
     def test_add_and_get_vault_folder(self, temp_snippet_db_path):
         db = SnippetDB(temp_snippet_db_path)
         db.add_vault_folder("Secrets")
-        assert db.get_vault_folders() == ["Secrets"]
+        # "Vault" is auto-registered as the reserved folder on every startup.
+        assert set(db.get_vault_folders()) == {"Vault", "Secrets"}
 
     def test_add_duplicate_folder_is_safe(self, temp_snippet_db_path):
         db = SnippetDB(temp_snippet_db_path)
@@ -629,7 +640,8 @@ class TestVaultFolders:
         for name in ["Alpha", "Beta", "Gamma"]:
             db.add_vault_folder(name)
         folders = db.get_vault_folders()
-        assert set(folders) == {"Alpha", "Beta", "Gamma"}
+        # "Vault" is auto-registered as the reserved folder on every startup.
+        assert set(folders) == {"Alpha", "Beta", "Gamma", "Vault"}
 
 
 class TestVaultSnippetOps:
@@ -798,3 +810,82 @@ class TestInsertSnippetVaultAware:
         entry = {**self._BASE, "folder": "Secret", "trigger": "/novm2"}
         with pytest.raises(VaultError):
             db.insert_snippet_vault_aware(entry, vault_manager=None)
+
+
+class TestPlaceholderBraceMigration:
+    _BASE = {
+        "enabled": True, "label": "Test", "trigger": "/t",
+        "snippet": "plain text", "paste_style": "clipboard",
+        "return_press": False, "folder": "General", "tags": "",
+    }
+
+    def test_rewrite_legacy_placeholder_braces_rewrites_known_names(self):
+        result = rewrite_legacy_placeholder_braces(
+            "Sent {date}, from {myph}, but not {unrelated}",
+            custom_names={"myph"},
+        )
+        assert result == "Sent {{date}}, from {{myph}}, but not {unrelated}"
+
+    def test_rewrite_legacy_placeholder_braces_is_idempotent(self):
+        once = rewrite_legacy_placeholder_braces("Sent {date}", custom_names=set())
+        twice = rewrite_legacy_placeholder_braces(once, custom_names=set())
+        assert once == "Sent {{date}}"
+        assert twice == once
+
+    def test_rewrite_legacy_placeholder_braces_ignores_unknown_names(self):
+        text = "{notaplaceholder} and {alsonot}"
+        assert rewrite_legacy_placeholder_braces(text, custom_names=set()) == text
+
+    def test_migrate_placeholder_braces_rewrites_non_encrypted_snippets(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_custom_placeholder({"name": "myph", "value": "x", "description": "", "is_encrypted": False})
+        entry = {**self._BASE, "trigger": "/legacy", "snippet": "Hi {date}, {myph}, and {unrelated}"}
+        db.insert_snippet(entry)
+
+        db.migrate_placeholder_braces()
+
+        migrated = db.get_snippet_by_trigger("/legacy")
+        assert migrated["snippet"] == "Hi {{date}}, {{myph}}, and {unrelated}"
+
+    def test_migrate_placeholder_braces_skips_encrypted_snippets(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        entry = {**self._BASE, "trigger": "/enc", "snippet": "ciphertext-with-{date}-in-it"}
+        db.insert_snippet(entry)
+        # is_encrypted isn't settable via plain insert_snippet (that's the
+        # vault-aware insert path) - flip it directly for this test.
+        db.conn.execute("UPDATE snippets SET is_encrypted = 1 WHERE trigger = '/enc'")
+
+        db.migrate_placeholder_braces()
+
+        untouched = db.get_snippet_by_trigger("/enc")
+        assert untouched["snippet"] == "ciphertext-with-{date}-in-it"
+
+    def test_startup_migration_backs_up_before_rewriting_existing_data(self, temp_snippet_db_path, tmp_path, monkeypatch):
+        """Simulate upgrading a pre-existing DB (schema_version 0, has data):
+        the next SnippetDB() construction should back up before migrating."""
+        downloads = tmp_path / "FakeHome" / "Downloads"
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
+
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/pre-existing", "snippet": "Hi {date}"})
+        # Simulate a DB that predates schema-version tracking.
+        db.conn.execute("PRAGMA user_version = 0")
+        assert db.pending_migration_backup_path is None  # fresh DB, nothing backed up yet
+
+        db2 = SnippetDB(temp_snippet_db_path)
+
+        assert db2.pending_migration_backup_path is not None
+        assert db2.pending_migration_backup_path.exists()
+        assert db2.pending_migration_export_path is not None
+        assert db2.pending_migration_export_path.exists()
+        assert db2.pending_migration_export_path.parent == downloads
+        assert db2.get_schema_version() == SCHEMA_MIGRATION_VERSION
+        migrated = db2.get_snippet_by_trigger("/pre-existing")
+        assert migrated["snippet"] == "Hi {{date}}"
+
+    def test_fresh_database_does_not_trigger_backup(self, temp_snippet_db_path, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
+        db = SnippetDB(temp_snippet_db_path)
+        assert db.pending_migration_backup_path is None
+        assert db.pending_migration_export_path is None
+        assert not (tmp_path / "FakeHome" / "Downloads").exists()

@@ -77,6 +77,7 @@ class VaultManager:
         self.lock_callback: Optional[Callable] = None
         self._failed_unlock_attempts: int = 0
         self._aad_migration_done: bool = False
+        self._brace_migration_done: bool = False
 
     # --State
 
@@ -201,6 +202,7 @@ class VaultManager:
                 self.key[i] = 0
         self.key = None
         self._aad_migration_done = False
+        self._brace_migration_done = False
         if self.timer:
             self.timer.cancel()
             self.timer = None
@@ -638,6 +640,43 @@ class VaultManager:
 
         self._aad_migration_done = True
         logger.info("AAD migration pass complete")
+
+    def migrate_existing_vault_snippets_braces(self, db) -> None:
+        """Rewrite legacy {name} placeholders to {{name}} inside encrypted snippet bodies.
+
+        Mirrors migrate_existing_vault_snippets_aad(): encrypted snippet
+        bodies are ciphertext and can only be rewritten while the vault is
+        unlocked, so this runs opportunistically here instead of at DB-open
+        time (see SnippetDB.migrate_placeholder_braces() for the eager,
+        non-encrypted pass). Safe to call repeatedly - rows with nothing
+        left to rewrite are simply skipped. No-op if the vault is locked.
+        """
+        if not self.is_unlocked():
+            return
+
+        from utils.snippet_db import rewrite_legacy_placeholder_braces
+
+        if not db._backup_done_this_session:
+            db.pending_migration_backup_path, db.pending_migration_export_path = (
+                db.backup_before_migration()
+            )
+            db._backup_done_this_session = True
+
+        custom_names = {ph["name"] for ph in db.get_all_custom_placeholders()}
+
+        for s in db.get_vault_snippets():
+            try:
+                aad = (s.get("vault_uuid") or "").encode()
+                plain = self.decrypt(s["snippet"], aad=aad)
+                rewritten = rewrite_legacy_placeholder_braces(plain, custom_names)
+                if rewritten != plain:
+                    new_blob = self.encrypt(rewritten, aad=aad)
+                    db.update_snippet_content(s["id"], new_blob)
+            except Exception:
+                logger.warning("Brace migration skipped for snippet id=%s", s.get("id"))
+
+        self._brace_migration_done = True
+        logger.info("Placeholder brace migration pass complete")
 
     @staticmethod
     def derive_key(password: str, salt: bytes) -> bytearray:

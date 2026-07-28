@@ -260,7 +260,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_input = QTextEdit(self)
         self.snippet_input.setObjectName("SnippetInput")
         self.snippet_input.setToolTip(self.snippet_tooltip)
-        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type { to insert placeholders...")
+        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field...")
         self.snippet_input.setFocusPolicy(Qt.StrongFocus)
         self.snippet_input.installEventFilter(self)
         self.snippet_input.setMinimumHeight(100)
@@ -378,7 +378,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.reveal_snippet_btn.hide()
         self.snippet_input.setReadOnly(False)
         self.snippet_input.setPlaceholderText(
-            "Text that appears when you type a shortcut. Type { to insert placeholders..."
+            "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
         )
         self.new_input.clear()
         self.trigger_input.clear()
@@ -439,7 +439,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 self.reveal_snippet_btn.hide()
         else:
             self.snippet_input.setPlaceholderText(
-                "Text that appears when you type a shortcut. Type { to insert placeholders..."
+                "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
             )
             self.snippet_input.setReadOnly(False)
             self.reveal_snippet_btn.hide()
@@ -787,14 +787,14 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
         # Fill with placeholders + sub-snippets
         self.completions = [
-            "{date}", "{date_long}", "{time}", "{time_ampm}", "{datetime}",
-            "{weekday}", "{month}", "{year}", "{greeting}", "{location}"
+            "{{date}}", "{{date_long}}", "{{time}}", "{{time_ampm}}", "{{datetime}}",
+            "{{weekday}}", "{{month}}", "{{year}}", "{{greeting}}", "{{location}}"
         ]
 
         # Add user-defined custom placeholders
         try:
             for ph in self.main.snippet_db.get_all_custom_placeholders():
-                token = "{" + ph["name"] + "}"
+                token = "{{" + ph["name"] + "}}"
                 if token not in self.completions:
                     self.completions.append(token)
         except Exception:
@@ -849,9 +849,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
             cursor.setPosition(start, QTextCursor.KeepAnchor)
             cursor.removeSelectedText()
 
-        # Strip and format text
-        formatted = item.text().strip("{}")
-        completion = f"{{{formatted}}}"
+        # Strip and format text. Placeholders (system/custom) use {{name}};
+        # plain snippet triggers use {/trigger} - a nested-snippet reference,
+        # which is a different, unrelated single-brace syntax.
+        raw = item.text()
+        formatted = raw.strip("{}")
+        if raw.startswith("{"):
+            completion = f"{{{{{formatted}}}}}"
+        else:
+            completion = f"{{{formatted}}}"
 
         # Insert the full completion
         cursor.insertText(completion)
@@ -912,7 +918,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
 
             if c.startswith("{"):
                 # Check inside placeholder name
-                if raw_prefix in candidate[1:-1]:  # skip surrounding { }
+                if raw_prefix in candidate.strip("{}"):  # skip surrounding {{ }}
                     QListWidgetItem(c, self.intellisense_popup)
             else:
                 # Plain snippet trigger
@@ -1005,7 +1011,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.snippet_input.setPlainText(self.decrypted_snippet_cache)
             self.snippet_input.setReadOnly(False)
             self.snippet_input.setPlaceholderText(
-                "Text that appears when you type a shortcut. Type { to insert placeholders..."
+                "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
             )
             self.reveal_snippet_btn.setIcon(self.icon_eye_off)
             self.reveal_snippet_btn.setToolTip("Hide snippet")
@@ -1056,7 +1062,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
         if obj is self.snippet_input and event.type() == QEvent.KeyPress:
             # Detect opening {
             if event.text() == "{":
-                self.start_brace_pos = self.snippet_input.textCursor().position()
+                cursor_pos = self.snippet_input.textCursor().position()
+                # If this is a second "{" typed right after one we're already
+                # tracking (e.g. manually typing "{{"), keep the original
+                # start position so completion-insertion replaces the whole
+                # "{{" sequence instead of leaving a stray leading "{" behind.
+                if getattr(self, "start_brace_pos", None) != cursor_pos - 1:
+                    self.start_brace_pos = cursor_pos
                 self.show_intellisense()
                 QTimer.singleShot(0, self.update_prefix)
                 return False
@@ -1064,25 +1076,29 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 self.intellisense_popup.hide()
 
             if self.intellisense_popup.isVisible():
-                if event.key() == Qt.Key_Down:
+                # Only treat these as popup-navigation keys when pressed
+                # unmodified - e.g. Shift+Right/Up/Down are text-selection
+                # shortcuts and must reach the editor, not be swallowed here.
+                no_modifiers = event.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
+                if event.key() == Qt.Key_Down and no_modifiers:
                     row = (self.intellisense_popup.currentRow() + 1) % self.intellisense_popup.count()
                     self.intellisense_popup.setCurrentRow(row)
                     return True
-                elif event.key() == Qt.Key_Up:
+                elif event.key() == Qt.Key_Up and no_modifiers:
                     row = (self.intellisense_popup.currentRow() - 1) % self.intellisense_popup.count()
                     self.intellisense_popup.setCurrentRow(row)
                     return True
-                elif event.key() in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter):
+                elif event.key() in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter) and no_modifiers:
                     self.insert_completion(self.intellisense_popup.currentItem())
                     return True
-                elif event.key() in (Qt.Key_Escape, Qt.Key_Right):
+                elif event.key() in (Qt.Key_Escape, Qt.Key_Right) and no_modifiers:
                     self.intellisense_popup.hide()
                     return True
-                elif event.key() == Qt.Key_Space:
+                elif event.key() == Qt.Key_Space and no_modifiers:
                     # Hide the popup but still insert the space into the text
                     self.intellisense_popup.hide()
                     return False
-                elif event.key() == Qt.Key_Backspace:
+                elif event.key() == Qt.Key_Backspace and no_modifiers:
                     QTimer.singleShot(0, self.update_prefix)
 
                     # Check if user deleted the opening brace

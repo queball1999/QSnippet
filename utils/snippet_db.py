@@ -1,15 +1,57 @@
 import re
+import shutil
 import sqlite3
 import logging
 import random
 import threading
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
 
 from .file_utils import FileUtils
 
 logger = logging.getLogger(__name__)
+
+# Bump whenever a new startup migration is added below. Gates the one-time
+# pre-migration backup so it only fires when a migration will actually run,
+# not on every normal launch.
+SCHEMA_MIGRATION_VERSION = 1
+
+# Names substituted by SnippetExpander.process_snippet_text() as {{name}}.
+# Mirrors the "replacements" dict in utils/keyboard_utils.py; kept as an
+# independent constant here (like the existing duplicate list in
+# ui/widgets/snippet_form.py) to avoid a circular import with keyboard_utils,
+# which already imports SnippetDB.
+SYSTEM_PLACEHOLDER_NAMES = {
+    "date", "date_long", "weekday", "month", "year",
+    "time", "time_ampm", "hour", "minute", "second",
+    "datetime", "greeting",
+}
+
+
+def rewrite_legacy_placeholder_braces(text: str, custom_names: set) -> str:
+    """
+    Rewrite known {name} placeholder tokens to {{name}} in *text*.
+
+    Only tokens matching a known system or custom placeholder name are
+    rewritten; unrelated single-brace text (code, JSON, etc.) is left
+    untouched. Anchored with negative lookaround so it is safe to run
+    repeatedly - an already-migrated {{name}} is never re-wrapped.
+
+    Args:
+        text (str): Snippet body to rewrite.
+        custom_names (set): Custom placeholder names known at call time.
+
+    Returns:
+        str: The rewritten text.
+    """
+    names = SYSTEM_PLACEHOLDER_NAMES | set(custom_names)
+    if not names or not text:
+        return text
+    alternation = "|".join(re.escape(name) for name in sorted(names, key=len, reverse=True))
+    pattern = re.compile(r"(?<!\{)\{(" + alternation + r")\}(?!\})")
+    return pattern.sub(r"{{\1}}", text)
 
 
 # Custom exception classes for specific error conditions
@@ -120,6 +162,11 @@ class SnippetDB:
         self.lock = threading.RLock()
         self.closed = False
         self.was_freshly_created = False
+        # Set below if a startup migration backs up the database; picked up
+        # by the UI once it's ready, to show a one-time informational notice.
+        self.pending_migration_backup_path: Path | None = None
+        self.pending_migration_export_path: Path | None = None
+        self._backup_done_this_session = False
         logger.debug("SQLite path: %s", db_path)
         self.conn = sqlite3.connect(
             self.db_path,
@@ -130,6 +177,17 @@ class SnippetDB:
         self.configure_connection()
         self.fts_available = False
         self.create_table()
+
+        # Back up once, before any migration below touches existing data.
+        # Skipped for a brand-new (empty) database - there's nothing yet to
+        # protect, and every fresh install would otherwise get a pointless
+        # backup+export on first launch.
+        if self.get_schema_version() < SCHEMA_MIGRATION_VERSION and self.has_any_snippets():
+            self.pending_migration_backup_path, self.pending_migration_export_path = (
+                self.backup_before_migration()
+            )
+            self._backup_done_this_session = True
+
         self.migrate_vault_schema()
         self.create_indexes()
         self.setup_fts()
@@ -143,9 +201,78 @@ class SnippetDB:
         self.create_custom_placeholders_table()
         self.migrate_custom_placeholders_vault_schema()
         self.migrate_aad_binding_schema()
+        self.migrate_placeholder_braces()
         self.seed_default_custom_placeholders()
         self.seed_empty_db()
+
+        if self.get_schema_version() < SCHEMA_MIGRATION_VERSION:
+            self.set_schema_version(SCHEMA_MIGRATION_VERSION)
+
         logger.info("SnippetDB initialized successfully")
+
+    def get_schema_version(self) -> int:
+        """Return the app-defined schema/data migration version (SQLite PRAGMA user_version)."""
+        cur = self.conn.execute("PRAGMA user_version").fetchone()
+        return cur[0] if cur else 0
+
+    def set_schema_version(self, version: int) -> None:
+        """Record that migrations up to *version* have been applied."""
+        with self.lock:
+            self.conn.execute(f"PRAGMA user_version = {int(version)}")
+
+    def has_any_snippets(self) -> bool:
+        """Cheap check used to skip pre-migration backups on a fresh install."""
+        with self.managed_connection() as conn:
+            cur = conn.execute("SELECT 1 FROM snippets LIMIT 1")
+            return cur.fetchone() is not None
+
+    def backup_before_migration(self, downloads_dir: Path | None = None) -> tuple[Path | None, Path | None]:
+        """
+        Copy the raw database file and export a portable YAML snapshot
+        before a migration modifies anything.
+
+        Vault-encrypted snippet bodies are exported with their ciphertext
+        preserved as-is (same as get_all_snippets()) - still protected by
+        the vault password, so no password prompt is needed here.
+
+        Args:
+            downloads_dir (Path | None): Override for the YAML export
+                directory (defaults to ~/Downloads). Exists so tests/callers
+                can redirect it instead of writing into a real user profile.
+
+        Returns:
+            tuple[Path | None, Path | None]: (db_backup_path, export_path),
+            either of which may be None if that step failed. Failures are
+            logged but never raised - a failed backup must not block startup.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        db_backup_path: Path | None = None
+        export_path: Path | None = None
+
+        try:
+            backup_dir = self.db_path.parent / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            db_backup_path = backup_dir / f"{self.db_path.stem}-backup-{timestamp}{self.db_path.suffix}"
+            with self.lock:
+                self.conn.commit()
+                shutil.copy2(self.db_path, db_backup_path)
+            logger.info("Pre-migration database backup written to %s", db_backup_path)
+        except Exception:
+            logger.exception("Pre-migration database file backup failed")
+            db_backup_path = None
+
+        try:
+            downloads = Path(downloads_dir) if downloads_dir else Path.home() / "Downloads"
+            downloads.mkdir(parents=True, exist_ok=True)
+            export_path = downloads / f"qsnippets-backup-{timestamp}.yaml"
+            clean = [{k: v for k, v in s.items() if k != "id"} for s in self.get_all_snippets()]
+            FileUtils.export_snippets_yaml(export_path, clean)
+            logger.info("Pre-migration snippet export written to %s", export_path)
+        except Exception:
+            logger.exception("Pre-migration snippet export failed")
+            export_path = None
+
+        return db_backup_path, export_path
 
     def configure_connection(self) -> None:
         """
@@ -1289,6 +1416,32 @@ class SnippetDB:
                         logger.info("Migrated: added vault_uuid to %s", table)
         except sqlite3.Error as exc:
             logger.warning("AAD binding schema migration failed: %s", exc)
+
+    def migrate_placeholder_braces(self) -> None:
+        """Rewrite {name} placeholders to {{name}} in non-encrypted snippet bodies (migration).
+
+        Only rewrites tokens matching a known system or custom placeholder
+        name; unrelated single-brace text is left untouched. Vault-encrypted
+        snippet bodies are ciphertext and cannot be rewritten here - see
+        VaultManager.migrate_existing_vault_snippets_braces(), which handles
+        those opportunistically on the next vault unlock. Safe to call
+        repeatedly: the rewrite is idempotent and a no-op once applied.
+        """
+        try:
+            custom_names = {ph["name"] for ph in self.get_all_custom_placeholders()}
+            updates = []
+            for s in self.get_all_snippets():
+                if s.get("is_encrypted"):
+                    continue
+                original = s.get("snippet", "")
+                rewritten = rewrite_legacy_placeholder_braces(original, custom_names)
+                if rewritten != original:
+                    updates.append((s["id"], rewritten))
+            if updates:
+                self.bulk_update_snippet_content(updates)
+                logger.info("Migrated placeholder braces in %d snippet(s)", len(updates))
+        except sqlite3.Error as exc:
+            logger.warning("Placeholder brace migration failed: %s", exc)
 
     def migrate_custom_placeholders_vault_schema(self) -> None:
         """Add is_encrypted column to custom_placeholders if it does not exist (migration)."""
