@@ -95,19 +95,78 @@ def extract_dynamic_placeholder_names(text: str) -> list[str]:
     return names
 
 
-def substitute_dynamic_placeholders(text: str, values: dict) -> str:
+# Sentinel marking where an empty placeholder used to be, so the surrounding
+# whitespace can be tidied without disturbing whitespace elsewhere in the text.
+EMPTY_PLACEHOLDER_MARK = "\uE000"
+
+
+def collapse_empty_placeholder_gaps(text: str) -> str:
+    """
+    Tidy the whitespace left behind by placeholders the user submitted empty.
+
+    Each removed token is marked with EMPTY_PLACEHOLDER_MARK first, so only the
+    gap it created is touched. Rules, applied in order:
+
+      1. A line containing nothing but the token disappears entirely, rather
+         than being left as a blank line.
+      2. "a [[x]] b"     -> "a b"        (one separating space survives)
+      3. "Hello [[x]], hi" -> "Hello, hi"  (no space stranded before punctuation)
+      4. "[[x]] start"   -> "start"      (no leading space)
+
+    Args:
+        text (str): Text whose empty tokens have been replaced by the sentinel.
+
+    Returns:
+        str: The text with the sentinel removed and its gap collapsed.
+    """
+    mark = re.escape(EMPTY_PLACEHOLDER_MARK)
+
+    # 1. Token was the entire line - drop the line, including its newline.
+    text = re.sub(rf"^[ \t]*{mark}[ \t]*\r?\n", "", text, flags=re.MULTILINE)
+    # ...and the same case on a final line with no trailing newline.
+    text = re.sub(rf"\r?\n[ \t]*{mark}[ \t]*$", "", text)
+
+    # 2. Whitespace on both sides - keep exactly one space.
+    text = re.sub(rf"[ \t]+{mark}[ \t]+", " ", text)
+
+    # 3. Whitespace only before the token (end of line, or punctuation after).
+    text = re.sub(rf"[ \t]+{mark}", "", text)
+
+    # 4. Whitespace only after the token (start of line).
+    text = re.sub(rf"{mark}[ \t]+", "", text)
+
+    # 5. Anything left (token flush against text on both sides).
+    return text.replace(EMPTY_PLACEHOLDER_MARK, "")
+
+
+def substitute_dynamic_placeholders(text: str, values: dict,
+                                    collapse_empty: bool = True) -> str:
     """
     Replace [[name]] tokens in text with user-supplied values.
 
     Args:
         text (str): The text containing [[name]] tokens.
         values (dict): Mapping of placeholder name to its replacement value.
+        collapse_empty (bool): When True, a token whose value is empty is
+            removed along with the whitespace it would otherwise strand (a
+            doubled space, a space before a comma, or a now-blank line).
+            Pass False to substitute the empty string literally.
 
     Returns:
         str: The text with all known [[name]] tokens substituted.
     """
+    had_empty = False
     for name, value in values.items():
-        text = text.replace(f"[[{name}]]", value)
+        token = f"[[{name}]]"
+        if not value and collapse_empty:
+            if token in text:
+                had_empty = True
+                text = text.replace(token, EMPTY_PLACEHOLDER_MARK)
+        else:
+            text = text.replace(token, value)
+
+    if had_empty:
+        text = collapse_empty_placeholder_gaps(text)
     return text
 
 

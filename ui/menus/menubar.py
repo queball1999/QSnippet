@@ -151,21 +151,26 @@ class MenuBar(QMenuBar):
         datetime_menu = tools_menu.addMenu(datetime_icon, "Date/Time")
         context_menu  = tools_menu.addMenu(context_icon, "Context")
 
-        # Define token groups (no icons for individual items)
+        # Define token groups (no icons for individual items).
+        # Tokens use the {{name}} form resolved by
+        # SnippetExpander.process_snippet_text(); single braces are legacy and
+        # are only rewritten on load by rewrite_legacy_placeholder_braces().
         placeholders = {
             datetime_menu: {
-                "Date": ("{date}", "Insert date (YYYY-MM-DD)"),
-                "Date (long)": ("{date_long}", "Insert long date"),
-                "Time": ("{time}", "Insert time (24hr)"),
-                "Time (12hr)": ("{time_ampm}", "Insert time (12hr)"),
-                "Date & Time": ("{datetime}", "Insert full datetime"),
-                "Weekday": ("{weekday}", "Insert weekday name"),
-                "Month": ("{month}", "Insert month name"),
-                "Year": ("{year}", "Insert year"),
+                "Date": ("{{date}}", "Insert date (YYYY-MM-DD)"),
+                "Date (long)": ("{{date_long}}", "Insert long date"),
+                "Time": ("{{time}}", "Insert time (24hr)"),
+                "Time (12hr)": ("{{time_ampm}}", "Insert time (12hr)"),
+                "Date & Time": ("{{datetime}}", "Insert full datetime"),
+                "Weekday": ("{{weekday}}", "Insert weekday name"),
+                "Month": ("{{month}}", "Insert month name"),
+                "Year": ("{{year}}", "Insert year"),
+                "Hour": ("{{hour}}", "Insert hour (24hr)"),
+                "Minute": ("{{minute}}", "Insert minute"),
+                "Second": ("{{second}}", "Insert second"),
             },
             context_menu: {
-                "Greeting": ("{greeting}", "Insert context-aware greeting"),
-                "Location": ("{location}", "Insert user-defined location"),
+                "Greeting": ("{{greeting}}", "Insert context-aware greeting"),
             }
         }
 
@@ -330,7 +335,7 @@ class MenuBar(QMenuBar):
             return
 
         for ph in placeholders:
-            token = "{" + ph["name"] + "}"
+            token = "{{" + ph["name"] + "}}"
             tip = ph.get("description") or f"Insert {token}"
             act = QAction(ph["name"], self)
             act.setStatusTip(tip)
@@ -389,7 +394,7 @@ class MenuBar(QMenuBar):
         Falls back to the insert() method if specialized cursor methods aren't available.
 
         Args:
-            token (str): The token string to insert (e.g., "{date}", "{time}").
+            token (str): The token string to insert (e.g., "{{date}}", "{{time}}").
 
         Returns:
             None

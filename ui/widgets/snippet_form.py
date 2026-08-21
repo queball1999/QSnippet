@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QEvent, QTimer, QSize
 from PySide6.QtGui import QTextCursor, QIcon
 from utils.file_utils import FileUtils
+from utils.keyboard_utils import extract_dynamic_placeholder_names
 from .QAnimatedSwitch import QAnimatedSwitch
 from .CheckableComboBox import CheckableComboBox
-from .password_field import svg_icon, _EYE_SVG, _EYE_OFF_SVG
+from .password_field import eye_icons
 
 # Fixed-width mask shown for encrypted snippet content so the real length is never leaked
 SNIPPET_MASK = "•" * 12
@@ -243,8 +244,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.reveal_snippet_btn.setCursor(Qt.PointingHandCursor)
         self.reveal_snippet_btn.setFlat(True)
         self.reveal_snippet_btn.setFixedSize(26, 26)
-        self.icon_eye_on = svg_icon(_EYE_SVG)
-        self.icon_eye_off = svg_icon(_EYE_OFF_SVG)
+        self.icon_eye_on, self.icon_eye_off = eye_icons()
         self.reveal_snippet_btn.setIcon(self.icon_eye_on)
         self.reveal_snippet_btn.setToolTip("Show snippet")
         self.reveal_snippet_btn.clicked.connect(self.on_reveal_snippet_toggled)
@@ -260,7 +260,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.snippet_input = QTextEdit(self)
         self.snippet_input.setObjectName("SnippetInput")
         self.snippet_input.setToolTip(self.snippet_tooltip)
-        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field...")
+        self.snippet_input.setPlaceholderText("Text that appears when you type a shortcut. Type {{ to insert placeholders, or [[ for a fill-in field...")
         self.snippet_input.setFocusPolicy(Qt.StrongFocus)
         self.snippet_input.installEventFilter(self)
         self.snippet_input.setMinimumHeight(100)
@@ -283,6 +283,17 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.intellisense_popup.itemClicked.connect(self.insert_completion)
         # Fill list
         self.fill_intellisense_popup_list()
+
+        # Second popup: dynamic ([[name]]) placeholder intellisense, triggered on "[["
+        self.dynamic_placeholder_popup = QListWidget(self)
+        self.dynamic_placeholder_popup.hide()
+        self.dynamic_placeholder_popup.setWindowFlags(
+            Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        )
+        self.dynamic_placeholder_popup.setFocusPolicy(Qt.NoFocus)
+        self.dynamic_placeholder_popup.itemActivated.connect(self.insert_dynamic_completion)
+        self.dynamic_placeholder_popup.itemClicked.connect(self.insert_dynamic_completion)
+        self.fill_dynamic_placeholder_popup_list()
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -378,7 +389,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.reveal_snippet_btn.hide()
         self.snippet_input.setReadOnly(False)
         self.snippet_input.setPlaceholderText(
-            "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
+            "Text that appears when you type a shortcut. Type {{ to insert placeholders, or [[ for a fill-in field..."
         )
         self.new_input.clear()
         self.trigger_input.clear()
@@ -439,7 +450,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 self.reveal_snippet_btn.hide()
         else:
             self.snippet_input.setPlaceholderText(
-                "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
+                "Text that appears when you type a shortcut. Type {{ to insert placeholders, or [[ for a fill-in field..."
             )
             self.snippet_input.setReadOnly(False)
             self.reveal_snippet_btn.hide()
@@ -730,7 +741,15 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """Show a live character counter when content is within 20% of its limit."""
         if text_len >= int(max_len * 0.8):
             counter_label.setText(f"{text_len:,} / {max_len:,}")
-            counter_label.setStyleSheet("color: red;" if text_len >= max_len else "color: orange;")
+            # Colour comes from the palette, not a literal, so the counter
+            # stays readable on every theme.
+            from ui.theme_manager import ThemeManager
+            tm = ThemeManager.get_instance()
+            colors = tm.get_colors() if tm else {}
+            over = text_len >= max_len
+            counter_label.setStyleSheet(
+                f"color: {colors.get('danger', '#fc4f4f') if over else colors.get('warning', '#ffc107')};"
+            )
             counter_label.show()
         else:
             counter_label.hide()
@@ -869,8 +888,11 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         Update the intellisense popup based on current cursor position.
 
-        Recomputes the prefix from the most recent opening brace and filters
-        the popup items accordingly. Hides the popup if no opening brace is found.
+        Opens on "{{" (not a single "{") so old placeholders/triggers only
+        pop up once the user commits to the double-brace syntax. Recomputes
+        the prefix from the nearest preceding "{{" and filters the popup
+        items accordingly; hides the popup once a closing "}" or newline
+        appears between that "{{" and the cursor.
 
         Returns:
             None
@@ -882,17 +904,44 @@ Snippets come in handy for text you enter often or for standard messages you sen
         current_text = self.snippet_input.toPlainText()
         pos = cursor.position()
 
-        # Look backwards for last '{'
-        start = current_text.rfind("{", 0, pos)
+        # Look backwards for the nearest opening "{{"
+        start = current_text.rfind("{{", 0, pos)
         if start != -1:
-            # make sure the char before cursor is still a '{'
-            if pos > 0 and current_text[pos - 1] == "{":
+            segment = current_text[start:pos]
+            if "}" not in segment and "\n" not in segment:
                 self.start_brace_pos = start
                 self.show_intellisense()
-            prefix = current_text[start:pos]
-            self.filter_intellisense(prefix)
-        else:
-            self.intellisense_popup.hide()
+                self.filter_intellisense(segment)
+                return
+        self.intellisense_popup.hide()
+
+    def update_bracket_prefix(self):
+        """
+        Update the dynamic placeholder popup based on current cursor position.
+
+        Mirrors update_prefix but for the "[[" dynamic-placeholder trigger:
+        opens on "[[", recomputes the prefix from the nearest preceding "[[",
+        and hides once a closing "]" or newline appears before the cursor.
+
+        Returns:
+            None
+        """
+        if not self.snippet_input.isVisible():
+            return
+
+        cursor = self.snippet_input.textCursor()
+        current_text = self.snippet_input.toPlainText()
+        pos = cursor.position()
+
+        start = current_text.rfind("[[", 0, pos)
+        if start != -1:
+            segment = current_text[start:pos]
+            if "]" not in segment and "\n" not in segment:
+                self.start_bracket_pos = start
+                self.show_dynamic_placeholder_intellisense()
+                self.filter_dynamic_placeholder_intellisense(segment)
+                return
+        self.dynamic_placeholder_popup.hide()
 
 
     def filter_intellisense(self, prefix: str):
@@ -929,6 +978,96 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.intellisense_popup.setCurrentRow(0)
         else:
             self.intellisense_popup.hide()
+
+    # ----- Dynamic ([[name]]) placeholder intellisense -----
+    def fill_dynamic_placeholder_popup_list(self):
+        """
+        Populate the dynamic placeholder popup with [[name]] tokens already
+        used across existing snippets, so previously-used fill-in field names
+        can be reused via autocomplete instead of retyped from scratch.
+
+        Returns:
+            None
+        """
+        self.dynamic_placeholder_popup.clear()
+        names = []
+        try:
+            for s in self.main.snippet_db.get_all_snippets():
+                if s.get("is_encrypted") or not s.get("snippet"):
+                    continue
+                for name in extract_dynamic_placeholder_names(s["snippet"]):
+                    if name not in names:
+                        names.append(name)
+        except Exception:
+            pass
+
+        self.dynamic_placeholder_completions = names
+        for c in names:
+            QListWidgetItem(c, self.dynamic_placeholder_popup)
+
+    def show_dynamic_placeholder_intellisense(self):
+        """
+        Display the dynamic placeholder popup near the cursor position.
+
+        Returns:
+            None
+        """
+        if not self.isVisible():
+            return
+
+        cursor = self.snippet_input.textCursor()
+        rect = self.snippet_input.cursorRect(cursor)
+        pos = self.snippet_input.mapToGlobal(rect.bottomRight())
+
+        self.dynamic_placeholder_popup.move(pos)
+        self.dynamic_placeholder_popup.show()
+        self.snippet_input.setFocus()
+
+    def insert_dynamic_completion(self, item):
+        """
+        Insert the selected dynamic placeholder name as [[name]] at the cursor.
+
+        Args:
+            item (QListWidgetItem): The selected completion item from the popup.
+
+        Returns:
+            None
+        """
+        if not item:
+            return
+        cursor = self.snippet_input.textCursor()
+        start = getattr(self, "start_bracket_pos", None)
+        if start is not None:
+            cursor.setPosition(start, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+
+        name = item.text().strip("[]")
+        cursor.insertText(f"[[{name}]]")
+        self.snippet_input.setTextCursor(cursor)
+        self.dynamic_placeholder_popup.hide()
+        self.snippet_input.setFocus()
+
+    def filter_dynamic_placeholder_intellisense(self, prefix: str):
+        """
+        Filter the dynamic placeholder popup items based on the provided prefix.
+
+        Args:
+            prefix (str): The prefix text to filter by (e.g. "[[na").
+
+        Returns:
+            None
+        """
+        self.dynamic_placeholder_popup.clear()
+        raw_prefix = prefix.strip("[]").lower()
+
+        for c in getattr(self, "dynamic_placeholder_completions", []):
+            if raw_prefix in c.lower():
+                QListWidgetItem(c, self.dynamic_placeholder_popup)
+
+        if self.dynamic_placeholder_popup.count() > 0:
+            self.dynamic_placeholder_popup.setCurrentRow(0)
+        else:
+            self.dynamic_placeholder_popup.hide()
 
     # ----- Styling Functions -----
     def apply_tags_font(self):
@@ -997,6 +1136,12 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 icon = tm.recolor_icon(icon, tm.icon_color())
             self.popout_btn.setIcon(icon)
             self.popout_btn.setIconSize(QSize(14, 14))
+
+            # Re-render the reveal icons in the new theme's icon colour
+            self.icon_eye_on, self.icon_eye_off = eye_icons()
+            self.reveal_snippet_btn.setIcon(
+                self.icon_eye_off if getattr(self, "snippet_revealed", False) else self.icon_eye_on
+            )
             self.reveal_snippet_btn.setIconSize(QSize(14, 14))
         except Exception:
             pass
@@ -1011,7 +1156,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
             self.snippet_input.setPlainText(self.decrypted_snippet_cache)
             self.snippet_input.setReadOnly(False)
             self.snippet_input.setPlaceholderText(
-                "Text that appears when you type a shortcut. Type { to insert placeholders, or [[name]] for a fill-in field..."
+                "Text that appears when you type a shortcut. Type {{ to insert placeholders, or [[ for a fill-in field..."
             )
             self.reveal_snippet_btn.setIcon(self.icon_eye_off)
             self.reveal_snippet_btn.setToolTip("Hide snippet")
@@ -1060,58 +1205,73 @@ Snippets come in handy for text you enter often or for standard messages you sen
             bool: True if the event was handled, False otherwise.
         """
         if obj is self.snippet_input and event.type() == QEvent.KeyPress:
-            # Detect opening {
+            # "{{" opens the placeholder/trigger popup; "[[" opens the dynamic
+            # placeholder popup. Both are deferred via update_*_prefix so the
+            # just-typed character is already in the text when we scan for
+            # the "{{"/"[[" pair - a single "{" or "[" alone no longer pops
+            # anything up.
             if event.text() == "{":
-                cursor_pos = self.snippet_input.textCursor().position()
-                # If this is a second "{" typed right after one we're already
-                # tracking (e.g. manually typing "{{"), keep the original
-                # start position so completion-insertion replaces the whole
-                # "{{" sequence instead of leaving a stray leading "{" behind.
-                if getattr(self, "start_brace_pos", None) != cursor_pos - 1:
-                    self.start_brace_pos = cursor_pos
-                self.show_intellisense()
                 QTimer.singleShot(0, self.update_prefix)
                 return False
             elif event.text() == "}":
                 self.intellisense_popup.hide()
+            elif event.text() == "[":
+                QTimer.singleShot(0, self.update_bracket_prefix)
+                return False
+            elif event.text() == "]":
+                self.dynamic_placeholder_popup.hide()
 
+            active_popup = None
             if self.intellisense_popup.isVisible():
+                active_popup = self.intellisense_popup
+                active_insert = self.insert_completion
+                active_update = self.update_prefix
+                active_start_attr = "start_brace_pos"
+            elif self.dynamic_placeholder_popup.isVisible():
+                active_popup = self.dynamic_placeholder_popup
+                active_insert = self.insert_dynamic_completion
+                active_update = self.update_bracket_prefix
+                active_start_attr = "start_bracket_pos"
+
+            if active_popup is not None:
                 # Only treat these as popup-navigation keys when pressed
                 # unmodified - e.g. Shift+Right/Up/Down are text-selection
                 # shortcuts and must reach the editor, not be swallowed here.
                 no_modifiers = event.modifiers() in (Qt.NoModifier, Qt.KeypadModifier)
                 if event.key() == Qt.Key_Down and no_modifiers:
-                    row = (self.intellisense_popup.currentRow() + 1) % self.intellisense_popup.count()
-                    self.intellisense_popup.setCurrentRow(row)
+                    row = (active_popup.currentRow() + 1) % active_popup.count()
+                    active_popup.setCurrentRow(row)
                     return True
                 elif event.key() == Qt.Key_Up and no_modifiers:
-                    row = (self.intellisense_popup.currentRow() - 1) % self.intellisense_popup.count()
-                    self.intellisense_popup.setCurrentRow(row)
+                    row = (active_popup.currentRow() - 1) % active_popup.count()
+                    active_popup.setCurrentRow(row)
                     return True
                 elif event.key() in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter) and no_modifiers:
-                    self.insert_completion(self.intellisense_popup.currentItem())
+                    active_insert(active_popup.currentItem())
                     return True
                 elif event.key() in (Qt.Key_Escape, Qt.Key_Right) and no_modifiers:
-                    self.intellisense_popup.hide()
+                    active_popup.hide()
                     return True
                 elif event.key() == Qt.Key_Space and no_modifiers:
                     # Hide the popup but still insert the space into the text
-                    self.intellisense_popup.hide()
+                    active_popup.hide()
                     return False
                 elif event.key() == Qt.Key_Backspace and no_modifiers:
-                    QTimer.singleShot(0, self.update_prefix)
+                    QTimer.singleShot(0, active_update)
 
-                    # Check if user deleted the opening brace
+                    # Check if user deleted the opening bracket/brace pair
                     cursor = self.snippet_input.textCursor()
-                    if hasattr(self, "start_brace_pos") and cursor.position() <= self.start_brace_pos + 1:
-                        self.intellisense_popup.hide()
+                    start = getattr(self, active_start_attr, None)
+                    if start is not None and cursor.position() <= start + 1:
+                        active_popup.hide()
                         return False
                 else:
-                    QTimer.singleShot(0, self.update_prefix)    # Recompute regarless if visible
+                    QTimer.singleShot(0, active_update)    # Recompute regardless if visible
 
-            # Recompute on backspace so it can trigger pop-up again
+            # Recompute on backspace so either popup can trigger again
             if event.key() in (Qt.Key_Backspace, Qt.Key_Delete):
                 QTimer.singleShot(0, self.update_prefix)
+                QTimer.singleShot(0, self.update_bracket_prefix)
 
         return super().eventFilter(obj, event)
 
@@ -1135,4 +1295,5 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.populate_tags_input()
         # Reload popup list. Fixing Issue #24
         self.fill_intellisense_popup_list()
+        self.fill_dynamic_placeholder_popup_list()
 
