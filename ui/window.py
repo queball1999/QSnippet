@@ -37,7 +37,7 @@ class QSnippet(QMainWindow):
     vault_trigger_signal = Signal(str, object, str, bool)
     trigger_detected_signal = Signal(str, object)
     dynamic_placeholder_signal = Signal(str, object, str, bool)
-    migration_backup_signal = Signal(object, object)
+    migration_backup_signal = Signal(object, object, object)
 
     def __init__(self, parent=None) -> None:
         """
@@ -1070,7 +1070,7 @@ class QSnippet(QMainWindow):
         except Exception:
             logger.warning("Failed to refresh placeholder integrations", exc_info=True)
 
-    def show_settings_window(self) -> None:
+    def show_settings_window(self, page: str = None) -> None:
         """
         Show the settings window dialog.
 
@@ -1082,16 +1082,24 @@ class QSnippet(QMainWindow):
         from ui.widgets.settings import SettingsDialog
         from ui.widgets.settings.vault_settings_page import VaultSettingsPage
         from ui.widgets.settings.db_settings_page import DbSettingsPage
+        from ui.widgets.settings.backup_settings_page import BackupSettingsPage
 
         vault_page = VaultSettingsPage(window=self)
         db_page = DbSettingsPage(window=self)
+        backup_page = BackupSettingsPage(window=self)
 
         self.settings_dialog = SettingsDialog(
             settings=self.parent.settings,
             save_callback=self.save_settings,
             parent=self,
-            extra_pages=[("Vault", vault_page), ("Database", db_page)],
+            extra_pages=[
+                ("Vault", vault_page),
+                ("Database", db_page),
+                ("Backups", backup_page),
+            ],
         )
+        if page:
+            self.settings_dialog.select_page(page)
         self.settings_dialog.exec()
 
     def save_settings(self, settings: dict) -> None:
@@ -1217,9 +1225,12 @@ class QSnippet(QMainWindow):
         """Background-thread worker: run the vault-unlock placeholder-brace
         migration, then notify the main thread if it took a backup."""
         vm.migrate_existing_vault_snippets_braces(db)
-        if db.pending_migration_backup_path or db.pending_migration_export_path:
+        if (db.pending_migration_backup_path or db.pending_migration_export_path
+                or db.pending_migration_archive_path):
             self.migration_backup_signal.emit(
-                db.pending_migration_backup_path, db.pending_migration_export_path
+                db.pending_migration_backup_path,
+                db.pending_migration_export_path,
+                db.pending_migration_archive_path,
             )
 
     def check_startup_migration_backup(self) -> None:
@@ -1229,36 +1240,39 @@ class QSnippet(QMainWindow):
             return
         backup_path = getattr(db, "pending_migration_backup_path", None)
         export_path = getattr(db, "pending_migration_export_path", None)
-        if backup_path or export_path:
-            self.show_migration_backup_notice(backup_path, export_path)
+        archive_path = getattr(db, "pending_migration_archive_path", None)
+        if backup_path or export_path or archive_path:
+            self.show_migration_backup_notice(backup_path, export_path, archive_path)
 
-    def show_migration_backup_notice(self, backup_path, export_path) -> None:
+    def show_migration_backup_notice(self, backup_path, export_path, archive_path=None) -> None:
         """Inform the user that a database update backed up their snippets first."""
         if self._migration_notice_shown:
             return
         self._migration_notice_shown = True
         try:
-            self.record_migration_backup(backup_path, export_path)
+            self.record_migration_backup(backup_path, export_path, archive_path)
             self.show_backup_links_dialog(
                 "Database Updated",
                 "QSnippet updated its snippet database for this version.\n"
                 "Before making any changes, a backup was saved:",
                 [{"timestamp": datetime.now().isoformat(timespec="seconds"),
                   "db_backup_path": str(backup_path) if backup_path else None,
-                  "export_path": str(export_path) if export_path else None}],
+                  "export_path": str(export_path) if export_path else None,
+                  "archive_path": str(archive_path) if archive_path else None}],
             )
         except Exception:
             logger.exception("Failed to show migration backup notice")
 
-    def record_migration_backup(self, backup_path, export_path) -> None:
-        """Persist a migration-backup entry so it can be recalled later from
-        Help > Backup History, even if the one-time notice was dismissed."""
+    def record_migration_backup(self, backup_path, export_path, archive_path=None) -> None:
+        """Persist a backup entry so it can be found later under
+        Settings > Backups, even if the one-time notice was dismissed."""
         try:
             backups = self.parent.settings.setdefault("backups", {})
             entry = {
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "db_backup_path": str(backup_path) if backup_path else None,
                 "export_path": str(export_path) if export_path else None,
+                "archive_path": str(archive_path) if archive_path else None,
             }
             history = list(backups.get("database_backups", {}).get("value", []))
             history.append(entry)
@@ -1279,23 +1293,13 @@ class QSnippet(QMainWindow):
             logger.exception("Failed to record migration backup history")
 
     def handle_view_backup_history(self) -> None:
-        """Help menu action: show every automatic pre-migration backup on record."""
-        history = (
-            self.parent.settings.get("backups", {})
-            .get("database_backups", {})
-            .get("value", [])
-        )
-        if not history:
-            self.parent.message_box.info(
-                "No automatic database backups have been made yet.",
-                title="Backup History",
-            )
-            return
-        self.show_backup_links_dialog(
-            "Backup History",
-            "Automatic backups QSnippet has made before database updates:",
-            list(reversed(history)),
-        )
+        """Help menu action: open the Backups page in Settings.
+
+        History and management live there as sub-cards rather than in a
+        throwaway message box, so entries stay browsable alongside the
+        actions that operate on them.
+        """
+        self.show_settings_window(page="Backups")
 
     def show_backup_links_dialog(self, title: str, intro: str, entries: list) -> None:
         """Show *entries* (each with timestamp/db_backup_path/export_path) as a
@@ -1306,6 +1310,10 @@ class QSnippet(QMainWindow):
             parts = [f"<b>{entry.get('timestamp', '')}</b>"]
             db_path = entry.get("db_backup_path")
             export_path = entry.get("export_path")
+            archive_path = entry.get("archive_path")
+            if archive_path:
+                safe = html.escape(archive_path)
+                parts.append(f"Backup archive: <a href=\"{safe}\">{safe}</a>")
             if db_path:
                 safe = html.escape(db_path)
                 parts.append(f"Database copy: <a href=\"{safe}\">{safe}</a>")

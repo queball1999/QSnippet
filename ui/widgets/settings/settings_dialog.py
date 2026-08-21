@@ -112,6 +112,7 @@ class SettingsDialog(QDialog):
         self.build_extra_pages()
         self.list.itemClicked.connect(self.on_sidebar_changed)
         self.list.setCurrentRow(0)
+        self.last_sidebar_row = 0
 
         # Set up Ctrl+F keyboard shortcut to focus search bar
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
@@ -120,18 +121,44 @@ class SettingsDialog(QDialog):
 
     @property
     def root_page_count(self) -> int:
-        return len(self.settings) + len(self.extra_pages)
+        return len(self.visible_categories()) + len(self.extra_pages)
+
+    def visible_categories(self) -> list:
+        """
+        Category names that have at least one visible setting.
+
+        A category whose entries are all marked hidden (backups, which only
+        stores history) would otherwise get a sidebar entry leading to a
+        completely blank page. Such a category is either presented by a
+        purpose-built extra page or not at all.
+        """
+        visible = []
+        for category, values in self.settings.items():
+            if not isinstance(values, dict):
+                continue
+            if any(self.is_visible_entry(meta) for meta in values.values()):
+                visible.append(category)
+        return visible
+
+    def is_visible_entry(self, meta) -> bool:
+        """True when a settings entry (or sub-group) renders something."""
+        if not isinstance(meta, dict):
+            return False
+        if "type" in meta:
+            return not meta.get("hidden", False)
+        # Sub-group: visible when any child is
+        return any(self.is_visible_entry(child) for child in meta.values())
 
     def build(self):
         """ Build the sidebar and root pages. """
         self.list.clear()
 
-        for category, values in self.settings.items():
+        for category in self.visible_categories():
             self.list.addItem(QListWidgetItem(category.replace("_", " ").title()))
 
             page = SettingsCategoryPage(
                 category=category,
-                values=values,
+                values=self.settings[category],
                 on_change=self.on_setting_changed,
                 parent=self,
             )
@@ -154,6 +181,8 @@ class SettingsDialog(QDialog):
                 new_path = path + [key]
 
                 if isinstance(value, dict) and "value" in value:
+                    if value.get("hidden", False):
+                        continue
                     label = key.replace("_", " ").title()
                     desc = value.get("description", "")
                     text = f"{label} {desc}".lower()
@@ -169,8 +198,8 @@ class SettingsDialog(QDialog):
                 elif isinstance(value, dict):
                     walk(category, value, new_path)
 
-        for category, values in self.settings.items():
-            walk(category, values, [category])
+        for category in self.visible_categories():
+            walk(category, self.settings[category], [category])
 
     # ----- SEARCH -----
 
@@ -236,6 +265,18 @@ class SettingsDialog(QDialog):
 
     # ----- NAVIGATION -----
 
+    def page_index_for_category(self, category: str):
+        """
+        Stack/sidebar index of a category's page, or None when it has none.
+
+        Indexes against the categories that actually produced a page, not the
+        raw settings dict: an all-hidden category (backups) is skipped, so a
+        positional lookup into self.settings would point at the wrong page for
+        every category after it.
+        """
+        categories = self.visible_categories()
+        return categories.index(category) if category in categories else None
+
     def navigate_to_path(self, path: list[str]):
         """
         Navigate to the full path of a setting.
@@ -244,7 +285,9 @@ class SettingsDialog(QDialog):
         self.nav_stack.clear()
 
         category = path[0]
-        index = list(self.settings.keys()).index(category)
+        index = self.page_index_for_category(category)
+        if index is None:
+            return self.stack.currentWidget()
 
         self.list.setCurrentRow(index)
         page = self.stack.widget(index)
@@ -270,7 +313,9 @@ class SettingsDialog(QDialog):
         self.nav_stack.clear()
 
         category = path[0]
-        index = list(self.settings.keys()).index(category)
+        index = self.page_index_for_category(category)
+        if index is None:
+            return self.stack.currentWidget(), path[-1]
 
         self.list.setCurrentRow(index)
         page = self.stack.widget(index)
@@ -335,6 +380,21 @@ class SettingsDialog(QDialog):
             page = self.stack.widget(i)
             if hasattr(page, "apply_search_highlight"):
                 page.apply_search_highlight("")
+
+    def select_page(self, label: str) -> bool:
+        """
+        Show the sidebar page whose label matches *label* (case-insensitive).
+
+        Lets callers deep-link into a specific settings page, e.g. the Help
+        menu opening Backups. Returns False when no such page exists.
+        """
+        for row in range(self.list.count()):
+            if self.list.item(row).text().strip().lower() == label.strip().lower():
+                self.list.setCurrentRow(row)
+                self.stack.setCurrentIndex(row)
+                self.last_sidebar_row = row
+                return True
+        return False
 
     def on_sidebar_changed(self, item: QListWidgetItem):
         """ Handle when the user clicks a sidebar item """

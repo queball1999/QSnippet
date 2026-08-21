@@ -656,25 +656,44 @@ class VaultManager:
 
         from utils.snippet_db import rewrite_legacy_placeholder_braces
 
-        if not db._backup_done_this_session:
-            db.pending_migration_backup_path, db.pending_migration_export_path = (
-                db.backup_before_migration()
-            )
-            db._backup_done_this_session = True
-
         custom_names = {ph["name"] for ph in db.get_all_custom_placeholders()}
 
+        # Work out what actually needs rewriting BEFORE touching anything.
+        # This pass runs on every unlock, but almost always finds nothing to
+        # do; taking the backup up-front meant a full DB copy plus a YAML
+        # export in ~/Downloads every single time the user signed into the
+        # vault. Back up only when data is genuinely about to change.
+        pending = []
         for s in db.get_vault_snippets():
             try:
                 aad = (s.get("vault_uuid") or "").encode()
                 plain = self.decrypt(s["snippet"], aad=aad)
                 rewritten = rewrite_legacy_placeholder_braces(plain, custom_names)
                 if rewritten != plain:
-                    new_blob = self.encrypt(rewritten, aad=aad)
-                    db.update_snippet_content(s["id"], new_blob)
+                    pending.append((s["id"], aad, rewritten))
             except Exception:
                 logger.warning("Brace migration skipped for snippet id=%s", s.get("id"))
 
+        if not pending:
+            self._brace_migration_done = True
+            logger.debug("Placeholder brace migration: nothing to rewrite")
+            return
+
+        if not db.backup_done_this_session:
+            (
+                db.pending_migration_backup_path,
+                db.pending_migration_export_path,
+                db.pending_migration_archive_path,
+            ) = db.backup_before_migration()
+            db.backup_done_this_session = True
+
+        for snippet_id, aad, rewritten in pending:
+            try:
+                db.update_snippet_content(snippet_id, self.encrypt(rewritten, aad=aad))
+            except Exception:
+                logger.warning("Brace migration failed for snippet id=%s", snippet_id)
+
+        logger.info("Placeholder brace migration rewrote %d vault snippet(s)", len(pending))
         self._brace_migration_done = True
         logger.info("Placeholder brace migration pass complete")
 

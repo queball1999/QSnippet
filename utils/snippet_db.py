@@ -1,5 +1,6 @@
 import re
 import shutil
+import zipfile
 import sqlite3
 import logging
 import random
@@ -166,7 +167,8 @@ class SnippetDB:
         # by the UI once it's ready, to show a one-time informational notice.
         self.pending_migration_backup_path: Path | None = None
         self.pending_migration_export_path: Path | None = None
-        self._backup_done_this_session = False
+        self.pending_migration_archive_path: Path | None = None
+        self.backup_done_this_session = False
         logger.debug("SQLite path: %s", db_path)
         self.conn = sqlite3.connect(
             self.db_path,
@@ -183,10 +185,12 @@ class SnippetDB:
         # protect, and every fresh install would otherwise get a pointless
         # backup+export on first launch.
         if self.get_schema_version() < SCHEMA_MIGRATION_VERSION and self.has_any_snippets():
-            self.pending_migration_backup_path, self.pending_migration_export_path = (
-                self.backup_before_migration()
-            )
-            self._backup_done_this_session = True
+            (
+                self.pending_migration_backup_path,
+                self.pending_migration_export_path,
+                self.pending_migration_archive_path,
+            ) = self.backup_before_migration()
+            self.backup_done_this_session = True
 
         self.migrate_vault_schema()
         self.create_indexes()
@@ -226,33 +230,48 @@ class SnippetDB:
             cur = conn.execute("SELECT 1 FROM snippets LIMIT 1")
             return cur.fetchone() is not None
 
-    def backup_before_migration(self, downloads_dir: Path | None = None) -> tuple[Path | None, Path | None]:
+    def backup_dir(self) -> Path:
+        """Directory holding backup archives, alongside the database file."""
+        return self.db_path.parent / "backups"
+
+    def backup_before_migration(self, export_dir: Path | None = None) -> tuple[Path | None, Path | None, Path | None]:
         """
         Copy the raw database file and export a portable YAML snapshot
         before a migration modifies anything.
+
+        When both artefacts are produced they are bundled into a single
+        timestamped zip in the backups directory and the loose files are
+        removed, so one backup is one self-contained file rather than a .db
+        beside the database and a .yaml stranded in Downloads. If either
+        step fails, whatever succeeded is left in place unzipped rather than
+        discarded.
 
         Vault-encrypted snippet bodies are exported with their ciphertext
         preserved as-is (same as get_all_snippets()) - still protected by
         the vault password, so no password prompt is needed here.
 
         Args:
-            downloads_dir (Path | None): Override for the YAML export
-                directory (defaults to ~/Downloads). Exists so tests/callers
-                can redirect it instead of writing into a real user profile.
+            export_dir (Path | None): Override for the directory both
+                artefacts are written to (defaults to the backups directory).
+                Exists so tests/callers can redirect it.
 
         Returns:
-            tuple[Path | None, Path | None]: (db_backup_path, export_path),
-            either of which may be None if that step failed. Failures are
-            logged but never raised - a failed backup must not block startup.
+            tuple[Path | None, Path | None, Path | None]:
+            (db_backup_path, export_path, archive_path). When archiving
+            succeeds the first two are None and only archive_path is set.
+            Any of them may be None if that step failed. Failures are logged
+            but never raised - a failed backup must not block startup.
         """
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         db_backup_path: Path | None = None
         export_path: Path | None = None
+        archive_path: Path | None = None
+
+        target_dir = Path(export_dir) if export_dir else self.backup_dir()
 
         try:
-            backup_dir = self.db_path.parent / "backups"
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            db_backup_path = backup_dir / f"{self.db_path.stem}-backup-{timestamp}{self.db_path.suffix}"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            db_backup_path = target_dir / f"{self.db_path.stem}-backup-{timestamp}{self.db_path.suffix}"
             with self.lock:
                 self.conn.commit()
                 shutil.copy2(self.db_path, db_backup_path)
@@ -262,9 +281,8 @@ class SnippetDB:
             db_backup_path = None
 
         try:
-            downloads = Path(downloads_dir) if downloads_dir else Path.home() / "Downloads"
-            downloads.mkdir(parents=True, exist_ok=True)
-            export_path = downloads / f"qsnippets-backup-{timestamp}.yaml"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            export_path = target_dir / f"qsnippets-backup-{timestamp}.yaml"
             clean = [{k: v for k, v in s.items() if k != "id"} for s in self.get_all_snippets()]
             FileUtils.export_snippets_yaml(export_path, clean)
             logger.info("Pre-migration snippet export written to %s", export_path)
@@ -272,7 +290,52 @@ class SnippetDB:
             logger.exception("Pre-migration snippet export failed")
             export_path = None
 
-        return db_backup_path, export_path
+        if db_backup_path and export_path:
+            # Guarded as a whole: this method promises never to raise, because
+            # it runs during startup migration. A failed archive must leave the
+            # two loose files in place rather than costing the user a backup.
+            try:
+                archive_path = self.archive_backup(
+                    target_dir / f"qsnippet-backup-{timestamp}.zip",
+                    [db_backup_path, export_path],
+                )
+            except Exception:
+                logger.exception("Backup archiving failed")
+                archive_path = None
+            if archive_path:
+                db_backup_path = None
+                export_path = None
+
+        return db_backup_path, export_path, archive_path
+
+    def archive_backup(self, archive_path: Path, members: list) -> Path | None:
+        """
+        Zip *members* into *archive_path* and delete the originals.
+
+        Returns the archive path, or None if anything went wrong - in which
+        case the loose files are deliberately left alone, so a failed zip
+        never costs the user their backup.
+        """
+        try:
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as bundle:
+                for member in members:
+                    bundle.write(member, arcname=member.name)
+        except Exception:
+            logger.exception("Backup archive creation failed")
+            try:
+                archive_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return None
+
+        for member in members:
+            try:
+                member.unlink(missing_ok=True)
+            except Exception:
+                logger.warning("Could not remove %s after archiving", member)
+
+        logger.info("Backup archive written to %s", archive_path)
+        return archive_path
 
     def configure_connection(self) -> None:
         """

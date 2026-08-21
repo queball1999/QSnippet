@@ -255,8 +255,9 @@ backups:
     hidden: true
     description: >
       History of automatic pre-migration database backups (timestamp and
-      file paths), so a backup notice can be recalled later from
-      Help > Backup History even if its dialog was dismissed.
+      file paths), shown as sub-cards under Settings > Backups (also reachable
+      from Help > Backup History) so a backup can be found again later even if
+      its one-time notice was dismissed.
 
 saving:
   navigate_home_after_save:

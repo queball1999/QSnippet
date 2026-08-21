@@ -1,3 +1,4 @@
+import zipfile
 import pytest
 import sqlite3
 from pathlib import Path
@@ -863,29 +864,49 @@ class TestPlaceholderBraceMigration:
     def test_startup_migration_backs_up_before_rewriting_existing_data(self, temp_snippet_db_path, tmp_path, monkeypatch):
         """Simulate upgrading a pre-existing DB (schema_version 0, has data):
         the next SnippetDB() construction should back up before migrating."""
-        downloads = tmp_path / "FakeHome" / "Downloads"
         monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
 
         db = SnippetDB(temp_snippet_db_path)
         db.insert_snippet({**self._BASE, "trigger": "/pre-existing", "snippet": "Hi {date}"})
         # Simulate a DB that predates schema-version tracking.
         db.conn.execute("PRAGMA user_version = 0")
-        assert db.pending_migration_backup_path is None  # fresh DB, nothing backed up yet
+        assert db.pending_migration_archive_path is None  # fresh DB, nothing backed up yet
 
         db2 = SnippetDB(temp_snippet_db_path)
 
-        assert db2.pending_migration_backup_path is not None
-        assert db2.pending_migration_backup_path.exists()
-        assert db2.pending_migration_export_path is not None
-        assert db2.pending_migration_export_path.exists()
-        assert db2.pending_migration_export_path.parent == downloads
+        # Both artefacts succeeded, so they are bundled into one zip and the
+        # loose paths are cleared.
+        archive = db2.pending_migration_archive_path
+        assert archive is not None and archive.exists()
+        assert archive.parent == db2.backup_dir()
+        assert db2.pending_migration_backup_path is None
+        assert db2.pending_migration_export_path is None
+
+        with zipfile.ZipFile(archive) as bundle:
+            names = bundle.namelist()
+        assert any(n.endswith(".db") for n in names), names
+        assert any(n.endswith(".yaml") for n in names), names
+
         assert db2.get_schema_version() == SCHEMA_MIGRATION_VERSION
         migrated = db2.get_snippet_by_trigger("/pre-existing")
         assert migrated["snippet"] == "Hi {{date}}"
+
+    def test_backup_archive_leaves_loose_files_when_zipping_fails(self, temp_snippet_db_path, monkeypatch):
+        """A failed zip must never cost the user the backup it was bundling."""
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/keep", "snippet": "body"})
+
+        monkeypatch.setattr(db, "archive_backup", lambda *a, **k: None)
+        db_path, export_path, archive = db.backup_before_migration()
+
+        assert archive is None
+        assert db_path is not None and db_path.exists()
+        assert export_path is not None and export_path.exists()
 
     def test_fresh_database_does_not_trigger_backup(self, temp_snippet_db_path, tmp_path, monkeypatch):
         monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
         db = SnippetDB(temp_snippet_db_path)
         assert db.pending_migration_backup_path is None
         assert db.pending_migration_export_path is None
-        assert not (tmp_path / "FakeHome" / "Downloads").exists()
+        assert db.pending_migration_archive_path is None
+        assert not db.backup_dir().exists()
