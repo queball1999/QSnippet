@@ -59,6 +59,45 @@ jobs:
           cp "$DEB" /tmp/QSnippet_${{ steps.version.outputs.version }}_amd64.deb
           sudo apt install /tmp/QSnippet_${{ steps.version.outputs.version }}_amd64.deb -y
 
+      - name: Verify installed package contents
+        run: |
+          set -e
+          FAILED=0
+          # Paths the app resolves at runtime; a missing one means a broken install
+          for path in \
+            /opt/QSnippet/QSnippet \
+            /opt/QSnippet/config/config.yaml \
+            /opt/QSnippet/assets/icons/icon_128x128.png \
+            /opt/QSnippet/assets/images \
+            /usr/bin/qsnippet \
+            /usr/share/applications/qsnippet.desktop
+          do
+            if [ ! -e "$path" ]; then
+              echo "MISSING: $path"
+              FAILED=1
+            fi
+          done
+          # Every image declared in config.yaml must be present under assets/
+          python3 - <<'EOF'
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          root = Path("/opt/QSnippet/assets")
+          cfg = yaml.safe_load(open("/opt/QSnippet/config/config.yaml")) or {}
+          missing = [
+              f"{key} ({name})"
+              for key, name in (cfg.get("images") or {}).items()
+              if name and name != "QSnippet"
+              and not any((root / sub / name).is_file() for sub in ("images", "icons"))
+          ]
+          if missing:
+              sys.exit("Assets declared in config.yaml are missing from the install: " + ", ".join(missing))
+          EOF
+          [ "$FAILED" -eq 0 ] || exit 1
+          echo "Installed package layout verified."
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
         with:
