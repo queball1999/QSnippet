@@ -354,6 +354,7 @@ class SnippetEditor(QWidget):
         self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
+        self.home_widget.focus_test_entry()
 
     def show_new_form(self, *_):
         """

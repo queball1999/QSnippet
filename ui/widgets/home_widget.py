@@ -203,8 +203,14 @@ class HomeWidget(QWidget):
         """
         Handle widget show events.
 
-        Refreshes the random snippet display and sets focus
-        to the test entry field.
+        Refreshes the random snippet display. Does NOT force focus into
+        test_entry here - showEvent also fires when the main window is
+        merely restored/re-shown (e.g. from the tray) while Home already
+        happens to be the current page, which would otherwise steal OS
+        focus into the test box and swallow the next snippet expansion
+        meant for another application. Focusing test_entry is instead done
+        explicitly by callers that represent a deliberate navigation to
+        Home (see focus_test_entry / show_home_widget in snippet_editor.py).
 
         Args:
             event (Any): The Qt show event.
@@ -214,4 +220,7 @@ class HomeWidget(QWidget):
         """
         super().showEvent(event)
         self.set_random_snippet()   # Set random snippet on each load
-        self.test_entry.setFocus(Qt.TabFocusReason) # Force focus when the form is shown
+
+    def focus_test_entry(self) -> None:
+        """Focus the test entry field. Call only on deliberate navigation to Home."""
+        self.test_entry.setFocus(Qt.TabFocusReason)
