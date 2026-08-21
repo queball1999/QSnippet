@@ -40,6 +40,10 @@ THEMES: dict[str, dict[str, str]] = {
         "border":          "rgba(255, 255, 255, 0.08)",
         "scrollbar":       "rgba(255, 255, 255, 0.18)",
         "scrollbar_hover": "rgba(255, 255, 255, 0.38)",
+        "warning":         "#ffc107",
+        "warning_bg":      "rgba(255, 193, 7, 0.12)",
+        "warning_text":    "#ffd75e",
+        "success":         "#6cc46c",
         "search_panel":    "#2b2b2b",
     },
     # Windows 11 light mode
@@ -63,6 +67,10 @@ THEMES: dict[str, dict[str, str]] = {
         "border":          "rgba(0, 0, 0, 0.08)",
         "scrollbar":       "rgba(0, 0, 0, 0.2)",
         "scrollbar_hover": "rgba(0, 0, 0, 0.38)",
+        "warning":         "#ffc107",
+        "warning_bg":      "#fff3cd",
+        "warning_text":    "#664d03",
+        "success":         "#157347",
         "search_panel":    "#ffffff",
     },
     # Nord palette - https://www.nordtheme.com/docs/colors-and-palettes
@@ -89,6 +97,10 @@ THEMES: dict[str, dict[str, str]] = {
         "border":          "rgba(76, 86, 106, 0.7)",
         "scrollbar":       "rgba(216, 222, 233, 0.2)",
         "scrollbar_hover": "rgba(216, 222, 233, 0.4)",
+        "warning":         "#EBCB8B",
+        "warning_bg":      "rgba(235, 203, 139, 0.14)",
+        "warning_text":    "#EBCB8B",
+        "success":         "#A3BE8C",
         "search_panel":    "#3B4252",
     },
     "pink": {
@@ -110,6 +122,10 @@ THEMES: dict[str, dict[str, str]] = {
         "border":          "rgba(233, 30, 140, 0.2)",
         "scrollbar":       "rgba(233, 30, 140, 0.25)",
         "scrollbar_hover": "rgba(233, 30, 140, 0.45)",
+        "warning":         "#e0a800",
+        "warning_bg":      "rgba(224, 168, 0, 0.14)",
+        "warning_text":    "#7a5c00",
+        "success":         "#2e7d32",
         "search_panel":    "#ffffff",
     },
 }
@@ -120,6 +136,57 @@ THEME_DISPLAY_NAMES = {
     "light":  "Light",
     "nord":   "Nord",
     "pink":   "Girly Pink",
+}
+
+# ---------------------------------------------------------------------------
+# Role fonts keyed by objectName.
+#
+# objectName is already the styling contract used by build_qss(); this table
+# extends the same contract to font sizing so a widget's typography is decided
+# in exactly one place instead of being re-derived by each dialog's applyStyles.
+# Values are (size_role, bold). Anything not listed gets ("medium", False).
+# ---------------------------------------------------------------------------
+OBJECT_NAME_FONTS: dict[str, tuple[str, bool]] = {
+    # Settings
+    "SettingsHeader":            ("large",  True),
+    "SettingsChevron":           ("large",  False),
+    "SettingsCardTitle":         ("medium", True),
+    "SettingsCardDescription":   ("small",  False),
+    "SettingsToast":             ("medium", False),
+    # Vault dialogs
+    "VaultDialogTitle":          ("large",  True),
+    "VaultDialogDesc":           ("small",  False),
+    "VaultFieldLabel":           ("medium", True),
+    "VaultField":                ("medium", False),
+    "VaultErrorLabel":           ("small",  False),
+    "VaultHintPass":             ("small",  False),
+    "VaultHintFail":             ("small",  False),
+    "VaultRecoveryCode":         ("large",  True),
+    "VaultWarningText":          ("small",  False),
+    "VaultOptionsNote":          ("small",  False),
+    "VaultOptionsSectionTitle":  ("medium", True),
+    "VaultRecoveryLink":         ("small",  False),
+    "VaultHintLabel":            ("small",  False),
+    "VaultConfirmCheck":         ("small",  False),
+    # Import / export wizard
+    "ImportExportTitle":         ("large",  True),
+    "CountLabel":                ("small",  False),
+    # Backups
+    "BackupPageBtn":             ("small",  False),
+    "BackupPageBtnCurrent":      ("small",  True),
+    "BackupPageSize":            ("small",  False),
+    # Placeholder dialog
+    "PanelTitle":                ("large",  True),
+    "FieldLabel":                ("large",  False),
+    "FieldHint":                 ("small",  False),
+    "ErrorLabel":                ("small",  False),
+    "SystemNotice":              ("small",  False),
+    # Snippet popout
+    "PopoutSnippetName":         ("large",  True),
+    "PopoutLabel":               ("medium", False),
+    # Notice carousel
+    "NoticeTopLabel":            ("large",  True),
+    "NoticeTitleLabel":          ("medium", True),
 }
 
 # Themes that should inherit the Windows system accent color
@@ -143,9 +210,10 @@ class ThemeManager(QObject):
 
     instance: "ThemeManager | None" = None
 
-    def __init__(self, app):
+    def __init__(self, app, main=None):
         super().__init__()
         self.app = app
+        self.main = main
         self.theme_name = "dark"
         self.scale_pct  = 100
         ThemeManager.instance = self
@@ -153,6 +221,114 @@ class ThemeManager(QObject):
     @classmethod
     def get_instance(cls) -> "ThemeManager | None":
         return cls.instance
+
+    @classmethod
+    def app_instance(cls):
+        """
+        Return the main() application object that owns the scaled QFont
+        attributes (small_font_size, medium_font_size, ...).
+
+        This is the single supported way for any widget to reach those fonts.
+        Widgets must never walk the Qt/Python parent chain themselves: the
+        QSnippet window stores its owner on a Python attribute named `parent`
+        that shadows QWidget.parent(), so hand-rolled walks silently fail
+        depending on how deeply a widget happens to be nested.
+        """
+        tm = cls.instance
+        return getattr(tm, "main", None) if tm else None
+
+    @classmethod
+    def font(cls, size: str = "medium", bold: bool = False):
+        """
+        Return a scaled QFont by role name ("small", "medium", "large",
+        "extra_large", "humongous"), falling back to the QApplication font
+        when the main app is not reachable (e.g. isolated widget tests).
+        """
+        from PySide6.QtGui import QFont
+        from PySide6.QtWidgets import QApplication
+
+        app = cls.app_instance()
+        if app is not None:
+            attr = f"{size}_font_size" + ("_bold" if bold else "")
+            font = getattr(app, attr, None)
+            if font is not None:
+                # Hand back a copy; callers (and Qt) must never mutate the
+                # shared QFont objects owned by the main app.
+                return QFont(font)
+            font = getattr(app, f"{size}_font_size", None)
+            if font is not None:
+                font = QFont(font)
+                font.setBold(bold)
+                return font
+
+        qapp = QApplication.instance()
+        font = QFont(qapp.font()) if qapp else QFont()
+        font.setBold(bold)
+        return font
+
+    @classmethod
+    def toggle_size(cls, size: str = "small"):
+        """Return the scaled QSize for a QAnimatedSwitch toggle, or None."""
+        app = cls.app_instance()
+        return getattr(app, f"{size}_toggle_size", None) if app else None
+
+    @classmethod
+    def font_for(cls, widget, default_size: str = "medium"):
+        """Return the scaled QFont for *widget* based on its objectName role."""
+        try:
+            name = widget.objectName()
+        except RuntimeError:
+            name = ""
+        size, bold = OBJECT_NAME_FONTS.get(name, (default_size, False))
+        return cls.font(size, bold)
+
+    @classmethod
+    def apply_fonts(cls, root, default_size: str = "medium") -> None:
+        """
+        Apply role-correct scaled fonts to *root* and every text-bearing widget
+        beneath it, using OBJECT_NAME_FONTS.
+
+        This is the shared implementation behind every dialog's applyStyles():
+        call it instead of hand-rolling per-widget setFont() loops, so a new
+        object name only has to be registered once to be styled everywhere.
+        """
+        from PySide6.QtWidgets import (
+            QWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
+            QPlainTextEdit, QPushButton, QCheckBox, QRadioButton,
+            QAbstractItemView, QHeaderView,
+        )
+
+        applicable = (
+            QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit, QPlainTextEdit,
+            QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
+        )
+
+        def apply_one(w):
+            try:
+                if isinstance(w, applicable):
+                    font = cls.font_for(w, default_size)
+                    w.setFont(font)
+                    if isinstance(w, QComboBox) and w.lineEdit():
+                        w.lineEdit().setFont(font)
+                    if isinstance(w, QAbstractItemView):
+                        w.viewport().update()
+                if isinstance(w, QHeaderView):
+                    w.setFont(cls.font(default_size))
+                    w.viewport().update()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+
+        try:
+            apply_one(root)
+            # findChildren with a tuple of types crashes PySide6; filter here.
+            for child in root.findChildren(QWidget):
+                apply_one(child)
+        except RuntimeError:
+            pass
+        except Exception as e:
+            logger.debug("apply_fonts failed for %r: %s", root, e)
 
     # Public API
 
@@ -169,7 +345,7 @@ class ThemeManager(QObject):
         self.app.setStyleSheet(qss)
         self.apply_font_scale(scale_pct)
         self.force_repaint()
-        self.update_animated_switches(colors["accent"])
+        self.update_animated_switches(colors["accent"], colors)
         self.themeChanged.emit()
         logger.info("Theme applied: %s @ %d%%", resolved, scale_pct)
 
@@ -219,7 +395,7 @@ class ThemeManager(QObject):
         painter.end()
         return _QIcon(result)
 
-    def update_animated_switches(self, accent: str) -> None:
+    def update_animated_switches(self, accent: str, colors: dict | None = None) -> None:
         """Push the new accent color into every live QAnimatedSwitch."""
         try:
             from ui.widgets import QAnimatedSwitch
@@ -304,6 +480,50 @@ class ThemeManager(QObject):
 
         return default_dark if is_dark else default_light
 
+    @classmethod
+    def qcolor(cls, key: str, fallback: str = "#808080"):
+        """
+        Return a palette entry as a QColor.
+
+        Palette values may be hex ("#ffffff") or CSS rgba with a float alpha
+        ("rgba(255, 255, 255, 0.6)"). QColor cannot parse the latter, so it is
+        converted here; use this instead of QColor(colors[key]) anywhere a
+        palette colour is needed for painting rather than for QSS.
+        """
+        from PySide6.QtGui import QColor
+
+        tm = cls.instance
+        value = tm.get_colors().get(key, fallback) if tm else fallback
+        value = str(value).strip()
+
+        if value.startswith("rgb"):
+            try:
+                parts = value[value.index("(") + 1:value.rindex(")")].split(",")
+                r, g, b = (int(float(x)) for x in parts[:3])
+                a = int(float(parts[3]) * 255) if len(parts) > 3 else 255
+                return QColor(r, g, b, a)
+            except Exception:
+                return QColor(fallback)
+
+        color = QColor(value)
+        return color if color.isValid() else QColor(fallback)
+
+    def contrast_text(self, color: str) -> str:
+        """
+        Return black or white, whichever stays readable on top of *color*.
+        Used for text painted directly on the accent (toast, primary buttons),
+        which would otherwise be invisible against a pale system accent.
+        """
+        try:
+            from PySide6.QtGui import QColor
+            qc = QColor(color)
+            if not qc.isValid():
+                return "#ffffff"
+            luminance = (0.299 * qc.red() + 0.587 * qc.green() + 0.114 * qc.blue())
+            return "#000000" if luminance > 150 else "#ffffff"
+        except Exception:
+            return "#ffffff"
+
     def hex_to_rgba(self, hex_color: str, alpha: float) -> str:
         h = hex_color.lstrip("#")
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -325,49 +545,99 @@ class ThemeManager(QObject):
             # Light uses accent for selection; dark keeps its own #393939
             if not is_dark:
                 c["selected"] = self.hex_to_rgba(accent, 0.15)
+        # Readable foreground for anything painted directly on the accent
+        c["on_accent"] = self.contrast_text(c["accent"])
         return c
 
     def force_repaint(self) -> None:
         """
-        Unpolish and re-polish every live widget so the new QSS takes effect.
-        Also calls applyStyles() on any widget that implements it so explicit
-        setFont() calls (e.g. SnippetTable) pick up the new scaled QFont objects.
+        Re-apply every style surface, in the only order that produces a
+        consistent result:
+
+          1. repolish_all()        - re-evaluate the new QSS on every widget
+          2. apply_app_fonts()     - blanket sweep that pushes the medium font
+                                     (and, crucially, the new font family) onto
+                                     every generic widget
+          3. refresh_widget_styles() - per-widget applyStyles()/refresh_fonts()
+                                     hooks that restore role-specific sizes
+                                     (titles, hints, counters, headers, ...)
+
+        Phase 2 must run before phase 3. It deliberately overwrites every
+        widget font, so any hook that ran before it would have its
+        role-specific sizes stomped straight back to medium.
         """
-        style = self.app.style()
+        self.repolish_all()
+        self.apply_app_fonts()
+        self.refresh_widget_styles()
+
+    def live_widgets(self) -> list:
+        """
+        Snapshot every live widget up front so object churn during a repaint
+        cannot invalidate the iterator, and drop wrappers whose underlying C++
+        object has already been destroyed.
+        """
         try:
             from shiboken6 import isValid as is_valid
         except Exception:
             is_valid = None
 
-        # Snapshot widgets up front so object churn during repaint does not
-        # invalidate the iterator while we are traversing it.
+        widgets = []
         for w in list(self.app.allWidgets()):
             if w is None:
                 continue
-
             try:
                 if is_valid and not is_valid(w):
                     continue
+            except RuntimeError:
+                continue
+            widgets.append(w)
+        return widgets
+
+    def repolish_all(self) -> None:
+        """Unpolish and re-polish every live widget so the new QSS takes effect."""
+        style = self.app.style()
+        for w in self.live_widgets():
+            try:
                 style.unpolish(w)
                 style.polish(w)
                 w.update()
             except RuntimeError:
-                # Wrapper exists but the underlying C++ QObject was deleted.
                 continue
             except Exception:
                 continue
 
+    def apply_app_fonts(self) -> None:
+        """
+        Run the main app's blanket font sweep, which pushes the current font
+        family/size onto widgets that never call setFont() themselves
+        (status bars, group boxes, tab bars, header views, ...).
+        """
+        app = self.app_instance()
+        sweep = getattr(app, "apply_fonts_to_all_widgets", None) if app else None
+        if callable(sweep):
+            try:
+                sweep()
+            except Exception as e:
+                logger.debug("Blanket font sweep failed: %s", e)
+
+    def refresh_widget_styles(self) -> None:
+        """
+        Call applyStyles()/refresh_fonts() on every live widget that implements
+        them, so explicit setFont() calls and per-theme icon tints are restored
+        after the blanket sweep.
+        """
+        for w in self.live_widgets():
             for hook_name in ("applyStyles", "refresh_fonts"):
                 try:
                     hook = getattr(w, hook_name, None)
                 except RuntimeError:
-                    continue
+                    break
 
                 if callable(hook):
                     try:
                         hook()
                     except RuntimeError:
-                        continue
+                        break
                     except Exception:
                         pass
 
@@ -900,21 +1170,21 @@ QLabel#VaultDialogDesc {{
     color: {c['text_muted']};
 }}
 QLabel#VaultErrorLabel {{
-    color: #e05555;
+    color: {c['danger']};
     font-weight: 600;
     padding-top: {p4}px;
 }}
 QFrame#VaultWarningBox {{
-    background-color: #fff3cd;
-    border: 1px solid #ffc107;
+    background-color: {c['warning_bg']};
+    border: 1px solid {c['warning']};
     border-radius: {r4}px;
 }}
 QLabel#VaultWarningText {{
-    color: #664d03;
+    color: {c['warning_text']};
 }}
 QPushButton#VaultConfirmBtn {{
     background-color: {c['accent']};
-    color: #ffffff;
+    color: {c['on_accent']};
     border: none;
     border-radius: {r4}px;
     padding: {bp_y}px {bp_x}px;
@@ -957,7 +1227,7 @@ QFrame#VaultHintsFrame {{
     border-radius: {r4}px;
 }}
 QLabel#VaultHintPass {{
-    color: #3cb371;
+    color: {c['success']};
 }}
 QLabel#VaultHintFail {{
     color: {c['text_muted']};
@@ -992,10 +1262,125 @@ QLabel#NoticeTitleLabel {{
     font-weight: bold;
 }}
 
+/* Import / export wizard */
+QLabel#CountLabel {{
+    color: {c['text_muted']};
+    margin-left: 12px;
+}}
+QFrame#VaultOptionsFrame {{
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r4}px;
+}}
+QLabel#VaultOptionsNote {{
+    color: {c['text_muted']};
+}}
+
+/* Vault link-style labels */
+QLabel#VaultRecoveryLink {{
+    color: {c['accent']};
+}}
+QLabel#VaultHintLabel {{
+    color: {c['text_muted']};
+}}
+
+/* Platform notice banner (Linux) */
+QWidget#PlatformNotice {{
+    background: {c['warning_bg']};
+    border: 1px solid {c['warning']};
+    border-radius: {r4}px;
+    padding: 5px;
+}}
+QWidget#PlatformNotice QLabel {{
+    background: transparent;
+    color: {c['warning_text']};
+}}
+QPushButton#PlatformNoticeClose {{
+    background: transparent;
+    border: none;
+    color: {c['warning_text']};
+    min-width: 0;
+    min-height: 0;
+    padding: 0px;
+    font-weight: bold;
+}}
+QPushButton#PlatformNoticeClose:hover {{
+    background: {c['hover']};
+    border-radius: {r4}px;
+}}
+
+/* Backup history table */
+QTableWidget#BackupHistoryTable {{
+    background-color: transparent;
+    color: {c['text']};
+    border: 1px solid {c['border']};
+    border-radius: {r6}px;
+    gridline-color: {c['border']};
+    outline: none;
+}}
+QTableWidget#BackupHistoryTable::item {{
+    padding: {p6}px {p8}px;
+    border-bottom: 1px solid {c['border']};
+}}
+QTableWidget#BackupHistoryTable QHeaderView::section {{
+    background-color: {c['card']};
+    color: {c['text_muted']};
+    border: none;
+    border-bottom: 1px solid {c['border']};
+    padding: {p6}px {p8}px;
+}}
+
+/* Inline row action buttons */
+QPushButton#BackupRowBtn {{
+    background: transparent;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 2px;
+    border-radius: {r4}px;
+}}
+QPushButton#BackupRowBtn:hover {{
+    background-color: {c['hover']};
+}}
+QPushButton#BackupRowBtn:pressed {{
+    background-color: {c['selected']};
+}}
+QPushButton#BackupRowBtn:disabled {{
+    background: transparent;
+}}
+
+/* Pagination */
+QPushButton#BackupPageBtn {{
+    background: transparent;
+    border: 1px solid {c['border']};
+    color: {c['text']};
+    min-width: 0;
+    min-height: 0;
+    padding: 0px {p6}px;
+    border-radius: {r4}px;
+}}
+QPushButton#BackupPageBtn:hover {{
+    background-color: {c['hover']};
+    border-color: {c['accent']};
+}}
+QPushButton#BackupPageBtnCurrent {{
+    background-color: {c['accent']};
+    color: {c['on_accent']};
+    border: 1px solid {c['accent']};
+    min-width: 0;
+    min-height: 0;
+    padding: 0px {p6}px;
+    border-radius: {r4}px;
+}}
+QPushButton#BackupPageBtnCurrent:disabled {{
+    background-color: {c['accent']};
+    color: {c['on_accent']};
+}}
+
 /* Settings toast */
 QLabel#SettingsToast {{
     background-color: {c['accent']};
-    color: white;
+    color: {c['on_accent']};
     padding: {p8}px {p12}px;
     border-radius: {r6}px;
 }}

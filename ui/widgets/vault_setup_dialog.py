@@ -873,7 +873,8 @@ class VaultSetupDialog(QDialog):
     def save_config(self, config: dict) -> None:
         try:
             from utils.file_utils import FileUtils
-            main = getattr(self.parent(), "parent", None)
+            from ui.theme_manager import ThemeManager
+            main = ThemeManager.app_instance()
             if main and hasattr(main, "config_file"):
                 FileUtils.write_yaml(main.config_file, config)
         except Exception as exc:
@@ -881,40 +882,7 @@ class VaultSetupDialog(QDialog):
             logging.getLogger(__name__).error("Failed to persist vault config: %s", exc)
 
     def applyStyles(self) -> None:
-        try:
-            main = getattr(self.parent(), "parent", None)
-            if main and hasattr(main, "medium_font_size"):
-                mf = main.medium_font_size
-                lf_bold = main.large_font_size_bold
-                sf = main.small_font_size
-
-                for lbl in self.findChildren(QLabel, "VaultDialogTitle"):
-                    lbl.setFont(lf_bold)
-                for lbl in self.findChildren(QLabel, "VaultDialogDesc"):
-                    lbl.setFont(sf)
-                for btn in self.findChildren(QPushButton):
-                    btn.setFont(mf)
-                for lbl in self.findChildren(QLabel, "VaultFieldLabel"):
-                    lbl.setFont(mf)
-                for attr in ("current_pw", "new_pw", "confirm_pw", "target_folder",
-                             "change_rec_code", "disable_rec_code"):
-                    field = getattr(self, attr, None)
-                    if field:
-                        field.setFont(mf)
-                for attr in ("change_recovery_link", "change_pw_link",
-                             "disable_recovery_link", "disable_pw_link"):
-                    lbl = getattr(self, attr, None)
-                    if lbl:
-                        lbl.setFont(sf)
-                if hasattr(self, "recovery_code_label"):
-                    self.recovery_code_label.setFont(lf_bold)
-                for lbl in self.findChildren(QLabel, "VaultHintFail"):
-                    lbl.setFont(sf)
-                for lbl in self.findChildren(QLabel, "VaultHintPass"):
-                    lbl.setFont(sf)
-                if hasattr(self, "recovery_ack"):
-                    self.recovery_ack.setFont(sf)
-                if hasattr(self, "copy_toast"):
-                    self.copy_toast.applyStyles()
-        except Exception:
-            pass
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
+        if hasattr(self, "copy_toast"):
+            self.copy_toast.applyStyles()

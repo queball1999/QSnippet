@@ -102,25 +102,8 @@ class PasswordDialog(QDialog):
         self.field.setFocus()
 
     def applyStyles(self):
-        try:
-            # PasswordDialog -> ImportExportWizard -> window -> main app
-            p = self.parent()
-            if p is not None:
-                p = p.parent()
-            main = getattr(p, "parent", None)
-            if main and not callable(main) and hasattr(main, "medium_font_size"):
-                mf = main.medium_font_size
-                sf = main.small_font_size
-                self.title_label.setFont(main.large_font_size_bold)
-                self.prompt_label.setFont(sf)
-                self.field.setFont(mf)
-                self.error_label.setFont(sf)
-                for lbl in self.findChildren(QLabel, "VaultFieldLabel"):
-                    lbl.setFont(mf)
-                for btn in self.findChildren(QPushButton):
-                    btn.setFont(mf)
-        except Exception:
-            pass
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
 
 
 # ─── Main wizard ──────────────────────────────────────────────────────────────
@@ -204,7 +187,7 @@ class ImportExportWizard(QDialog):
 
         self.count_label = QLabel("0 / 0 selected")
         self.count_label.setObjectName("CountLabel")
-        self.count_label.setStyleSheet("color: gray; margin-left: 12px;")
+        # Colour is themed via the QLabel#CountLabel rule in ThemeManager.build_qss
         checkbox_row.addWidget(self.count_label)
         checkbox_row.addStretch()
         root.addLayout(checkbox_row)
@@ -956,45 +939,6 @@ class ImportExportWizard(QDialog):
     # ─────────────────────────────────────────────── Styles
 
     def applyStyles(self) -> None:
-        """Apply fonts from the main app to all widgets."""
-        try:
-            main_app = getattr(self.parent(), "parent", None)
-            if not main_app or not hasattr(main_app, "medium_font_size"):
-                return
-
-            font = main_app.medium_font_size
-            title_font = getattr(
-                main_app, "large_font_size_bold",
-                getattr(main_app, "large_font_size", font)
-            )
-            small_font = getattr(main_app, "small_font_size", font)
-
-            self.setFont(font)
-            if hasattr(self, "title_label"):
-                self.title_label.setFont(title_font)
-            for child in self.findChildren(QLabel):
-                if child is getattr(self, "title_label", None):
-                    continue
-                name = child.objectName()
-                if name in ("VaultOptionsNote", "VaultWarningText"):
-                    child.setFont(small_font)
-                elif name == "VaultOptionsSectionTitle":
-                    child.setFont(getattr(main_app, "medium_font_size_bold", font))
-                else:
-                    child.setFont(font)
-            for child in self.findChildren(QPushButton):
-                child.setFont(font)
-            for child in self.findChildren(QCheckBox):
-                child.setFont(font)
-            if hasattr(self, "table"):
-                self.table.setFont(font)
-                self.apply_header_font(self.table.horizontalHeader(), font)
-        except Exception:
-            pass
-
-    def apply_header_font(self, header, font) -> None:
-        if not header:
-            return
-        header.setFont(font)
-        header.viewport().update()
-        header.update()
+        """Apply the app's scaled, role-correct fonts to every widget."""
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)

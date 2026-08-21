@@ -8,9 +8,9 @@ from PySide6.QtWidgets import (
     QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QFont, QIcon
 from .QAnimatedSwitch import QAnimatedSwitch
-from .password_field import svg_icon, _EYE_SVG, _EYE_OFF_SVG
+from .password_field import eye_icons
 from utils.file_utils import FileUtils
 
 logger = logging.getLogger(__name__)
@@ -191,8 +191,7 @@ class PlaceholderDialog(QDialog):
         self.reveal_value_btn.setCursor(Qt.PointingHandCursor)
         self.reveal_value_btn.setFlat(True)
         self.reveal_value_btn.setFixedSize(28, 28)
-        self.icon_eye_on = svg_icon(_EYE_SVG)
-        self.icon_eye_off = svg_icon(_EYE_OFF_SVG)
+        self.icon_eye_on, self.icon_eye_off = eye_icons()
         self.reveal_value_btn.setIcon(self.icon_eye_on)
         self.reveal_value_btn.setToolTip("Show value")
         self.reveal_value_btn.clicked.connect(self.on_reveal_value_toggled)
@@ -307,7 +306,8 @@ class PlaceholderDialog(QDialog):
         name_item.setData(Qt.UserRole, {"id": row_id, "is_system": is_system, "is_encrypted": is_encrypted})
 
         if is_system:
-            grey = QColor("#aaaaaa")
+            from ui.theme_manager import ThemeManager
+            grey = ThemeManager.qcolor("text_muted", "#aaaaaa")
             italic_font = QFont()
             italic_font.setItalic(True)
             for item in (type_item, name_item, desc_item):
@@ -639,49 +639,15 @@ class PlaceholderDialog(QDialog):
                 return
 
     def applyStyles(self):
-        """Apply fonts from main app to all widgets."""
-        try:
-            # self.parent() = QSnippet window (Qt method)
-            # .parent = Python attribute on the window pointing to the main() app instance
-            main_app = getattr(self.parent(), 'parent', None)
+        """Apply the app's scaled, role-correct fonts and re-tint theme icons."""
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
+        self.refresh_eye_icons()
 
-            if not main_app or not hasattr(main_app, 'medium_font_size'):
-                return
-
-            font = main_app.medium_font_size
-            self.setFont(font)
-
-            title_font = getattr(main_app, "large_font_size_bold", getattr(main_app, "large_font_size", font))
-            field_label_font = getattr(main_app, "large_font_size", font)
-            small_font = getattr(main_app, "small_font_size", font)
-
-            # Apply to all label, input, and button widgets
-            for child in self.findChildren(QLabel):
-                if child.objectName() == "PanelTitle":
-                    child.setFont(title_font)
-                elif child.objectName() == "FieldLabel":
-                    child.setFont(field_label_font)
-                elif child.objectName() in ("FieldHint", "ErrorLabel", "SystemNotice"):
-                    child.setFont(small_font)
-                else:
-                    child.setFont(font)
-            for child in self.findChildren(QLineEdit):
-                child.setFont(font)
-            for child in self.findChildren(QTextEdit):
-                child.setFont(font)
-            for child in self.findChildren(QPushButton):
-                child.setFont(font)
-            if hasattr(self, 'table') and self.table:
-                self.table.setFont(font)
-                self.apply_header_font(self.table.horizontalHeader(), font)
-        except Exception:
-            pass
-
-    def apply_header_font(self, header, font):
-        """Set font on a QHeaderView and force a visual repaint."""
-        if not header:
-            return
-        header.setFont(font)
-        header.viewport().update()
-        header.update()
+    def refresh_eye_icons(self) -> None:
+        """Re-render the reveal icons for the current theme."""
+        self.icon_eye_on, self.icon_eye_off = eye_icons()
+        self.reveal_value_btn.setIcon(
+            self.icon_eye_off if getattr(self, "value_revealed", False) else self.icon_eye_on
+        )
 

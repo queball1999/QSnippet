@@ -179,30 +179,19 @@ class VaultSettingsPage(QWidget):
     def applyStyles(self):
         self.apply_header_font()
         try:
-            main = getattr(self.window, 'parent', None)
-            if not main:
-                return
-            mf = getattr(main, 'medium_font_size', None)
-            ts = getattr(main, 'small_toggle_size', None)
-            if mf is not None and ts is not None:
-                self.launch_switch.text_font = mf
-                self.launch_switch.toggle_size = ts
-                self.launch_switch.applyStyles()
+            from ui.theme_manager import ThemeManager
+            self.launch_switch.text_font = ThemeManager.font("medium")
+            toggle_size = ThemeManager.toggle_size("small")
+            if toggle_size is not None:
+                self.launch_switch.toggle_size = toggle_size
+            self.launch_switch.applyStyles()
         except Exception:
             pass
 
     def apply_header_font(self):
         """Match the bold/large header font used by dynamically generated settings pages."""
-        app = getattr(self.window, "parent", None)
-        if not app:
-            return
-
-        if hasattr(app, "large_font_size_bold"):
-            self.header.setFont(getattr(app, "large_font_size_bold"))
-        elif hasattr(app, "large_font_size"):
-            font = getattr(app, "large_font_size")
-            font.setBold(True)
-            self.header.setFont(font)
+        from ui.theme_manager import ThemeManager
+        self.header.setFont(ThemeManager.font("large", bold=True))
 
     def on_launch_changed(self, checked: bool):
         cfg = dict(self.window.vault_config())

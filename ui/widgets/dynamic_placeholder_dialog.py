@@ -182,19 +182,5 @@ class DynamicPlaceholderDialog(QDialog):
             self.submit_single_form()
 
     def applyStyles(self) -> None:
-        try:
-            main = getattr(self.parent(), "parent", None)
-            if main and hasattr(main, "medium_font_size"):
-                mf = main.medium_font_size
-                sf = main.small_font_size
-                self.title_label.setFont(main.large_font_size_bold)
-                for lbl in self.findChildren(QLabel, "VaultDialogDesc"):
-                    lbl.setFont(sf)
-                for lbl in self.findChildren(QLabel, "VaultFieldLabel"):
-                    lbl.setFont(mf)
-                for field in self.findChildren(QLineEdit, "VaultField"):
-                    field.setFont(mf)
-                for btn in self.findChildren(QPushButton):
-                    btn.setFont(mf)
-        except Exception:
-            pass
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)

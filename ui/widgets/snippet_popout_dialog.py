@@ -56,15 +56,8 @@ class SnippetPopoutDialog(QDialog):
         self.editor.setPlainText(text)
 
     def applyStyles(self) -> None:
-        try:
-            main = getattr(self.parent(), 'parent', None)
-            if main and hasattr(main, 'medium_font_size'):
-                self.snippet.setFont(main.large_font_size_bold)
-                self.label.setFont(main.medium_font_size)
-                self.editor.setFont(main.medium_font_size)
-                self.close_btn.setFont(main.medium_font_size)
-        except Exception:
-            pass
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
 
     def apply_and_close(self) -> None:
         self.snippetApplied.emit(self.editor.toPlainText())

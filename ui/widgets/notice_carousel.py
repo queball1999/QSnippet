@@ -192,26 +192,9 @@ class NoticeCarouselDialog(QDialog):
         super().reject()
 
     def applyStyles(self) -> None:
-        """Apply scaled fonts from the parent app instance to all widgets."""
-        try:
-            main_app = getattr(self.parent, 'parent', None) if self.parent else None
-            if not main_app or not hasattr(main_app, 'medium_font_size'):
-                return
-            font = main_app.medium_font_size
-            self.setFont(font)
-            top_font = getattr(main_app, 'large_font_size_bold', getattr(main_app, 'large_font_size', font))
-            title_font = getattr(main_app, 'medium_font_size_bold', getattr(main_app, 'large_font_size', font))
-            self.top_label.setFont(top_font)
-            self.title_label.setFont(title_font)
-            for child in self.findChildren(QLabel):
-                if child not in (self.top_label, self.title_label):
-                    child.setFont(font)
-            for child in self.findChildren(QPushButton):
-                child.setFont(font)
-            for child in self.findChildren(QCheckBox):
-                child.setFont(font)
-        except Exception:
-            pass
+        """Apply the app's scaled, role-correct fonts to every widget."""
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
 
     @staticmethod
     def parse_notice_dt(stem: str, path: Path) -> datetime:

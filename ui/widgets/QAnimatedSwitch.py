@@ -41,9 +41,11 @@ class QAnimatedSwitch(QWidget):
         super().__init__(parent)
         if checked_color is None:
             try:
-                from ui.theme_manager import ThemeManager, THEMES
+                from ui.theme_manager import ThemeManager
                 tm = ThemeManager.get_instance()
-                checked_color = THEMES.get(tm.theme_name, {}).get("accent", "#9C0000") if tm else "#9C0000"
+                # get_colors() resolves the live system/override accent; the
+                # raw THEMES entry is only a fallback literal.
+                checked_color = tm.get_colors()["accent"] if tm else "#9C0000"
             except Exception:
                 checked_color = "#9C0000"
         self.setObjectName(objectName)

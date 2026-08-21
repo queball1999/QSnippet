@@ -155,6 +155,8 @@ class QSnippet(QMainWindow):
 
         # Create a container widget for the notice
         notice_container = QWidget()
+        notice_container.setObjectName("PlatformNotice")
+        notice_container.setAttribute(Qt.WA_StyledBackground, True)
         notice_layout = QHBoxLayout(notice_container)
         notice_layout.setContentsMargins(10, 5, 5, 5)
 
@@ -165,6 +167,7 @@ class QSnippet(QMainWindow):
 
         # Create close button
         close_button = QPushButton("✕")
+        close_button.setObjectName("PlatformNoticeClose")
         close_button.setMaximumWidth(30)
         close_button.setToolTip("Dismiss notice")
         close_button.clicked.connect(notice_container.hide)
@@ -174,30 +177,8 @@ class QSnippet(QMainWindow):
         notice_layout.addWidget(close_button)
         notice_container.setLayout(notice_layout)
 
-        # Style the notice container
-        notice_container.setStyleSheet("""
-            QWidget {
-                padding: 5px;
-                background: #ffcc00;
-                color: #000000;
-            }
-            QLabel {
-                background: transparent;
-                color: #000000;
-            }
-            QPushButton {
-                background: transparent;
-                border: none;
-                color: #000000;
-                padding: 0px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: rgba(0, 0, 0, 0.1);
-                border-radius: 3px;
-            }
-        """)
+        # Styled by the QWidget#PlatformNotice rules in ThemeManager.build_qss
+        # so the banner follows the active theme instead of a fixed yellow.
 
         self.linux_notice = notice_container
         self.linux_notice.hide()
@@ -1152,22 +1133,11 @@ class QSnippet(QMainWindow):
         Call this whenever font family, font size, or button sizes change while the
         app is running.  safe to call multiple times.
         """
-        # Recompute QFont objects and re-apply QSS/theme
+        # Recompute QFont objects, then re-apply QSS/theme. apply_theme ->
+        # ThemeManager.apply -> force_repaint runs the full three-phase refresh
+        # (repolish -> blanket font sweep -> per-widget applyStyles) across
+        # every live widget, so no dialog needs to be refreshed by hand here.
         self.parent.scale_ui_cfg()
-
-        # Propagate new family to every widget that hasn't had setFont() called
-        # explicitly - this covers status bars, group boxes, tab bars, etc.
-        self.parent.apply_fonts_to_all_widgets()
-
-        # Size-specific overrides (non-medium widgets)
-        self.editor.applyStyles()
-
-        if hasattr(self, 'settings_dialog') and self.settings_dialog and self.settings_dialog.isVisible():
-            self.settings_dialog.applyStyles()
-
-        if hasattr(self, 'placeholder_dialog') and self.placeholder_dialog and self.placeholder_dialog.isVisible():
-            self.placeholder_dialog.applyStyles()
-
         self.app.processEvents()
 
     # Vault
@@ -1767,15 +1737,9 @@ class QSnippet(QMainWindow):
 
     def refresh_theme_display(self) -> None:
         """Re-apply theme/scale/accent after a live change to those settings."""
+        # force_repaint inside apply_theme covers every live widget in the
+        # correct order; see QSnippet.refresh_font_display.
         self.parent.apply_theme()
-        # apply_theme → force_repaint calls applyStyles on all widgets, but the
-        # generic sweep and dialog-specific refreshes still need to run.
-        self.parent.apply_fonts_to_all_widgets()
-        self.editor.applyStyles()
-        if hasattr(self, 'settings_dialog') and self.settings_dialog and self.settings_dialog.isVisible():
-            self.settings_dialog.applyStyles()
-        if hasattr(self, 'placeholder_dialog') and self.placeholder_dialog and self.placeholder_dialog.isVisible():
-            self.placeholder_dialog.applyStyles()
         self.app.processEvents()
 
     def unset_skip_reg(self):

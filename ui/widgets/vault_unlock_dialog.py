@@ -200,20 +200,5 @@ class VaultUnlockDialog(QDialog):
         super().closeEvent(event)
 
     def applyStyles(self) -> None:
-        try:
-            main = getattr(self.parent(), "parent", None)
-            if main and hasattr(main, "medium_font_size"):
-                mf = main.medium_font_size
-                sf = main.small_font_size
-                self.title_label.setFont(main.large_font_size_bold)
-                self.body_label.setFont(sf)
-                self.pw_field.setFont(mf)
-                self.rec_field.setFont(mf)
-                self.cancel_btn.setFont(mf)
-                self.unlock_btn.setFont(mf)
-                self.recovery_link.setFont(sf)
-                self.pw_link.setFont(sf)
-                for lbl in self.findChildren(QLabel, "VaultFieldLabel"):
-                    lbl.setFont(mf)
-        except Exception:
-            pass
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)

@@ -458,13 +458,5 @@ class DbSettingsPage(QWidget):
 
     def apply_header_font(self):
         """Match the bold/large header font used by dynamically generated settings pages."""
-        app = getattr(self.window, "parent", None)
-        if not app:
-            return
-
-        if hasattr(app, "large_font_size_bold"):
-            self.header.setFont(getattr(app, "large_font_size_bold"))
-        elif hasattr(app, "large_font_size"):
-            font = getattr(app, "large_font_size")
-            font.setBold(True)
-            self.header.setFont(font)
+        from ui.theme_manager import ThemeManager
+        self.header.setFont(ThemeManager.font("large", bold=True))

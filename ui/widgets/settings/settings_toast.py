@@ -28,12 +28,11 @@ class SettingsToast(QLabel):
         self.hide_timer.start(duration_ms)
 
     def applyStyles(self):
-        """Update font from the parent settings dialog's app instance."""
+        """Update the toast font from the main app's scaled font set."""
         try:
-            main_app = getattr(self.parentWidget().parent(), 'parent', None)
-            if main_app and hasattr(main_app, 'medium_font_size'):
-                self.setFont(main_app.medium_font_size)
-                self.adjustSize()
+            from ui.theme_manager import ThemeManager
+            self.setFont(ThemeManager.font("medium"))
+            self.adjustSize()
         except Exception:
             pass
 

@@ -484,40 +484,25 @@ class main():
         self.apply_theme()
 
     def apply_fonts_to_all_widgets(self) -> None:
-        """Apply the current medium font to every applicable widget in the app."""
-        try:
-            from PySide6.QtWidgets import (
-                QWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
-                QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
-                QHeaderView
-            )
+        """
+        Blanket font sweep across every top-level widget tree.
 
-            font = self.medium_font_size
+        Sizing is role-aware: ThemeManager.apply_fonts picks each widget's
+        font from OBJECT_NAME_FONTS, falling back to the medium font. This is
+        phase 2 of ThemeManager.force_repaint and must run before the
+        per-widget applyStyles() hooks (phase 3), which layer on the remaining
+        overrides that object names alone cannot express.
+        """
+        try:
+            from ui.theme_manager import ThemeManager
 
             # Set the app-level font so widgets that rely on inheritance
             # (status bar, group box titles, tab bars, etc.) also pick up
             # the new font family even though we don't walk their trees explicitly.
-            self.app.setFont(font)
-
-            applicable = (
-                QLabel, QLineEdit, QComboBox, QSpinBox, QTextEdit,
-                QPushButton, QCheckBox, QRadioButton, QAbstractItemView,
-            )
-
-            def apply_to_tree(root):
-                for child in root.findChildren(QWidget):
-                    if isinstance(child, applicable):
-                        child.setFont(font)
-                        if isinstance(child, QComboBox) and child.lineEdit():
-                            child.lineEdit().setFont(font)
-                    # Sweep every header view directly - covers QTreeView, QTableView,
-                    # QTreeWidget, QTableWidget, and any other view that uses a header
-                    if isinstance(child, QHeaderView):
-                        child.setFont(font)
-                        child.viewport().update()
+            self.app.setFont(self.medium_font_size)
 
             for top in self.app.topLevelWidgets():
-                apply_to_tree(top)
+                ThemeManager.apply_fonts(top)
 
         except Exception as e:
             logger.debug(f"Error applying fonts to all widgets: {e}")
@@ -578,7 +563,11 @@ class main():
         accent_col = val("accent_color", "system")
 
         if not hasattr(self, "theme_manager") or self.theme_manager is None:
-            self.theme_manager = ThemeManager(self.app)
+            # `main=self` is what every widget uses to reach the scaled QFont
+            # attributes (see ThemeManager.app_instance / ThemeManager.font).
+            self.theme_manager = ThemeManager(self.app, main=self)
+        else:
+            self.theme_manager.main = self
 
         resolved  = self.theme_manager.resolve_theme(theme_val)
         prev_theme = self.theme_manager.theme_name  # theme from the last apply()

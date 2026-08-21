@@ -500,23 +500,19 @@ class SettingsDialog(QDialog):
             self.stack.setCurrentIndex(row)
 
     def applyStyles(self):
-        """Apply fonts from main app to all widgets."""
-        try:
-            font = self.get_medium_font()
-            self.setFont(font)
+        """
+        Apply the app's scaled, role-correct fonts across the whole dialog.
 
-            if hasattr(self, 'search') and self.search:
-                self.search.setFont(font)
-            if hasattr(self, 'list') and self.list:
-                self.list.setFont(font)
-            if hasattr(self, 'restore_defaults_btn') and self.restore_defaults_btn:
-                self.restore_defaults_btn.setFont(font)
-            if hasattr(self, 'search_results') and self.search_results:
-                self.search_results.setFont(font)
+        Font sizing is driven entirely by objectName via
+        ThemeManager.OBJECT_NAME_FONTS, so pages, cards, and controls all
+        follow the same table the QSS colour rules use.
+        """
+        from ui.theme_manager import ThemeManager
+        try:
+            ThemeManager.apply_fonts(self)
 
             for i in range(self.stack.count()):
                 page = self.stack.widget(i)
-                self.apply_font_to_widget_tree(page, font)
                 if hasattr(page, "refresh_breadcrumb_fonts"):
                     page.refresh_breadcrumb_fonts()
                 if hasattr(page, "applyStyles"):
@@ -524,57 +520,18 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-    def apply_font_to_widget_tree(self, widget, font):
-        """Recursively apply font to all widgets in tree, using size variants by role."""
-        from PySide6.QtWidgets import (
-            QWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton
-        )
-
-        try:
-            main_app = getattr(self.parent(), 'parent', None)
-
-            def font_for(w):
-                if main_app:
-                    name = w.objectName()
-                    if name == "SettingsHeader":
-                        return getattr(main_app, 'large_font_size_bold', getattr(main_app, 'large_font_size', font))
-                    if name == "SettingsChevron":
-                        return getattr(main_app, 'large_font_size', font)
-                    if name == "SettingsCardTitle":
-                        return getattr(main_app, 'medium_font_size_bold', font)
-                    if name == "SettingsCardDescription":
-                        return getattr(main_app, 'small_font_size', font)
-                return font
-
-            applicable = (QLabel, QLineEdit, QComboBox, QSpinBox, QPushButton)
-
-            if isinstance(widget, applicable):
-                widget.setFont(font_for(widget))
-                if isinstance(widget, QComboBox) and widget.lineEdit():
-                    widget.lineEdit().setFont(font_for(widget))
-
-            # findChildren with a tuple of types crashes PySide6; use QWidget + isinstance
-            for child in widget.findChildren(QWidget):
-                if isinstance(child, applicable):
-                    child.setFont(font_for(child))
-                    if isinstance(child, QComboBox) and child.lineEdit():
-                        child.lineEdit().setFont(font_for(child))
-        except Exception:
-            pass
+    def apply_font_to_widget_tree(self, widget, font=None):
+        """Apply role-correct fonts to *widget* and its children."""
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(widget)
 
     def refresh_widget_fonts(self, widget):
         """Recursively update fonts on widget and all children."""
-        try:
-            self.apply_font_to_widget_tree(widget, self.get_medium_font())
-        except Exception:
-            pass
+        self.apply_font_to_widget_tree(widget)
 
     def get_medium_font(self):
         """Return the current medium font from the main app, or a fallback."""
-        from PySide6.QtGui import QFont
-        app = getattr(self.parent(), 'parent', None)
-        if app and hasattr(app, 'medium_font_size'):
-            return app.medium_font_size
-        return QFont()
+        from ui.theme_manager import ThemeManager
+        return ThemeManager.font("medium")
 
 

@@ -48,14 +48,8 @@ class SettingsCategoryPage(QWidget):
 
     def get_main_app(self):
         """Get reference to main QSnippet app instance."""
-        try:
-            # dialog.parent() = QSnippet window (Qt method on SettingsDialog)
-            # window.parent  = Python attribute on QSnippet = main() app instance
-            window = self.dialog.parent()
-            return getattr(window, 'parent', None)
-        except Exception:
-            pass
-        return None
+        from ui.theme_manager import ThemeManager
+        return ThemeManager.app_instance()
 
     def apply_widget_font(self, widget: QWidget, font_size: str = "medium"):
         """Apply appropriate font to a widget based on type."""

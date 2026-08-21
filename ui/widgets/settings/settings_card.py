@@ -18,7 +18,6 @@ class SettingsCard(QWidget):
         title_label = QLabel(title)
         title_label.setObjectName("SettingsCardTitle")
         title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.apply_font_to_label(title_label, "small")
 
         control.setMinimumWidth(100)
 
@@ -32,26 +31,19 @@ class SettingsCard(QWidget):
         desc = QLabel(description.strip())
         desc.setObjectName("SettingsCardDescription")
         desc.setWordWrap(True)
-        self.apply_font_to_label(desc, "small")
 
         root.addLayout(header)
         root.addWidget(desc)
 
-    def apply_font_to_label(self, label: QLabel, font_size: str):
-        """Apply font to label from main app if available."""
-        try:
-            # Navigate to main app: card -> page/subcategory -> dialog -> window -> app
-            widget = self.parent()
-            while widget and not hasattr(widget, 'parent'):
-                widget = widget.parent()
+        self.applyStyles()
 
-            if widget and hasattr(widget, 'parent'):
-                window = widget.parent()
-                if hasattr(window, 'parent'):
-                    app = window.parent()
-                    font_attr = f"{font_size}_font_size"
-                    if hasattr(app, font_attr):
-                        font = getattr(app, font_attr)
-                        label.setFont(font)
-        except Exception:
-            pass
+    def applyStyles(self) -> None:
+        """
+        Re-apply role-correct fonts to the card.
+
+        Sizing comes from ThemeManager.OBJECT_NAME_FONTS via the labels'
+        object names, so the card matches what SettingsDialog and the QSS
+        rules assume for SettingsCardTitle / SettingsCardDescription.
+        """
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(self)
