@@ -1608,14 +1608,27 @@ class QSnippet(QMainWindow):
         from ui.widgets.dynamic_placeholder_dialog import DynamicPlaceholderDialog
         from PySide6.QtCore import Qt as _Qt
         from PySide6.QtWidgets import QDialog
+        from utils.focus_utils import active_window, restore_focus
+
+        # Remember where the user was typing. The expander synthesises
+        # keystrokes into whatever window is focused, so this has to be
+        # restored before expanding or the paste lands in the wrong app.
+        target_window = active_window()
+
         mode = expander.get_dynamic_placeholder_dialog_mode()
         dlg = DynamicPlaceholderDialog(names, mode=mode, parent=self)
         # Stay on top even when the main window is hidden (minimized to tray)
         dlg.setWindowFlags(dlg.windowFlags() | _Qt.WindowStaysOnTopHint)
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-        if dlg.exec() != QDialog.Accepted:
+        # The dialog grabs the foreground itself from its showEvent, once Qt
+        # has created the native window that SetForegroundWindow needs.
+        accepted = dlg.exec() == QDialog.Accepted
+
+        # Hand focus back to the originating application either way, so a
+        # cancel does not leave the user staring at our window.
+        dlg.hide()
+        restore_focus(target_window)
+
+        if not accepted:
             expander.clear_buffer()
             return
 

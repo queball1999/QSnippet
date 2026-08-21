@@ -4,6 +4,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut, QGuiApplication, QCursor
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DynamicPlaceholderDialog(QDialog):
     """
@@ -18,8 +22,8 @@ class DynamicPlaceholderDialog(QDialog):
         self.names = list(names)
         self.mode = mode if mode == "sequential" else "single_form"
         self.values: dict[str, str] = {}
-        self._index = 0
-        self._fields: dict[str, QLineEdit] = {}
+        self.index = 0
+        self.fields: dict[str, QLineEdit] = {}
 
         self.setWindowTitle("Fill in Snippet Details")
         self.setWindowModality(Qt.ApplicationModal)
@@ -48,6 +52,41 @@ class DynamicPlaceholderDialog(QDialog):
         dialog_rect.moveCenter(screen_center)
         self.move(dialog_rect.topLeft())
 
+    def showEvent(self, event) -> None:
+        """
+        Take real keyboard focus once the window is actually mapped.
+
+        Both steps have to happen after the show, not during construction:
+        the native window does not exist yet in __init__, and setFocus() on a
+        not-yet-visible widget does not survive the show. This dialog
+        interrupts the user mid-keystroke in another application, so it has to
+        be typeable the moment it appears.
+        """
+        super().showEvent(event)
+        QTimer.singleShot(0, self.grab_focus)
+
+    def grab_focus(self) -> None:
+        """Pull the window to the foreground, then focus the first field."""
+        try:
+            from utils.focus_utils import focus_dialog
+            focus_dialog(self)
+        except Exception:
+            logger.debug("Foreground grab failed", exc_info=True)
+        self.focus_first_field()
+
+    def focus_first_field(self) -> None:
+        """Give keyboard focus to the field the user should fill in next."""
+        try:
+            if self.mode == "sequential":
+                target = self.field
+            else:
+                target = self.fields.get(self.names[0]) if self.names else None
+            if target is not None:
+                target.setFocus(Qt.OtherFocusReason)
+                target.selectAll()
+        except Exception:
+            pass
+
     def build_single_form_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 24, 24, 20)
@@ -74,7 +113,7 @@ class DynamicPlaceholderDialog(QDialog):
         for name in self.names:
             field = QLineEdit()
             field.setObjectName("VaultField")
-            self._fields[name] = field
+            self.fields[name] = field
 
             label = QLabel(name.title())
             label.setObjectName("VaultFieldLabel")
@@ -100,7 +139,7 @@ class DynamicPlaceholderDialog(QDialog):
         layout.addLayout(btn_layout)
 
         if self.names:
-            self._fields[self.names[0]].setFocus()
+            self.fields[self.names[0]].setFocus()
 
     def build_sequential_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -147,31 +186,31 @@ class DynamicPlaceholderDialog(QDialog):
 
     def show_current_field(self) -> None:
         total = len(self.names)
-        name = self.names[self._index]
-        self.progress_label.setText(f"Field {self._index + 1} of {total}")
+        name = self.names[self.index]
+        self.progress_label.setText(f"Field {self.index + 1} of {total}")
         self.field_label.setText(name)
         self.field.setText(self.values.get(name, ""))
-        self.back_btn.setEnabled(self._index > 0)
-        self.primary_btn.setText("Finish" if self._index == total - 1 else "Next")
+        self.back_btn.setEnabled(self.index > 0)
+        self.primary_btn.setText("Finish" if self.index == total - 1 else "Next")
         self.field.setFocus()
 
     def go_back(self) -> None:
-        if self._index == 0:
+        if self.index == 0:
             return
-        self.values[self.names[self._index]] = self.field.text()
-        self._index -= 1
+        self.values[self.names[self.index]] = self.field.text()
+        self.index -= 1
         self.show_current_field()
 
     def go_next(self) -> None:
-        self.values[self.names[self._index]] = self.field.text()
-        if self._index == len(self.names) - 1:
+        self.values[self.names[self.index]] = self.field.text()
+        if self.index == len(self.names) - 1:
             self.accept()
             return
-        self._index += 1
+        self.index += 1
         self.show_current_field()
 
     def submit_single_form(self) -> None:
-        for name, field in self._fields.items():
+        for name, field in self.fields.items():
             self.values[name] = field.text()
         self.accept()
 
