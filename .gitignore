@@ -172,3 +172,4 @@ linux-notes.md
 
 # Exclude ruff
 .ruff_cache/
+assets/images/Thumbs.db

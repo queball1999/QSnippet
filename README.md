@@ -65,11 +65,7 @@ If you prefer to build and run QSnippet from source, see the [Development Notes]
 Demo
 <img src="assets/videos/QSnippet_demo.gif" alt="Demo of QSnippet" style="align:center;"/>
 
-Homepage
-<img src="assets/images/homepage.png" alt="Photo of QSnippet" style="align:center;"/>
-
-Snippet Form
-<img src="assets/images/snippet_form.png" alt="Photo of QSnippet" style="align:center;"/>
+See the full [Screenshots Gallery](GALLERY.md) for a look at the homepage, snippet editor, and settings dialog across all built-in themes (Light, Dark, Nord, Pink).
 
 ## Development Notes
 
