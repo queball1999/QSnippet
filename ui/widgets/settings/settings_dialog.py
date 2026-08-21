@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from PySide6.QtWidgets import (
     QDialog, QListWidget, QStackedWidget, QHBoxLayout,
-    QListWidgetItem, QVBoxLayout, QLineEdit, QWidget
+    QListWidgetItem, QVBoxLayout, QLineEdit, QWidget,
+    QPushButton, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, QObject, QEvent
 from PySide6.QtGui import QShortcut
@@ -33,15 +34,17 @@ class SearchResult:
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: dict, save_callback, parent=None):
+    def __init__(self, settings: dict, save_callback, parent=None, extra_pages=None):
         super().__init__(parent)
         self.toast = SettingsToast(self)
 
         self.settings = settings
         self.save_callback = save_callback
-        self._last_sidebar_row = -1
-        self._nav_stack: list[QWidget] = []
-        self._search_index: list[SearchResult] = []
+        self.last_sidebar_row = -1
+        self.nav_stack: list[QWidget] = []
+        self.search_index: list[SearchResult] = []
+        self.extra_pages: list[tuple] = extra_pages or []
+        self.extra_page_widgets: list[QWidget] = []
 
         # Adding search debounce timer
         self.search_timer = QTimer(self)
@@ -55,31 +58,43 @@ class SettingsDialog(QDialog):
 
         self.initUI()
         self.build_search_index()
+        self.applyStyles()
+
 
     def initUI(self):
         root = QHBoxLayout(self)
 
         # Left
         left = QVBoxLayout()
-        left.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        left.setContentsMargins(0, 0, 0, 0)
         left_container = QWidget()
         left_container.setLayout(left)
-        left_container.setFixedWidth(260)
+        left_container.setFixedWidth(220)
 
         self.search = QLineEdit(clearButtonEnabled=True)
+        self.search.setObjectName("SettingsSearch")
         self.search.setFixedWidth(220)
         self.search.setPlaceholderText("Find a setting")
         self.search.textChanged.connect(self.on_search_text_changed)
 
         self.list = QListWidget()
+        self.list.setObjectName("SettingsSidebar")
         self.list.setFixedWidth(220)
         self.list.setFocusPolicy(Qt.NoFocus)
 
         left.addWidget(self.search)
-        left.addWidget(self.list)
+        left.addWidget(self.list, 1)   # stretch=1 fills all remaining vertical space
+
+        self.restore_defaults_btn = QPushButton("Restore Defaults")
+        self.restore_defaults_btn.setObjectName("RestoreDefaultsBtn")
+        self.restore_defaults_btn.setFixedWidth(220)
+        self.restore_defaults_btn.setCursor(Qt.PointingHandCursor)
+        self.restore_defaults_btn.clicked.connect(self.reset_all_settings)
+        left.addWidget(self.restore_defaults_btn)
 
         # Search dropdown
         self.search_results = QListWidget(self)
+        self.search_results.setObjectName("SearchResultsList")
         self.search_results.setWindowFlags(
             Qt.FramelessWindowHint | Qt.Tool
         )
@@ -94,45 +109,85 @@ class SettingsDialog(QDialog):
         root.addWidget(self.stack)
 
         self.build()
+        self.build_extra_pages()
         self.list.itemClicked.connect(self.on_sidebar_changed)
         self.list.setCurrentRow(0)
+        self.last_sidebar_row = 0
 
-        self.update_stylesheet()
-        
         # Set up Ctrl+F keyboard shortcut to focus search bar
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
 
     # ----- BUILD -----
 
+    @property
+    def root_page_count(self) -> int:
+        return len(self.visible_categories()) + len(self.extra_pages)
+
+    def visible_categories(self) -> list:
+        """
+        Category names that have at least one visible setting.
+
+        A category whose entries are all marked hidden (backups, which only
+        stores history) would otherwise get a sidebar entry leading to a
+        completely blank page. Such a category is either presented by a
+        purpose-built extra page or not at all.
+        """
+        visible = []
+        for category, values in self.settings.items():
+            if not isinstance(values, dict):
+                continue
+            if any(self.is_visible_entry(meta) for meta in values.values()):
+                visible.append(category)
+        return visible
+
+    def is_visible_entry(self, meta) -> bool:
+        """True when a settings entry (or sub-group) renders something."""
+        if not isinstance(meta, dict):
+            return False
+        if "type" in meta:
+            return not meta.get("hidden", False)
+        # Sub-group: visible when any child is
+        return any(self.is_visible_entry(child) for child in meta.values())
+
     def build(self):
         """ Build the sidebar and root pages. """
         self.list.clear()
 
-        for category, values in self.settings.items():
+        for category in self.visible_categories():
             self.list.addItem(QListWidgetItem(category.replace("_", " ").title()))
 
             page = SettingsCategoryPage(
                 category=category,
-                values=values,
+                values=self.settings[category],
                 on_change=self.on_setting_changed,
                 parent=self,
             )
             self.stack.addWidget(page)
 
+    def build_extra_pages(self):
+        """Append non-settings sidebar pages (e.g. Vault) after the generated pages."""
+        self.extra_page_widgets.clear()
+        for label, widget in self.extra_pages:
+            self.list.addItem(QListWidgetItem(label))
+            self.stack.addWidget(widget)
+            self.extra_page_widgets.append(widget)
+
     def build_search_index(self):
         """ Build the search index for all settings. """
-        self._search_index.clear()
+        self.search_index.clear()
 
         def walk(category, node, path):
             for key, value in node.items():
                 new_path = path + [key]
 
                 if isinstance(value, dict) and "value" in value:
+                    if value.get("hidden", False):
+                        continue
                     label = key.replace("_", " ").title()
                     desc = value.get("description", "")
                     text = f"{label} {desc}".lower()
 
-                    self._search_index.append(
+                    self.search_index.append(
                         SearchResult(
                             category=category,
                             path=new_path,
@@ -143,8 +198,8 @@ class SettingsDialog(QDialog):
                 elif isinstance(value, dict):
                     walk(category, value, new_path)
 
-        for category, values in self.settings.items():
-            walk(category, values, [category])
+        for category in self.visible_categories():
+            walk(category, self.settings[category], [category])
 
     # ----- SEARCH -----
 
@@ -181,7 +236,7 @@ class SettingsDialog(QDialog):
             self.reset_navigation()
             return
 
-        matches = [r for r in self._search_index if text in r.text][:15]
+        matches = [r for r in self.search_index if text in r.text][:15]
 
         if not matches:
             self.search_results.hide()
@@ -210,15 +265,29 @@ class SettingsDialog(QDialog):
 
     # ----- NAVIGATION -----
 
+    def page_index_for_category(self, category: str):
+        """
+        Stack/sidebar index of a category's page, or None when it has none.
+
+        Indexes against the categories that actually produced a page, not the
+        raw settings dict: an all-hidden category (backups) is skipped, so a
+        positional lookup into self.settings would point at the wrong page for
+        every category after it.
+        """
+        categories = self.visible_categories()
+        return categories.index(category) if category in categories else None
+
     def navigate_to_path(self, path: list[str]):
         """
         Navigate to the full path of a setting.
         Returns the final page widget.
         """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         category = path[0]
-        index = list(self.settings.keys()).index(category)
+        index = self.page_index_for_category(category)
+        if index is None:
+            return self.stack.currentWidget()
 
         self.list.setCurrentRow(index)
         page = self.stack.widget(index)
@@ -241,10 +310,12 @@ class SettingsDialog(QDialog):
         Navigate only to the parent category of a leaf setting.
         Returns (page, leaf_key)
         """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         category = path[0]
-        index = list(self.settings.keys()).index(category)
+        index = self.page_index_for_category(category)
+        if index is None:
+            return self.stack.currentWidget(), path[-1]
 
         self.list.setCurrentRow(index)
         page = self.stack.widget(index)
@@ -269,49 +340,78 @@ class SettingsDialog(QDialog):
         """ Add a new page to the navigation stack. """
         current = self.stack.currentWidget()
         if current:
-            self._nav_stack.append(current)
+            self.nav_stack.append(current)
 
         self.stack.addWidget(page)
         self.stack.setCurrentWidget(page)
 
+        # Newly created sub-pages do not pass through the dialog-wide refresh
+        # done at startup, so apply the same font-role mapping immediately.
+        self.refresh_widget_fonts(page)
+        if hasattr(page, "refresh_breadcrumb_fonts"):
+            page.refresh_breadcrumb_fonts()
+
     def pop_page(self):
         """ Remove the current page and go back to the previous one. """
-        if not self._nav_stack:
+        if not self.nav_stack:
             return
 
         current = self.stack.currentWidget()
-        previous = self._nav_stack.pop()
+        previous = self.nav_stack.pop()
 
         self.stack.setCurrentWidget(previous)
         self.stack.removeWidget(current)
         current.deleteLater()
 
+    def pop_pages(self, count: int):
+        """ Pop multiple pages from the navigation stack. """
+        for _ in range(count):
+            if not self.nav_stack:
+                break
+            self.pop_page()
+
     def reset_navigation(self, select_row=0):
         """ Reset navigation to a specific root page. """
-        self._nav_stack.clear()
+        self.nav_stack.clear()
         self.stack.setCurrentIndex(select_row)
         self.list.setCurrentRow(select_row)
 
         for i in range(self.stack.count()):
             page = self.stack.widget(i)
-            page.apply_search_highlight("")
+            if hasattr(page, "apply_search_highlight"):
+                page.apply_search_highlight("")
+
+    def select_page(self, label: str) -> bool:
+        """
+        Show the sidebar page whose label matches *label* (case-insensitive).
+
+        Lets callers deep-link into a specific settings page, e.g. the Help
+        menu opening Backups. Returns False when no such page exists.
+        """
+        for row in range(self.list.count()):
+            if self.list.item(row).text().strip().lower() == label.strip().lower():
+                self.list.setCurrentRow(row)
+                self.stack.setCurrentIndex(row)
+                self.last_sidebar_row = row
+                return True
+        return False
 
     def on_sidebar_changed(self, item: QListWidgetItem):
         """ Handle when the user clicks a sidebar item """
         row = self.list.row(item)
 
         # If user clicked the same root again, reset navigation and return
-        if row == self._last_sidebar_row:
+        if row == self.last_sidebar_row:
             self.reset_navigation(row)
             return
 
-        self._last_sidebar_row = row
+        self.last_sidebar_row = row
 
         # Clear deep navigation
-        self._nav_stack.clear()
+        self.nav_stack.clear()
 
         # Remove all stacked sub-pages (keep root pages only)
-        root_count = len(self.settings)
+        root_count = self.root_page_count
         while self.stack.count() > root_count:
             widget = self.stack.widget(self.stack.count() - 1)
             self.stack.removeWidget(widget)
@@ -321,6 +421,38 @@ class SettingsDialog(QDialog):
         self.stack.setCurrentIndex(row)
 
     # ----- SETTINGS -----
+
+    def approve_setting_change(self, path: list[str], old_value, new_value) -> bool:
+        """
+        Approve a setting change before it is persisted.
+
+        Args:
+            path (list[str]): The full path of the setting being changed.
+            old_value (Any): The current saved value.
+            new_value (Any): The requested new value.
+
+        Returns:
+            bool: True when the change should be applied.
+        """
+        if path != ["general", "clipboard_behavior", "clipboard_timeout"]:
+            return True
+
+        if str(new_value).strip().lower() != "off":
+            return True
+
+        if str(old_value).strip().lower() == "off":
+            return True
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Disable Clipboard Cleanup")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            "Turning clipboard cleanup off can leave expanded snippet content in your clipboard until you replace it."
+        )
+        msg.setInformativeText("Do you want to keep clipboard cleanup disabled?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+        return msg.exec() == QMessageBox.Yes
 
     def on_setting_changed(self, path: list[str], value):
         """ Handle when a setting value changes. """
@@ -340,82 +472,126 @@ class SettingsDialog(QDialog):
             self.save_callback(self.settings)
             self.toast.show_toast()
 
+            # Trigger immediate UI refresh for appearance changes.
+            # NOTE: settings_dialog.settings and window.parent.settings are the SAME
+            # dict reference, so save_settings()'s old != new comparisons are always
+            # False (both sides read the already-mutated dict).  We must drive the
+            # refresh from here instead.
+            if path and path[0] == "appearance":
+                try:
+                    window = self.parent()
+                    if path[1:2] == ["advanced"]:
+                        # Font family / sizes / button sizes changed
+                        if hasattr(window, 'refresh_font_display'):
+                            window.refresh_font_display()
+                    else:
+                        # Theme, ui_scale, or accent_color changed
+                        if hasattr(window, 'refresh_theme_display'):
+                            window.refresh_theme_display()
+                except Exception:
+                    pass
 
-    def update_stylesheet(self):
-        """ Update the dialog's stylesheet. """
-        
-        self.setStyleSheet("""
-        QComboBox {
-            padding: 8px 12px;
-        }
-                           
-        QLineEdit {
-            padding: 8px;
-        }
+    def reset_all_settings(self):
+        """ Reset all settings to their default values after user confirmation. """
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Restore Defaults")
+        msg.setText("Are you sure you want to restore all settings to their default values?")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
 
-        QListWidget {
-            background: transparent;
-            border: none;
-            font-size: 18px;
-        }
+        if msg.exec() != QMessageBox.Yes:
+            return
 
-        QListWidget::item {
-            padding: 10px 12px;
-            border-radius: 6px;
-        }
+        # Walk the settings tree and reset all values to defaults
+        self.reset_defaults_recursive(self.settings)
 
-        QListWidget::item:selected {
-            background-color: rgba(79, 163, 255, 0.15);
-        }
+        # Save the reset settings
+        if callable(self.save_callback):
+            self.save_callback(self.settings)
 
-        QLabel#SettingsHeader {
-            font-size: 26px;
-            font-weight: 600;
-            padding-bottom: 10px;
-        }
+        # Full refresh: theme + fonts may have changed
+        try:
+            window = self.parent()
+            if hasattr(window, 'refresh_font_display'):
+                window.refresh_font_display()
+        except Exception:
+            pass
 
-        QLabel#SettingsLabel {
-            font-size: 14px;
-        }
-                           
-        QLabel#SettingsHeader[highlighted="true"] {
-            color: rgba(79, 163, 255, 0.15);
-        }
+        # Rebuild all root pages to reflect the new values
+        self.rebuild_pages()
+        self.toast.show_toast()
 
-        QLabel#SettingsLabel[highlighted="true"] {
-            background-color: rgba(79, 163, 255, 0.15);
-            border-radius: 4px;
-            padding: 2px 4px;
-        }
-                           
-        SettingsCard {
-            border-radius: 8px;
-        }
+    def reset_defaults_recursive(self, node: dict):
+        """ Recursively reset all leaf settings that have a 'default' key. """
+        for key, value in node.items():
+            if not isinstance(value, dict):
+                continue
 
-        QLabel#SettingsCardTitle {
-            font-size: 15px;
-            font-weight: 600;
-        }
+            if "value" in value and "default" in value:
+                value["value"] = value["default"]
+            else:
+                self.reset_defaults_recursive(value)
 
-        QLabel#SettingsCardDescription {
-            font-size: 12px;
-        }
+    def rebuild_pages(self):
+        """ Tear down and rebuild all root category pages. """
+        self.nav_stack.clear()
 
-        SettingsSubCategoryCard {
-            border-radius: 8px;
-        }
+        # Detach extra page widgets before destroying everything
+        for widget in self.extra_page_widgets:
+            self.stack.removeWidget(widget)
+        self.extra_page_widgets.clear()
 
-        SettingsSubCategoryCard:hover {
-            background-color: rgba(79, 163, 255, 0.15);
-        }
-                           
-        SettingsCard[highlighted="true"],
-        SettingsSubCategoryCard[highlighted="true"] {
-            background-color: rgba(79, 163, 255, 0.18);
-        }
+        # Remove and destroy all remaining (generated) pages
+        while self.stack.count() > 0:
+            widget = self.stack.widget(0)
+            self.stack.removeWidget(widget)
+            widget.deleteLater()
 
-        QLabel#SettingsChevron {
-            font-size: 20px;
-            color: rgba(255, 255, 255, 0.4);
-        }
-        """)
+        # Rebuild generated pages then re-attach extra pages
+        self.build()
+        self.build_search_index()
+        self.build_extra_pages()
+
+        # Restore sidebar selection
+        row = max(0, self.last_sidebar_row)
+        if row < self.list.count():
+            self.list.setCurrentRow(row)
+            self.stack.setCurrentIndex(row)
+
+    def applyStyles(self):
+        """
+        Apply the app's scaled, role-correct fonts across the whole dialog.
+
+        Font sizing is driven entirely by objectName via
+        ThemeManager.OBJECT_NAME_FONTS, so pages, cards, and controls all
+        follow the same table the QSS colour rules use.
+        """
+        from ui.theme_manager import ThemeManager
+        try:
+            ThemeManager.apply_fonts(self)
+
+            for i in range(self.stack.count()):
+                page = self.stack.widget(i)
+                if hasattr(page, "refresh_breadcrumb_fonts"):
+                    page.refresh_breadcrumb_fonts()
+                if hasattr(page, "applyStyles"):
+                    page.applyStyles()
+        except Exception:
+            pass
+
+    def apply_font_to_widget_tree(self, widget, font=None):
+        """Apply role-correct fonts to *widget* and its children."""
+        from ui.theme_manager import ThemeManager
+        ThemeManager.apply_fonts(widget)
+
+    def refresh_widget_fonts(self, widget):
+        """Recursively update fonts on widget and all children."""
+        self.apply_font_to_widget_tree(widget)
+
+    def get_medium_font(self):
+        """Return the current medium font from the main app, or a fallback."""
+        from ui.theme_manager import ThemeManager
+        return ThemeManager.font("medium")
+
+

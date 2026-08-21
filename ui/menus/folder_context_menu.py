@@ -11,40 +11,30 @@ class FolderContextMenu(QMenu):
     addFolderRequested  = Signal(object)
     renameRequested     = Signal(object)
     deleteRequested     = Signal(object)
+    expandRequested     = Signal()
+    collapseRequested   = Signal()
 
-    def __init__(self, folder_item, parent=None):
-        """
-        Initialize the FolderContextMenu.
-
-        Args:
-            folder_item (QStandardItem): The folder item being acted upon.
-            parent (QWidget): Optional parent widget.
-
-        Returns:
-            None
-        """
+    def __init__(self, folder_item, is_expanded: bool = False, parent=None):
         super().__init__(parent)
         self.folder_item = folder_item
-        self._build()
+        self.is_expanded = is_expanded
+        self.build()
 
-    def _build(self):
-        """
-        Build the folder context menu with all available folder actions.
+    def build(self):
+        if self.is_expanded:
+            self.addAction("Collapse Folder", self.collapseRequested.emit)
+        else:
+            self.addAction("Expand Folder", self.expandRequested.emit)
 
-        Adds menu items for adding items, renaming, and deleting the folder.
-
-        Returns:
-            None
-        """
+        self.addSeparator()
         self.addAction(
             "Add Item",
             lambda: self.addItemRequested.emit(self.folder_item)
         )
-        # To Remove: sub folder functionality
-        """ self.addAction(
+        self.addAction(
             "Add Sub-Folder",
             lambda: self.addFolderRequested.emit(self.folder_item)
-        ) """
+        )
         self.addAction(
             "Rename Folder",
             lambda: self.renameRequested.emit(self.folder_item)

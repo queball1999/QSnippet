@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from utils.file_utils import FileUtils
+from utils.file_utils import FileUtils, validate_snippet_fields, parse_and_validate_snippets
 
 
 # Basic filesystem helpers
@@ -203,3 +203,259 @@ def test_get_default_paths_structure(monkeypatch, tmp_path):
 
     for key, value in paths.items():
         assert isinstance(value, Path)
+
+
+# merge_dict
+class TestMergeDict:
+    def test_missing_key_added_from_default(self):
+        default = {"a": 1, "b": 2}
+        user = {"a": 10}
+        result = FileUtils.merge_dict(default, user)
+        assert result == {"a": 10, "b": 2}
+
+    def test_user_value_preserved_at_correct_path(self):
+        default = {"color": "blue"}
+        user = {"color": "red"}
+        result = FileUtils.merge_dict(default, user)
+        assert result["color"] == "red"
+
+    def test_orphan_key_pruned(self):
+        default = {"a": 1}
+        user = {"a": 1, "orphan": "gone"}
+        result = FileUtils.merge_dict(default, user)
+        assert "orphan" not in result
+
+    def test_moved_key_uses_default_at_new_path(self):
+        # 'foo' moved from top-level to nested in default; user still has old location
+        default = {"category": {"foo": 42}}
+        user = {"foo": 99, "category": {}}
+        result = FileUtils.merge_dict(default, user)
+        assert "foo" not in result             # old top-level entry removed
+        assert result["category"]["foo"] == 42  # new path uses default value
+
+    def test_settingleaf_value_preserved(self):
+        default = {
+            "start_at_boot": {
+                "type": "bool", "value": True, "default": True,
+                "description": "Launch on boot."
+            }
+        }
+        user = {
+            "start_at_boot": {
+                "type": "bool", "value": False, "default": True,
+                "description": "Launch on boot."
+            }
+        }
+        result = FileUtils.merge_dict(default, user)
+        assert result["start_at_boot"]["value"] is False
+
+    def test_settingleaf_metadata_refreshed(self):
+        default = {
+            "start_at_boot": {
+                "type": "bool", "value": True, "default": True,
+                "description": "New description from update."
+            }
+        }
+        user = {
+            "start_at_boot": {
+                "type": "bool", "value": False, "default": False,
+                "description": "Old description."
+            }
+        }
+        result = FileUtils.merge_dict(default, user)
+        assert result["start_at_boot"]["value"] is False          # user value kept
+        assert result["start_at_boot"]["default"] is True         # default refreshed
+        assert result["start_at_boot"]["description"] == "New description from update."
+
+    def test_type_mismatch_uses_default(self):
+        default = {"nested": {"x": 1}}
+        user = {"nested": "not-a-dict"}
+        result = FileUtils.merge_dict(default, user)
+        assert result["nested"] == {"x": 1}
+
+
+class TestSettingsValidation:
+    """Tests for validate_setting_leaf and validate_merged_settings."""
+
+    def leaf(self, type_, value, default):
+        return {"type": type_, "value": value, "default": default}
+
+    def test_valid_stringleaf_returns_true(self):
+        """String value for type='string' should return True and leave value unchanged."""
+        leaf = self.leaf("string", "hello", "world")
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+        assert leaf["value"] == "hello"
+
+    def test_valid_booleanleaf_returns_true(self):
+        """Bool value for type='boolean' should return True."""
+        leaf = self.leaf("boolean", True, False)
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+
+    def test_valid_integerleaf_returns_true(self):
+        """Integer value for type='integer' should return True."""
+        leaf = self.leaf("integer", 42, 0)
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+
+    def test_valid_floatleaf_returns_true(self):
+        """Float value for type='float' should return True."""
+        leaf = self.leaf("float", 3.14, 0.0)
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+
+    def test_invalid_type_resets_to_default(self):
+        """Wrong type value should return False and reset leaf value to default."""
+        leaf = self.leaf("boolean", "yes", False)
+        result = FileUtils.validate_setting_leaf("key", leaf)
+        assert result is False
+        assert leaf["value"] is False
+
+    def test_no_type_declared_returns_true(self):
+        """Leaf without a 'type' key should return True without modification."""
+        leaf = {"value": "anything", "default": "fallback"}
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+        assert leaf["value"] == "anything"
+
+    def test_unknown_type_returns_true(self):
+        """Unrecognised type string should return True (skip validation)."""
+        leaf = self.leaf("custom", object(), None)
+        assert FileUtils.validate_setting_leaf("key", leaf) is True
+
+    def test_validate_merged_settings_fixes_nestedleaf(self):
+        """A bad value nested inside a settings dict should be reset to its default."""
+        merged = {
+            "general": {
+                "count": {"type": "integer", "value": "not-a-number", "default": 0}
+            }
+        }
+        FileUtils.validate_merged_settings(merged)
+        assert merged["general"]["count"]["value"] == 0
+
+    def test_validate_merged_settings_skips_non_dict(self):
+        """Scalar values at the top level should not cause errors."""
+        merged = {"scalar_key": "just a string"}
+        FileUtils.validate_merged_settings(merged)
+
+    def test_load_and_merge_yaml_resets_bad_value(self, tmp_path):
+        """End-to-end: a type-mismatched value in the user file is fixed on load."""
+        default_path = tmp_path / "default.yaml"
+        user_path = tmp_path / "user.yaml"
+
+        import yaml
+
+        default_path.write_text(yaml.dump({
+            "theme": {
+                "type": "string",
+                "value": "light",
+                "default": "light",
+            }
+        }), encoding="utf-8")
+
+        user_path.write_text(yaml.dump({
+            "theme": {
+                "type": "string",
+                "value": 12345,
+                "default": "light",
+            }
+        }), encoding="utf-8")
+
+        merged = FileUtils.load_and_merge_yaml(default_path, user_path)
+        assert merged["theme"]["value"] == "light"
+
+
+class TestValidateSnippetFieldsControlChars:
+    """Tests for the control-character check added to validate_snippet_fields."""
+
+    _VALID = {
+        "enabled": True,
+        "label": "My Label",
+        "trigger": "/cmd",
+        "snippet": "Hello",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "Misc",
+        "tags": "a,b",
+    }
+
+    def test_control_char_in_trigger_raises(self):
+        """Null byte in trigger should raise ValueError."""
+        snippet = {**self._VALID, "trigger": "/cm\x00d"}
+        with pytest.raises(ValueError, match="trigger"):
+            validate_snippet_fields(snippet)
+
+    def test_control_char_in_snippet_raises(self):
+        """Escape char (0x1b) in snippet body should raise ValueError."""
+        snippet = {**self._VALID, "snippet": "Hello\x1bWorld"}
+        with pytest.raises(ValueError, match="snippet"):
+            validate_snippet_fields(snippet)
+
+    def test_del_char_in_label_raises(self):
+        """DEL character (0x7f) in label should raise ValueError."""
+        snippet = {**self._VALID, "label": "bad\x7flabel"}
+        with pytest.raises(ValueError, match="label"):
+            validate_snippet_fields(snippet)
+
+    def test_control_char_in_optional_field_raises(self):
+        """SOH character (0x01) in folder should raise ValueError."""
+        snippet = {**self._VALID, "folder": "fold\x01er"}
+        with pytest.raises(ValueError, match="folder"):
+            validate_snippet_fields(snippet)
+
+    def test_clean_snippet_passes(self):
+        """Snippet with no control characters should raise no exception."""
+        validate_snippet_fields(dict(self._VALID))
+
+
+class TestParseAndValidateSnippets:
+    """Tests for parse_and_validate_snippets() - in-memory validation path used after decryption."""
+
+    _VALID = {
+        "label": "Test",
+        "trigger": "/test",
+        "snippet": "hello",
+    }
+
+    def test_valid_snippets_returned(self):
+        data = {"snippets": [dict(self._VALID)]}
+        result = parse_and_validate_snippets(data)
+        assert len(result) == 1
+        assert result[0]["trigger"] == "/test"
+
+    def test_private_fields_stripped(self):
+        snippet = {**self._VALID, "_was_encrypted": True, "_vault_locked": True}
+        data = {"snippets": [snippet]}
+        result = parse_and_validate_snippets(data)
+        assert "_was_encrypted" not in result[0]
+        assert "_vault_locked" not in result[0]
+
+    def test_id_field_stripped(self):
+        snippet = {**self._VALID, "id": 42}
+        data = {"snippets": [snippet]}
+        result = parse_and_validate_snippets(data)
+        assert "id" not in result[0]
+
+    def test_missing_required_field_raises_value_error(self):
+        data = {"snippets": [{"label": "X", "trigger": "/x"}]}  # no snippet field
+        with pytest.raises(ValueError, match="Snippet #1"):
+            parse_and_validate_snippets(data)
+
+    def test_empty_snippets_list_returns_empty(self):
+        assert parse_and_validate_snippets({"snippets": []}) == []
+
+    def test_not_a_list_raises(self):
+        with pytest.raises((ValueError, TypeError)):
+            parse_and_validate_snippets({"snippets": "not-a-list"})
+
+    def test_multiple_snippets_all_validated(self):
+        snippets = [
+            {**self._VALID, "trigger": f"/{i}"} for i in range(3)
+        ]
+        data = {"snippets": snippets}
+        result = parse_and_validate_snippets(data)
+        assert len(result) == 3
+
+    def test_second_snippet_error_reports_correct_index(self):
+        snippets = [
+            dict(self._VALID),
+            {"label": "Bad"},  # missing trigger and snippet
+        ]
+        with pytest.raises((ValueError, TypeError), match="Snippet #2"):
+            parse_and_validate_snippets({"snippets": snippets})

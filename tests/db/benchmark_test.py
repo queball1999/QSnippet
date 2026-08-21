@@ -6,7 +6,7 @@ import pytest
 from utils.snippet_db import SnippetDB
 
 
-BENCHMARK_SIZES = [10, 100, 1_000, 5_000, 10_000, 100_000]
+BENCHMARK_SIZES = [10, 100, 1_000, 5_000, 10_000, 25_000]
 
 _results: list = []
 

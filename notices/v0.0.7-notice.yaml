@@ -1,0 +1,23 @@
+id: "v0.0.7"
+title: "QSnippet 0.0.7"
+message: |
+  ### Vault
+  - New encrypted vault for sensitive snippets, secured with AES-256-GCM and a per-snippet encryption context.
+  - Custom placeholders can now pull values from the vault, with database schema and search updated to support it.
+
+  ### Placeholders
+  - Dynamic placeholders with `[[name]]` fill-in intellisense while typing, plus automatic cleanup of empty values.
+  - Snippets from older databases are migrated to the new placeholder format automatically.
+
+  ### Editing & UI
+  - Snippets can now be popped out into their own dialog for editing.
+  - New icon set and refreshed UI components, with a new theme manager and color picker for styling.
+  - Configurable trigger timeout with a status bar countdown.
+
+  ### Backups
+  - Pre-migration database backups are now bundled into a zip, and a new Backups page (Settings > Backups) makes them easy to find later.
+
+  ### Fixes & reliability
+  - Fixed a keyboard bug where backspace and navigation keys stopped working correctly.
+  - Snippet dialogs now reliably come to the foreground on Windows, and focus no longer gets stolen unexpectedly.
+  - Upgraded full-text search and added character limits for better vault and search performance.

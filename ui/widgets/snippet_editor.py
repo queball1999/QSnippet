@@ -1,16 +1,26 @@
 from pathlib import Path
 import re
+import logging
 
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QStackedWidget, QVBoxLayout, QMessageBox, QInputDialog,
     QLineEdit, QHBoxLayout, QComboBox, QPushButton, QSizePolicy
 )
 from PySide6.QtGui import QStandardItem, QPixmap, QShortcut
-from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QSize
+from PySide6.QtGui import QIcon
+
+from utils.file_utils import FileUtils
 
 from .snippet_table import SnippetTable
 from .snippet_form  import SnippetForm
 from .home_widget   import HomeWidget
+
+logger = logging.getLogger(__name__)
+
+# How long before the inactivity timeout fires that the status bar should
+# start showing a countdown warning.
+INACTIVITY_COUNTDOWN_WINDOW_MS = 15000
 
 
 class TextEditFocusFilter(QObject):
@@ -44,7 +54,9 @@ class WidgetMouseFilter(QObject):
 
 
 class SnippetEditor(QWidget):
-    trigger_reload = Signal()
+    trigger_reload = Signal()                 # Full refresh (import, bulk ops, folder moves)
+    trigger_snippet_saved = Signal(object)    # incremental save - snippet entry dict
+    trigger_snippet_deleted = Signal(int)     # incremental delete - snippet id
 
     def __init__(self, config_path, main, parent=None):
         """
@@ -71,8 +83,44 @@ class SnippetEditor(QWidget):
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(100)  # 0.1 seconds
 
+        # Adding safe reload timer to prevent database lock issues
+        self.reload_timer = QTimer(self)
+        self.reload_timer.setSingleShot(True)
+        self.reload_timer.setInterval(50)  # 50ms delay to ensure DB operations complete
+        self.reload_timer.timeout.connect(self.perform_reload)
+
+        # Inactivity timer for the snippet form (new or editing an existing entry)
+        self.inactivity_timer = QTimer(self)
+        self.inactivity_timer.setSingleShot(True)
+        self.inactivity_timer.timeout.connect(self.on_inactivity_timeout)
+
+        # Ticks while the inactivity timer is running so the status bar can
+        # show a countdown warning as the timeout approaches.
+        self.inactivity_countdown_timer = QTimer(self)
+        self.inactivity_countdown_timer.setInterval(500)
+        self.inactivity_countdown_timer.timeout.connect(self.update_inactivity_countdown)
+        self._inactivity_countdown_showing = False
+        self._inactivity_countdown_last_seconds = None
+
+        # Track expand state before search started (None = not in search mode)
+        self.pre_search_expanded = None
+
         self.initUI()
-        self.load_snippets()
+        # Lazy load the snippets; loads as soon as UI is fully rendered
+        QTimer.singleShot(0, self.load_snippets)
+
+        # Reset the inactivity timer on any key/mouse activity or window
+        # refocus while the form is open - not just edits to the tracked
+        # text fields - so the countdown reliably clears on real activity.
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if self.inactivity_timer.isActive() and event.type() in (
+            QEvent.KeyPress, QEvent.MouseButtonPress, QEvent.WindowActivate,
+        ):
+            self.reset_inactivity_timer()
+        return super().eventFilter(obj, event)
 
     def initUI(self):
         """
@@ -90,23 +138,32 @@ class SnippetEditor(QWidget):
 
         # Search bar and filters
         self.search_bar = QLineEdit(clearButtonEnabled=True)
+        self.search_bar.setObjectName("SearchBar")
         self.search_bar.setPlaceholderText("Search all the things...")
+        self.search_bar.setToolTip("Search all the things... (Ctrl+F to focus)")
+        self.search_bar.setMinimumWidth(100)
         self.search_bar.textChanged.connect(self.on_search_text_changed)
         # This line must go here to ensure we initalize search first
         self.search_timer.timeout.connect(self.run_search)
 
         self.filter_dropdown = QComboBox()
+        self.filter_dropdown.setObjectName("FilterDropdown")
         self.filter_dropdown.addItem("All Snippets")
         self.filter_dropdown.addItem("Enabled Only")
         self.filter_dropdown.addItem("Disabled Only")
+        self.filter_dropdown.setMinimumWidth(100)
+        self.filter_dropdown.setMaximumWidth(150)
         self.filter_dropdown.currentIndexChanged.connect(self.run_search)
 
-        arrow = "↓" if not self.main.settings["general"]["startup_behavior"]["expand_folders_on_load"].get("value", False) else "↑"
-        self.toggle_collapse_button = QPushButton(arrow)
+        is_expanded = self.main.settings["general"]["table_behavior"]["expand_folders_on_load"].get("value", False)
+        self.toggle_collapse_button = QPushButton()
+        self.toggle_collapse_button.setObjectName("ToggleCollapseBtn")
         self.toggle_collapse_button.setToolTip("Expand/Collapse All Folders")
         self.toggle_collapse_button.setFixedSize(30, 40)
+        self.toggle_collapse_button.setIconSize(QSize(16, 16))
         self.toggle_collapse_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.toggle_collapse_button.clicked.connect(self.toggle_collapse_folders)
+        self.set_collapse_button_state(is_expanded)
 
         search_layout = QHBoxLayout()
         search_layout.addWidget(self.search_bar)
@@ -116,11 +173,14 @@ class SnippetEditor(QWidget):
         # Left: snippet table
         self.table = SnippetTable(main=self.main, parent=self)
         self.table.entrySelected.connect(self.on_entry_selected)
+        self.table.folderSelected.connect(self.on_folder_selected)
         self.table.refreshSignal.connect(self.load_snippets)
         # folder signals
         self.table.addFolder.connect(self.on_add_folder)
         self.table.renameFolder.connect(self.on_rename_folder)
         self.table.deleteFolder.connect(self.on_delete_folder)
+        self.table.folderMoved.connect(self.on_folder_moved)
+        self.table.snippetMoved.connect(self.on_snippet_moved)
         # snippet signals
         self.table.addSnippet.connect(self.on_add_snippet)
         self.table.editSnippet.connect(self.on_edit_snippet)
@@ -136,6 +196,11 @@ class SnippetEditor(QWidget):
         self.form.saveClicked.connect(self.on_save)
         self.form.deleteClicked.connect(self.on_delete)
         self.form.cancelPressed.connect(self.show_home_widget)
+
+        # Reset inactivity timer on any field edit
+        self.form.new_input.textChanged.connect(self.reset_inactivity_timer)
+        self.form.trigger_input.textChanged.connect(self.reset_inactivity_timer)
+        self.form.snippet_input.textChanged.connect(self.reset_inactivity_timer)
 
         # Layout
         self.left_layout.addLayout(search_layout)
@@ -156,8 +221,8 @@ class SnippetEditor(QWidget):
         vlay.addWidget(self.splitter)
         self.setLayout(vlay)
 
-        # apply theme
-        self.update_stylesheet()
+        # apply theme and fonts
+        self.applyStyles()
 
         # Set up Ctrl+F keyboard shortcut to focus search bar
         QShortcut(Qt.CTRL | Qt.Key_F, self).activated.connect(self.focus_search_bar)
@@ -184,11 +249,60 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        old_text = self.parent.statusBar().currentMessage() or ""
-        self.parent.statusBar().showMessage(f"Loading Snippets...")
+        self.parent.statusBar().showMessage("Loading snippets...")
+
+        # Always pre-load vault folder set so lock icons render correctly.
+        # Only force "Vault" into the set as a pre-setup default when no vault
+        # folder has ever been registered - once any real registration exists,
+        # trust the database exclusively. Otherwise, if "Vault" itself ever
+        # gets desynced from vault_folders (e.g. removed by a bug or a manual
+        # DB edit), the UI would keep rendering it as protected forever and
+        # hide the "Mark as Vault Folder" menu action needed to fix it.
+        try:
+            vault_folders = list(self.main.snippet_db.get_vault_folders())
+            if not vault_folders:
+                vault_folders = ["Vault"]
+            self.table.set_vault_folders(vault_folders)
+        except Exception:
+            pass
+
         snippets = self.main.snippet_db.get_all_snippets()
         self.table.load_entries(snippets)
-        self.parent.statusBar().showMessage(old_text)
+        self.parent.show_snippets_loaded_message()
+
+    def safe_reload_snippets(self):
+        """
+        Schedule a safe reload of snippets with a small delay.
+
+        Uses a QTimer to defer the reload, preventing database lock contention
+        when multiple operations happen in quick succession (e.g., drag-drop,
+        move, delete). This ensures the database finishes its operation before
+        we try to reload.
+
+        Returns:
+            None
+        """
+        self.reload_timer.stop()  # Reset timer if already running
+        self.reload_timer.start()  # Will trigger perform_reload after 50ms
+
+    def perform_reload(self):
+        """
+        Perform the actual reload after the safety delay.
+
+        Called by the reload_timer when it expires after a database operation.
+
+        Returns:
+            None
+        """
+        try:
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except Exception as e:
+            logger.error(f"Error during safe reload: {e}")
+            self.main.message_box.warning(
+                f"Error reloading snippets: {e}",
+                title="Reload Error"
+            )
 
     def on_entry_selected(self, entry):
         """
@@ -204,11 +318,27 @@ class SnippetEditor(QWidget):
             None
         """
         if entry:
+            # Pause expansion while editing an existing snippet too, not just
+            # while composing a new one, so its own trigger can't fire mid-edit.
+            self.pause_service()
             self.form.clear_form()
             self.stack.setCurrentWidget(self.form)
             self.form.load_entry(entry)
+            self.start_inactivity_timer()
         else:
-            self.stack.setCurrentWidget(self.home_widget)    
+            self.show_home_widget()
+
+    def on_folder_selected(self, folder_path: str) -> None:
+        """Update the form's folder field when a folder row is clicked.
+
+        Only acts when the snippet form is already visible, so the current
+        widget (home or form) is never displaced by a folder click.
+
+        Args:
+            folder_path: Full folder path of the clicked folder row.
+        """
+        if self.stack.currentWidget() is self.form and folder_path:
+            self.form.folder_input.setCurrentText(folder_path)
 
     def show_home_widget(self, *_):
         """
@@ -220,9 +350,11 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
+        self.stop_inactivity_timer()
         self.parent.resume_service() # resume snippet service
         # Should deselect any selected items in tree view
         self.stack.setCurrentWidget(self.home_widget)
+        self.home_widget.focus_test_entry()
 
     def show_new_form(self, *_):
         """
@@ -241,6 +373,7 @@ class SnippetEditor(QWidget):
         self.form.clear_form()
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
+        self.start_inactivity_timer()
 
     def toggle_collapse_folders(self):
         """
@@ -254,10 +387,30 @@ class SnippetEditor(QWidget):
         """
         if self.table.isAnyFolderExpanded():
             self.table.collapseAll()
-            self.toggle_collapse_button.setText("↓")
+            self.set_collapse_button_state(False)
         else:
             self.table.expandAll()
-            self.toggle_collapse_button.setText("↑")
+            self.set_collapse_button_state(True)
+
+    def set_collapse_button_state(self, expanded: bool) -> None:
+        """
+        Update the collapse/expand toggle button's icon to reflect current state.
+
+        Args:
+            expanded (bool): True if folders are currently expanded (button
+                will collapse them next click); False otherwise.
+
+        Returns:
+            None
+        """
+        self._collapse_expanded = expanded
+        icon_name = "arrow-collapse.svg" if expanded else "arrow-expand.svg"
+        icon = QIcon(FileUtils.icon_path(icon_name))
+        from ui.theme_manager import ThemeManager
+        tm = ThemeManager.get_instance()
+        if tm:
+            icon = tm.recolor_icon(icon, tm.icon_color())
+        self.toggle_collapse_button.setIcon(icon)
 
     # ----- Handlers -----
     def on_save(self, *_):
@@ -275,6 +428,7 @@ class SnippetEditor(QWidget):
             Exception: If an unexpected error occurs during save.
         """
         try:
+            self.stop_inactivity_timer()
             if not self.form.validate():
                 return
             
@@ -289,6 +443,10 @@ class SnippetEditor(QWidget):
                 )
                 return
             
+            # Vault transition confirmation (before writing to DB)
+            if not self.check_vault_form_transition(entry):
+                return
+
             # Insert the snippet into the DB
             # returns True if new, False if updated
             is_new = self.main.snippet_db.insert_snippet(entry)
@@ -304,9 +462,12 @@ class SnippetEditor(QWidget):
                     title="Snippet Updated"
                 )
 
+            # Emit before load_snippets so on_snippet_saved_vault clears is_encrypted
+            # before the table refresh can reload the snippet with a stale flag.
+            self.trigger_snippet_saved.emit(entry)
             self.load_snippets()    # Reload snippets to reflect changes
             self.table.select_entry(entry)
-            self.trigger_reload.emit()  # Flag
+            self.form.invalidate_caches()  # Tags may have changed
 
             # Here we could go home or stay on new form
             # Should make this a setting, for now go home
@@ -387,8 +548,23 @@ class SnippetEditor(QWidget):
         name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
         if not ok or not name.strip():
             return
+
+        if name.strip().lower() == "vault":
+            self.main.message_box.error(
+                '"Vault" is a reserved folder name. Choose a different name.',
+                title="Reserved Folder Name"
+            )
+            return
+
+        new_folder = name.strip()
+        # If triggered from a folder context menu, make the new folder a sub-folder
+        if parent_item is not None:
+            folder_data = parent_item.data(Qt.UserRole)
+            if isinstance(folder_data, dict) and folder_data.get("_type") == "folder":
+                new_folder = folder_data["path"] + "/" + new_folder
+
         self.show_new_form()
-        self.form.folder_input.setCurrentText(name.strip())
+        self.form.folder_input.setCurrentText(new_folder)
         
     def on_rename_folder(self, folder_item=None, *_):
         """
@@ -403,13 +579,39 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        old = folder_item.text()
-        new, ok = QInputDialog.getText(self, 'Rename Folder', f'New name for "{old}":', text=old)
-        if not ok or not new.strip() or new.strip() == old:
+        folder_data = folder_item.data(Qt.UserRole) if folder_item is not None else None
+        old = (
+            folder_data["path"]
+            if isinstance(folder_data, dict) and "path" in folder_data
+            else folder_item.text()
+        )
+        # Display only the last segment in the prompt; keep the rest of the path
+        last_segment = old.split("/")[-1]
+        new_last, ok = QInputDialog.getText(
+            self, 'Rename Folder', f'New name for "{old}":', text=last_segment
+        )
+        if not ok or not new_last.strip():
             return
-        self.main.snippet_db.rename_folder(old, new.strip())
+        parts = old.split("/")
+        parts[-1] = new_last.strip()
+        new = "/".join(parts)
+        if new == old:
+            return
+        if new_last.strip().lower() == "vault":
+            self.main.message_box.error(
+                '"Vault" is a reserved folder name. Choose a different name.',
+                title="Reserved Folder Name"
+            )
+            return
+        db = self.main.snippet_db
+        db.rename_folder(old, new)
+        # Keep vault_folders in sync when the renamed folder is a vault root.
+        if db.is_vault_folder(old):
+            db.remove_vault_folder(old)
+            db.add_vault_folder(new)
         self.load_snippets()
-        self.main.message_box.info(f'Renamed folder "{old}" to "{new.strip()}"', title='Folder Renamed')
+        self.form.invalidate_caches()  # Folder list has changed
+        self.main.message_box.info(f'Renamed folder "{old}" to "{new}"', title='Folder Renamed')
 
     def on_add_snippet(self, parent_item=None, *_):
         """
@@ -426,8 +628,11 @@ class SnippetEditor(QWidget):
         """
         self.show_new_form()
         if isinstance(parent_item, QStandardItem):
-            itemText = str(parent_item.text())
-            self.form.folder_input.setCurrentText(itemText)
+            folder_data = parent_item.data(Qt.UserRole)
+            if isinstance(folder_data, dict) and folder_data.get("_type") == "folder":
+                self.form.folder_input.setCurrentText(folder_data["path"])
+            else:
+                self.form.folder_input.setCurrentText(parent_item.text())
 
     def on_delete_folder(self, folder_item=None, *_):
         """
@@ -442,9 +647,14 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
-        name = folder_item.text()
+        folder_data = folder_item.data(Qt.UserRole) if folder_item is not None else None
+        name = (
+            folder_data["path"]
+            if isinstance(folder_data, dict) and "path" in folder_data
+            else folder_item.text()
+        )
         confirm = self.main.message_box.question(
-            f'Delete folder "{name}" and all its snippets?',
+            f'Delete folder "{name}" and all its snippets (including sub-folders)?',
             title="Delete Folder",
             buttons=QMessageBox.Yes | QMessageBox.No,
             default_button=QMessageBox.No
@@ -455,6 +665,300 @@ class SnippetEditor(QWidget):
         
         self.main.snippet_db.delete_folder(name)
         self.load_snippets()
+        self.form.invalidate_caches()  # Folder list has changed
+
+    def on_folder_moved(self, old_path: str, new_path: str):
+        """Persist a folder drag-and-drop move, handling vault encrypt/decrypt transitions.
+
+        Detects when the move crosses a vault boundary and:
+        - Shows a confirmation dialog before encrypting or decrypting.
+        - Encrypts all snippets in the subtree when moving into a vault folder.
+        - Decrypts all snippets in the subtree when moving out of a vault folder.
+        - Updates the ``vault_folders`` registry when a vault root folder itself is moved.
+
+        Args:
+            old_path (str): Previous full path, e.g. ``"work"``.
+            new_path (str): New full path, e.g. ``"Vault/work"``.
+
+        Returns:
+            None
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from utils.vault_manager import VaultError
+
+        db = self.main.snippet_db
+        window = self.parent
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        old_in_vault = db.is_under_vault_folder(old_path)
+        new_in_vault = db.is_under_vault_folder(new_path)
+        old_is_vault_root = db.is_vault_folder(old_path)
+
+        cfg = window.vault_config() if hasattr(window, "vault_config") else {}
+        is_vault_setup = vm.is_setup(cfg) if vm else False
+        if not is_vault_setup:
+            table_vault_set = getattr(self.table, "vault_folder_set", set())
+            parts = new_path.split("/")
+            if any("/".join(parts[:i + 1]) in table_vault_set for i in range(len(parts))):
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Vault Not Configured")
+                msg.setText(
+                    "Cannot move folder into vault.\n\nThe vault is not set up."
+                )
+                msg.setMinimumWidth(250)
+                setup_btn = msg.addButton("Set Up Vault", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.setDefaultButton(setup_btn)
+                msg.exec()
+                if msg.clickedButton() == setup_btn:
+                    window.show_vault_settings()
+                return
+
+        moving_into_vault = (not old_in_vault) and new_in_vault
+        moving_out_of_vault = old_in_vault and (not new_in_vault) and (not old_is_vault_root)
+
+        if moving_into_vault or moving_out_of_vault:
+            snippets = db.get_snippets_by_folder(old_path)
+            count = len(snippets)
+            noun = "snippet" if count == 1 else "snippets"
+
+            if moving_into_vault:
+                if vm and not vm.is_unlocked():
+                    self.main.message_box.warning(
+                        "The vault is locked. Unlock the vault before moving a folder into it.",
+                        title="Vault Locked",
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    "Move Folder Into Vault",
+                    f'Moving "{old_path}" into a vault folder will encrypt '
+                    f'{count} {noun} (including any sub-folders).\n\nDo you wish to proceed?',
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+            else:
+                if vm and not vm.is_unlocked():
+                    self.main.message_box.warning(
+                        "The vault is locked. Unlock the vault before moving an encrypted "
+                        "folder out of it.",
+                        title="Vault Locked",
+                    )
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    "Move Folder Out of Vault",
+                    f'Moving "{old_path}" out of the vault will permanently decrypt '
+                    f'{count} {noun} (including any sub-folders).\n\nDo you wish to proceed?',
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+
+            if answer != QMessageBox.Yes:
+                return
+
+        try:
+            db.rename_folder(old_path, new_path)
+
+            # Keep vault_folders in sync when a vault root itself is moved.
+            if old_is_vault_root:
+                db.remove_vault_folder(old_path)
+                # Only re-register as a root if the new location is not already
+                # inside another vault (it would be implicitly protected).
+                if not db.is_under_vault_folder(new_path):
+                    db.add_vault_folder(new_path)
+
+            # Encrypt or decrypt all snippets now living under new_path.
+            if (moving_into_vault or moving_out_of_vault) and vm:
+                import uuid as _uuid
+                snippets = db.get_snippets_by_folder(new_path)
+                updates = []
+                for s in snippets:
+                    sid = s["id"]
+                    content = s.get("snippet", "")
+                    is_enc = bool(s.get("is_encrypted"))
+                    if moving_into_vault and not is_enc:
+                        new_uuid = str(_uuid.uuid4())
+                        updates.append((sid, vm.encrypt(content, aad=new_uuid.encode()), True, new_uuid))
+                    elif moving_out_of_vault and is_enc:
+                        aad = (s.get("vault_uuid") or "").encode()
+                        updates.append((sid, vm.decrypt(content, aad=aad), False, None))
+                db.bulk_encrypt_folder_snippets(updates)
+
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except VaultError as exc:
+            logger.warning("Vault error during folder move: %s", exc)
+            self.main.message_box.warning(str(exc), title="Vault Locked")
+        except Exception as exc:
+            logger.error("Error moving folder: %s", exc)
+            self.main.message_box.warning(
+                f"Error moving folder: {exc}",
+                title="Move Error",
+            )
+
+    def check_vault_form_transition(self, entry: dict) -> bool:
+        """Show confirmation or error dialogs for vault ↔ non-vault folder changes.
+
+        Must be called before ``insert_snippet`` so the user can cancel without
+        any DB write occurring.
+
+        Args:
+            entry (dict): The entry dict from ``get_entry()``, with the
+                *destination* folder already set.
+
+        Returns:
+            bool: True if the save should proceed, False to cancel.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        db = self.main.snippet_db
+        window = self.parent
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        snippet_id = entry.get("id")
+        dest_is_vault = db.is_under_vault_folder(entry.get("folder", ""))
+
+        src_is_encrypted = False
+        src_is_vault = False
+        if snippet_id:
+            db_entry = db.get_snippet(snippet_id) or {}
+            src_is_encrypted = bool(db_entry.get("is_encrypted"))
+            src_is_vault = db.is_under_vault_folder(db_entry.get("folder", ""))
+
+        moving_into_vault = (not src_is_vault) and dest_is_vault
+        moving_out_of_vault = src_is_encrypted and (not dest_is_vault)
+
+        if moving_into_vault:
+            if vm and not vm.is_unlocked():
+                self.main.message_box.warning(
+                    "The vault is locked. Unlock the vault before saving a snippet "
+                    "to a vault folder.",
+                    title="Vault Locked",
+                )
+                return False
+            answer = QMessageBox.question(
+                self,
+                "Move Into Vault",
+                "This snippet is about to be moved to the vault and encrypted.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            return answer == QMessageBox.Yes
+
+        if moving_out_of_vault:
+            if vm and not vm.is_unlocked():
+                self.main.message_box.warning(
+                    "The vault is locked. Unlock the vault before moving an encrypted "
+                    "snippet out of it.",
+                    title="Vault Locked",
+                )
+                return False
+            answer = QMessageBox.question(
+                self,
+                "Move Out of Vault",
+                "This snippet will be permanently decrypted and moved out of the vault.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            return answer == QMessageBox.Yes
+
+        return True
+
+    def on_snippet_moved(self, entry: dict, new_folder: str):
+        """Persist a snippet drag-and-drop move, handling vault encrypt/decrypt transitions.
+
+        When moving a snippet out of a vault folder the user is shown a
+        confirmation dialog because the content will be permanently decrypted.
+        When moving into a vault folder the vault must be unlocked.  All
+        encrypt/decrypt work is delegated to
+        :meth:`SnippetDB.insert_snippet_vault_aware` so the invariant is
+        enforced at the data layer.
+
+        Args:
+            entry (dict): Original snippet entry dict (folder = *source* folder).
+            new_folder (str): Destination folder path.
+
+        Returns:
+            None
+        """
+        from utils.vault_manager import VaultError
+
+        db = self.main.snippet_db
+        window = self.parent  # QSnippet main window (stored directly, not callable)
+        vm = window.vault_manager() if hasattr(window, "vault_manager") else None
+
+        src_encrypted = bool(entry.get("is_encrypted"))
+        dest_is_vault = db.is_vault_folder(new_folder)
+        src_is_vault = db.is_vault_folder(entry.get("folder", ""))
+
+        from PySide6.QtWidgets import QMessageBox
+
+        cfg = window.vault_config() if hasattr(window, "vault_config") else {}
+        is_vault_setup = vm.is_setup(cfg) if vm else False
+        if not is_vault_setup:
+            table_vault_set = getattr(self.table, "vault_folder_set", set())
+            parts = new_folder.split("/")
+            if any("/".join(parts[:i + 1]) in table_vault_set for i in range(len(parts))):
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Vault Not Configured")
+                msg.setText(
+                    "Cannot move snippet into vault.\n\nThe vault is not set up."
+                )
+                msg.setMinimumWidth(250)
+                setup_btn = msg.addButton("Set Up Vault", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.setDefaultButton(setup_btn)
+                msg.exec()
+                if msg.clickedButton() == setup_btn:
+                    window.show_vault_settings()
+                return
+
+        # Confirm before encrypting into vault
+        if not src_is_vault and dest_is_vault:
+            answer = QMessageBox.question(
+                self,
+                "Move Into Vault",
+                "This snippet is about to be moved to the vault and encrypted.\n\n"
+                "Do you wish to proceed?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        # Confirm before permanently decrypting
+        if src_encrypted and not dest_is_vault:
+            answer = QMessageBox.question(
+                self,
+                "Move Out of Vault",
+                "This snippet is encrypted. Moving it out of the vault will "
+                "permanently decrypt its contents.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+        try:
+            updated = {**entry, "folder": new_folder}
+            db.insert_snippet_vault_aware(updated, vault_manager=vm)
+            self.load_snippets()
+            self.trigger_reload.emit()
+        except VaultError as exc:
+            logger.warning("Vault error during snippet move: %s", exc)
+            self.main.message_box.warning(
+                str(exc),
+                title="Vault Locked",
+            )
+        except Exception as exc:
+            logger.error("Error moving snippet: %s", exc)
+            self.main.message_box.warning(
+                f"Error moving snippet: {exc}",
+                title="Move Error",
+            )
 
     def on_edit_snippet(self, entry=None, *_):
         """
@@ -523,6 +1027,8 @@ class SnippetEditor(QWidget):
         # Need to delete by ID
         self.main.snippet_db.delete_snippet(entry['id'])
         self.load_snippets()
+        self.trigger_snippet_deleted.emit(entry['id'])  # Incremental expander update
+        self.form.invalidate_caches()  # Tags may have changed
         self.navigate_home()
 
     def handle_rename_action(self):
@@ -592,14 +1098,28 @@ class SnippetEditor(QWidget):
         Execute the snippet search operation.
 
         Filters snippets based on keyword and enabled/disabled status,
-        updates the table with results, and optionally triggers an
-        easter egg dialog.
+        updates the table with results, temporarily expands folders when searching
+        (if enabled), and optionally triggers an easter egg dialog.
 
         Returns:
             None
         """
         keyword = self.search_bar.text().strip()
         filter_mode = self.filter_dropdown.currentText()
+        is_searching = bool(keyword)
+
+        # Check setting for expand on search behavior
+        expand_on_search = self.main.settings["general"]["table_behavior"]["expand_on_search"].get("value", True)
+
+        # On transition into search mode: save current expand state
+        if is_searching and self.pre_search_expanded is None:
+            self.pre_search_expanded = self._collapse_expanded
+
+        # On transition out of search mode: capture restore target and reset state
+        restore_expanded = None
+        if not is_searching and self.pre_search_expanded is not None:
+            restore_expanded = self.pre_search_expanded
+            self.pre_search_expanded = None
 
         # Get results from DB
         results = self.main.snippet_db.search_snippets(keyword)
@@ -610,12 +1130,47 @@ class SnippetEditor(QWidget):
         elif filter_mode == "Disabled Only":
             results = [s for s in results if not s.get("enabled", False)]
 
+        # Always strip vault-folder snippets when vault is locked or not configured.
+        # Query VaultManager directly so this path is not affected by stale table state.
+        try:
+            window = self.parent
+            if hasattr(window, "vault_manager") and hasattr(window, "vault_config"):
+                vm = window.vault_manager()
+                cfg = window.vault_config()
+                vault_open = vm.is_setup(cfg) and vm.is_unlocked()
+                if not vault_open:
+                    vault_folder_set = getattr(self.table, "vault_folder_set", set())
+                    results = [
+                        s for s in results
+                        if not bool(s.get("is_encrypted"))
+                        and s.get("folder", "") not in vault_folder_set
+                        and not any(
+                            s.get("folder", "").startswith(vf + "/")
+                            for vf in vault_folder_set
+                        )
+                    ]
+        except Exception:
+            pass
+
         self.table.load_entries(results)
+
+        # Override expansion state based on search mode
+        if expand_on_search:
+            if is_searching:
+                self.table.expandAll()
+                self.set_collapse_button_state(True)
+            elif restore_expanded is not None:
+                if restore_expanded:
+                    self.table.expandAll()
+                    self.set_collapse_button_state(True)
+                else:
+                    self.table.collapseAll()
+                    self.set_collapse_button_state(False)
 
         # Easter Egg
         # If user types "cat" in search, show cat dialog
         if (
-            keyword.lower() == "cat" and 
+            keyword.lower() == "cat" and
             self.main.settings["general"]["extra_features"]["easter_eggs_enabled"].get("value", True)
             ):
             self.search_bar.clear()
@@ -644,60 +1199,140 @@ class SnippetEditor(QWidget):
 
         box.exec()
 
+    # ----- Inactivity Timer -----
+
+    def get_inactivity_timeout_ms(self):
+        """Return the configured inactivity timeout in milliseconds, or None if disabled."""
+        val = (
+            self.main.settings
+            .get("general", {})
+            .get("form_behavior", {})
+            .get("inactivity_timeout", {})
+            .get("value", "120")
+        )
+        if str(val).lower() == "off":
+            return None
+        try:
+            return int(val) * 1000
+        except (ValueError, TypeError):
+            return 120 * 1000
+
+    def start_inactivity_timer(self):
+        timeout_ms = self.get_inactivity_timeout_ms()
+        if timeout_ms is None:
+            self.inactivity_countdown_timer.stop()
+            self._clear_inactivity_countdown()
+            return
+        self.inactivity_timer.start(timeout_ms)
+        self.inactivity_countdown_timer.start()
+
+    def stop_inactivity_timer(self):
+        self.inactivity_timer.stop()
+        self.inactivity_countdown_timer.stop()
+        self._clear_inactivity_countdown()
+
+    def reset_inactivity_timer(self):
+        """Restart the timer only when it is already active (i.e. the form is open)."""
+        if self.inactivity_timer.isActive():
+            self._clear_inactivity_countdown()
+            self.start_inactivity_timer()
+
+    def _clear_inactivity_countdown(self):
+        """Drop any countdown warning currently overwriting the status bar."""
+        if self._inactivity_countdown_showing:
+            self._inactivity_countdown_showing = False
+            self._inactivity_countdown_last_seconds = None
+            self.parent.check_service_status()
+
+    def update_inactivity_countdown(self):
+        """Show a countdown warning in the status bar as the inactivity timeout nears."""
+        if not self.inactivity_timer.isActive():
+            self.inactivity_countdown_timer.stop()
+            self._clear_inactivity_countdown()
+            return
+
+        remaining_ms = self.inactivity_timer.remainingTime()
+        if remaining_ms > INACTIVITY_COUNTDOWN_WINDOW_MS:
+            return
+
+        seconds_left = max(1, round(remaining_ms / 1000))
+        self._inactivity_countdown_showing = True
+        if seconds_left != self._inactivity_countdown_last_seconds:
+            self._inactivity_countdown_last_seconds = seconds_left
+            logger.debug("Inactivity detected - countdown: %ss remaining", seconds_left)
+            self.parent.statusBar().showMessage(
+                f"Inactivity detected ({seconds_left}s)"
+            )
+
+    def on_inactivity_timeout(self):
+        """Called when the inactivity timer fires while the snippet form is open."""
+        self.inactivity_countdown_timer.stop()
+        self._clear_inactivity_countdown()
+
+        if self.stack.currentWidget() is not self.form:
+            return
+
+        if not self.form.has_unsaved_changes():
+            logger.debug("Inactivity timeout: idle form with no changes closed automatically")
+            self.show_home_widget()
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle("Inactivity Detected")
+        box.setText(
+            "The snippet form has been idle.\n\n"
+            "Would you like to save your changes or discard them?"
+        )
+        save_btn = box.addButton("Save", QMessageBox.AcceptRole)
+        discard_btn = box.addButton("Discard", QMessageBox.DestructiveRole)
+        keep_btn = box.addButton("Keep Editing", QMessageBox.RejectRole)
+        box.setDefaultButton(keep_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked == save_btn:
+            self.on_save()
+        elif clicked == discard_btn:
+            self.show_home_widget()
+        else:
+            # Restart timer for another cycle
+            self.start_inactivity_timer()
+
     def applyStyles(self):
         """
-        Apply updated styles to child widgets and refresh the UI.
-
-        Calls style update methods on contained widgets and processes
-        pending application events.
+        Apply font and size styling to search controls and all child widgets.
 
         Returns:
             None
         """
+        self.search_bar.setFont(self.main.medium_font_size)
+        self.filter_dropdown.setFont(self.main.medium_font_size)
+        
         self.home_widget.applyStyles()
         self.form.applyStyles()
+        self.table.applyStyles()
+        self.set_collapse_button_state(self._collapse_expanded)
         self.update()
-        self.main.app.processEvents()
 
-    def update_stylesheet(self):
-        """
-        Update the widget stylesheet.
-
-        Applies styling rules for buttons, combo boxes, and line edits.
-
-        Returns:
-            None
-        """
-        self.setStyleSheet(""" 
-            QPushButton {
-                padding: 8px;
-            } 
-
-            QComboBox {
-                padding: 8px;
-            }
-
-            QLineEdit {
-                padding: 8px;
-            }
-        """)
-
-    def showStatus(self, msg=""):
+    def showStatus(self, msg="", duration_ms=5000):
         """
         Display a temporary status message.
 
-        Shows the provided message in the status bar and restores
-        the previous message after a delay.
+        Shows the provided message in the status bar, then restores the real
+        service status (rather than whatever text happened to be showing
+        before) so the status bar can't get stuck on a stale message.
 
         Args:
             msg (str): Message to display.
+            duration_ms (int): How long to show the message before restoring
+                the service status.
 
         Returns:
             None
         """
-        original_msg = self.parent.statusBar().currentMessage() or ""
         self.parent.statusBar().showMessage(msg)
-        QTimer.singleShot(5000, lambda: self.parent.statusBar().showMessage(original_msg))
+        QTimer.singleShot(duration_ms, self.parent.check_service_status)
 
     def navigate_home(self):
         """
@@ -709,29 +1344,27 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
+        self.stop_inactivity_timer()
         self.resume_service()
         self.stack.setCurrentIndex(0)   # go home
 
     def pause_service(self):
         """
-        Pause the snippet service.
-
-        Updates the status bar and pauses the background snippet service.
+        Pause the snippet service via the main window so state and the
+        status bar stay in sync with the single source of truth.
 
         Returns:
             None
         """
-        self.parent.statusBar().showMessage(f"Service status: Paused")
-        self.parent.snippet_service.pause()
+        self.parent.pause_service()
 
     def resume_service(self):
         """
-        Resume the snippet service.
-
-        Updates the status bar and resumes the background snippet service.
+        Resume the snippet service via the main window so state and the
+        status bar stay in sync with the single source of truth.
 
         Returns:
             None
         """
-        self.parent.statusBar().showMessage(f"Service status: Running")
-        self.parent.snippet_service.resume()
+        self.parent.resume_service()
+

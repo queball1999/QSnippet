@@ -1,0 +1,10 @@
+# Ensure Unix line endings for all shell scripts and Linux packaging files
+*.sh            text eol=lf
+deb-package/*   text eol=lf
+*.desktop       text eol=lf
+*.metainfo.xml  text eol=lf
+
+# Windows-native files keep CRLF
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf

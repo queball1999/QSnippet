@@ -2,10 +2,10 @@ import sys
 import os
 import logging
 from pathlib import Path
-import psutil, tempfile
 
 # Import utility modules (UI imports moved to __init__ to avoid import errors in test environments)
 from utils import FileUtils, SnippetDB, ConfigLoader, SettingsLoader, AppLogger, sys_utils
+from utils.lock_utils import LockFile
 
 # Import build info
 try:
@@ -75,6 +75,7 @@ class main():
         self.check_sys_requirements()  # Check system requirements
         self.check_if_already_running(self.program_name) # Check if application is already running
         self.scale_ui_cfg()
+        self.start_accent_color_monitor()
 
         # Check if we need to show notices
         # Default to True if setting missing
@@ -94,10 +95,7 @@ class main():
         Returns:
             None
         """
-        self.REQUIRED_IMAGE_FILES = [
-            "QSnippet.ico",
-            "QSnippet.icns",
-        ]
+        self.REQUIRED_IMAGE_FILES = []
 
         # Global Configuration Variables
         self.pid = os.getpid()  # Store Process ID of application
@@ -112,9 +110,10 @@ class main():
         self.skip_reg = False
 
         # Define Directories
-        self.working_dir = FileUtils.get_default_paths()["working_dir"]
-        self.resource_dir = FileUtils.get_default_paths()["resource_dir"]
-        self.default_os_paths = FileUtils.get_default_paths()
+        default_paths = FileUtils.get_default_paths()
+        self.working_dir = default_paths["working_dir"]
+        self.resource_dir = default_paths["resource_dir"]
+        self.default_os_paths = default_paths
 
         self.config_dir = self.working_dir / "config"
         self.logs_dir = self.default_os_paths["log_dir"]
@@ -130,9 +129,11 @@ class main():
 
         # Define Files
         self.app_exe = self.working_dir / "QSnippet.exe"
-        self.snippet_db_file = self.app_data_dir / "snippets.db"
         self.program_icon = os.path.join(self.images_path, "QSnippet_Icon_v1.png")
         self.log_path = os.path.join(self.logs_dir, "QSnippet.log")
+
+        # Ensure log directory exists before logger tries to write to it
+        Path(self.logs_dir).mkdir(parents=True, exist_ok=True)
 
         # Config and Settings files
 
@@ -145,14 +146,8 @@ class main():
         self.settings_file = self.app_data_dir / "settings.yaml"
         self.license_file  = self.working_dir / "LICENSE"
 
-        # Use this to ensure files exist
-        # Define files in a list of dicts with "file" and "function" keys
+        # Ensure config and settings files exist first (DB deferred until settings are loaded)
         sys_utils.ensure_files_exist([
-            {
-                "file": self.snippet_db_file,
-                "function": lambda p=self.snippet_db_file:
-                    FileUtils.create_snippets_db_file(p)
-            },
             {
                 "file": self.config_file,
                 "function": lambda p=self.config_file:
@@ -183,9 +178,36 @@ class main():
             default_path=self.default_settings_file,
             user_path=self.settings_file,
         )
+
+        # Resolve the snippet DB path: use custom directory from settings if set,
+        # otherwise fall back to the default app data directory.
+        custom_db_dir = (
+            self.settings.get("saving", {})
+            .get("db_path", {})
+            .get("value", "")
+            or ""
+        ).strip()
         
+        if custom_db_dir:
+            self.snippet_db_file = Path(custom_db_dir) / "snippets.db"
+            Path(custom_db_dir).mkdir(parents=True, exist_ok=True)
+        else:
+            self.snippet_db_file = self.app_data_dir / "snippets.db"
+
+        # Ensure the DB file exists at the resolved path
+        sys_utils.ensure_files_exist([
+            {
+                "file": self.snippet_db_file,
+                "function": lambda p=self.snippet_db_file:
+                    FileUtils.create_snippets_db_file(p)
+            },
+        ])
+
         # Initialize Snippet DB instance
         self.snippet_db = SnippetDB(self.snippet_db_file)
+
+        if self.snippet_db.was_freshly_created:
+            self.clear_vault_crypto_from_config()
 
         logger.info("Global variables created")
     
@@ -316,14 +338,34 @@ class main():
         self.loader.settingsChanged.connect(self.on_settings_updated)
         self.settings = self.loader.settings
         self.flatten_yaml(items=self.settings)
+        self.populate_available_fonts()
         self.handle_start_up_reg()
+
+    def populate_available_fonts(self) -> None:
+        """
+        Populate the available system fonts in the font_family setting.
+
+        Detects all available system fonts and adds them as options to the
+        font_family setting in appearance.advanced.
+        """
+        try:
+            available_fonts = FileUtils.get_system_fonts()
+
+            # Add options to the font_family setting
+            if "appearance" in self.settings and "advanced" in self.settings["appearance"]:
+                if "font_family" in self.settings["appearance"]["advanced"]:
+                    self.settings["appearance"]["advanced"]["font_family"]["options"] = available_fonts
+                    logger.debug(f"Populated {len(available_fonts)} system fonts")
+        except Exception as e:
+            logger.warning(f"Could not populate system fonts: {e}")
 
     def on_settings_updated(self, config) -> None:
         """
         Handle updates to the settings file.
 
-        Refreshes the stored settings, re-flattens attributes, and updates
-        startup registration behavior when changes are detected.
+        Refreshes the stored settings, re-flattens attributes, updates
+        startup registration behavior, and reapplies the current theme and
+        UI scale.
 
         Args:
             config (dict): The updated settings dictionary.
@@ -335,54 +377,330 @@ class main():
 
         if config:
             self.settings = config
-            self.flatten_yaml(items=self.settings)  # Flatten config again to refresh attributes.
+            self.flatten_yaml(items=self.settings)
             self.handle_start_up_reg()
+            self.scale_ui_cfg()  # recomputes fonts and reapplies theme/scale
 
     def scale_ui_cfg(self):
-        """ 
-        Reassigns the size attributes with scaled versions. 
-        Needs more work but this will do for now 05/07/25
         """
-        # Scale Accordingly
-        self.fonts_sizes = self.scale_font_sizes(font_dict=self.fonts_sizes, screen_geometry=self.screen_geometry)
-        self.dimensions_buttons = self.scale_dict_sizes(size_dict=self.dimensions_buttons, screen_geometry=self.screen_geometry)
-        self.dimensions_windows = self.scale_dict_sizes(size_dict=self.dimensions_windows, screen_geometry=self.screen_geometry)
-        
-        # Buttons
-        self.mini_button_size = self.QSize(self.dimensions_buttons["mini"]["width"], self.dimensions_buttons["mini"]["height"])
-        self.small_button_size = self.QSize(self.dimensions_buttons["small"]["width"], self.dimensions_buttons["small"]["height"])
-        self.medium_button_size = self.QSize(self.dimensions_buttons["medium"]["width"], self.dimensions_buttons["medium"]["height"])
-        self.large_button_size = self.QSize(self.dimensions_buttons["large"]["width"], self.dimensions_buttons["large"]["height"])
-        
-        # Font Sizes
-        self.small_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"])
-        self.small_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["small"], self.QFont.Bold)
-        self.medium_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"])
-        self.medium_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["medium"], self.QFont.Bold)
-        self.large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"])
-        self.large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["large"], self.QFont.Bold)
-        self.extra_large_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"])
-        self.extra_large_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["extra_large"], self.QFont.Bold)
-        self.humongous_font_size = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"])
-        self.humongous_font_size_bold = self.QFont(self.fonts["primary_font"], self.fonts_sizes["humongous"], self.QFont.Bold)
+        Recompute all scaled UI attributes from the original settings values.
 
-        # Widget Sizes
-        self.small_toggle_size = self.QSize(self.dimensions_toggles["small"]["width"], self.dimensions_toggles["small"]["height"])        
+        Safe to call multiple times - always reads from the unscaled originals
+        stored in settings so that repeated calls (e.g. after a settings change)
+        do not compound the scaling.
+        """
+        # --- resolve user-configured scale (default 100 %) ---
+        appearance = self.settings.get("appearance", {})
+        ui_scale_val = appearance.get("ui_scale", {})
+        if isinstance(ui_scale_val, dict):
+            ui_scale_val = ui_scale_val.get("value", "100")
+        user_scale = max(0.5, int(ui_scale_val) / 100.0)
+
+        # --- screen ratio (height vs reference 1080 p) ---
+        screen_ratio = self.screen_geometry.height() / self.REFERENCE_HEIGHT
+        total_font_scale = screen_ratio * user_scale
+
+        # --- read fonts and button sizes from settings (advanced appearance) ---
+        advanced = appearance.get("advanced", {})
+
+        # Font family
+        pf = advanced.get("font_family", {})
+        if isinstance(pf, dict):
+            pf = pf.get("value", "Inter")
+
+        # Font sizes - always from original settings, never from a previous call
+        font_sizes_setting = advanced.get("font_sizes", {})
+        orig_font_sizes = {}
+        for size_name in ["small", "medium", "large", "extra_large", "humongous"]:
+            size_dict = font_sizes_setting.get(size_name, {})
+            if isinstance(size_dict, dict):
+                orig_font_sizes[size_name] = size_dict.get("value", 12)
+            else:
+                orig_font_sizes[size_name] = 12
+
+        self.fonts_sizes = {
+            name: max(6, round(size * total_font_scale))
+            for name, size in orig_font_sizes.items()
+        }
+
+        # Button padding from settings (raw, unscaled - theme manager scales via QSS)
+        button_padding_setting = advanced.get("button_padding", {})
+        bpx_dict = button_padding_setting.get("x", {})
+        bpy_dict = button_padding_setting.get("y", {})
+        self.button_padding_x_raw = bpx_dict.get("value", 8) if isinstance(bpx_dict, dict) else 8
+        self.button_padding_y_raw = bpy_dict.get("value", 6) if isinstance(bpy_dict, dict) else 6
+
+        # Toggle sizes - always from original settings
+        toggle_sizes_setting = advanced.get("toggle_sizes", {})
+        orig_toggle_sizes = {}
+        for toggle_type in ["small"]:
+            toggle_dict = toggle_sizes_setting.get(toggle_type, {})
+            if isinstance(toggle_dict, dict):
+                orig_toggle_sizes[toggle_type] = {
+                    "width": toggle_dict.get("width", {}).get("value", 60) if isinstance(toggle_dict.get("width"), dict) else 60,
+                    "height": toggle_dict.get("height", {}).get("value", 45) if isinstance(toggle_dict.get("height"), dict) else 45,
+                }
+            else:
+                orig_toggle_sizes[toggle_type] = {"width": 60, "height": 45}
+
+        # Scale toggle sizes
+        self.dimensions_toggles = self.scale_dict_sizes(
+            size_dict=orig_toggle_sizes, screen_geometry=self.screen_geometry
+        )
+
+        # Window dimensions (from settings.advanced, scaled by screen ratio)
+        window_sizes_setting = advanced.get("window_sizes", {})
+        orig_window_sizes = {}
+        for window_type in ["main"]:
+            window_dict = window_sizes_setting.get(window_type, {})
+            if isinstance(window_dict, dict):
+                orig_window_sizes[window_type] = {
+                    "width": window_dict.get("width", {}).get("value", 1200) if isinstance(window_dict.get("width"), dict) else 1200,
+                    "height": window_dict.get("height", {}).get("value", 800) if isinstance(window_dict.get("height"), dict) else 800,
+                }
+            else:
+                orig_window_sizes[window_type] = {"width": 1200, "height": 800}
+
+        self.dimensions_windows = self.scale_dict_sizes(
+            size_dict=orig_window_sizes, screen_geometry=self.screen_geometry
+        )
+
+        # QSize object for toggle
+        self.small_toggle_size  = self.QSize(self.dimensions_toggles["small"]["width"],  self.dimensions_toggles["small"]["height"])
+
+        # QFont objects (user-scale applied on top of screen scale)
+        self.small_font_size           = self.QFont(pf, self.fonts_sizes["small"])
+        self.small_font_size_bold      = self.QFont(pf, self.fonts_sizes["small"],       self.QFont.Bold)
+        self.medium_font_size          = self.QFont(pf, self.fonts_sizes["medium"])
+        self.medium_font_size_bold     = self.QFont(pf, self.fonts_sizes["medium"],      self.QFont.Bold)
+        self.large_font_size           = self.QFont(pf, self.fonts_sizes["large"])
+        self.large_font_size_bold      = self.QFont(pf, self.fonts_sizes["large"],       self.QFont.Bold)
+        self.extra_large_font_size     = self.QFont(pf, self.fonts_sizes["extra_large"])
+        self.extra_large_font_size_bold= self.QFont(pf, self.fonts_sizes["extra_large"], self.QFont.Bold)
+        self.humongous_font_size       = self.QFont(pf, self.fonts_sizes["humongous"])
+        self.humongous_font_size_bold  = self.QFont(pf, self.fonts_sizes["humongous"],   self.QFont.Bold)
+
+        # Apply theme + scale to QApplication stylesheet
+        self.apply_theme()
+
+    def apply_fonts_to_all_widgets(self) -> None:
+        """
+        Blanket font sweep across every top-level widget tree.
+
+        Sizing is role-aware: ThemeManager.apply_fonts picks each widget's
+        font from OBJECT_NAME_FONTS, falling back to the medium font. This is
+        phase 2 of ThemeManager.force_repaint and must run before the
+        per-widget applyStyles() hooks (phase 3), which layer on the remaining
+        overrides that object names alone cannot express.
+        """
+        try:
+            from ui.theme_manager import ThemeManager
+
+            # Set the app-level font so widgets that rely on inheritance
+            # (status bar, group box titles, tab bars, etc.) also pick up
+            # the new font family even though we don't walk their trees explicitly.
+            self.app.setFont(self.medium_font_size)
+
+            for top in self.app.topLevelWidgets():
+                ThemeManager.apply_fonts(top)
+
+        except Exception as e:
+            logger.debug(f"Error applying fonts to all widgets: {e}")
+
+    def start_accent_color_monitor(self) -> None:
+        """Start a timer to monitor system accent color changes."""
+        # Only monitor if theme is "system" or accent is "system"
+        appearance = self.settings.get("appearance", {})
+        theme_val = appearance.get("theme", {})
+        if isinstance(theme_val, dict):
+            theme_val = theme_val.get("value", "system")
+
+        accent_val = appearance.get("accent_color", {})
+        if isinstance(accent_val, dict):
+            accent_val = accent_val.get("value", "system")
+
+        # Only monitor if using system theme/accent
+        if theme_val == "system" or accent_val == "system":
+            self.last_accent_color = None
+            timer = self.QTimer()
+            timer.timeout.connect(self.check_accent_color_changed)
+            timer.start(2000)  # Check every 2 seconds
+            self.accent_color_monitor = timer
+            logger.debug("System accent color monitor started")
+
+    def check_accent_color_changed(self) -> None:
+        """Check if system accent color has changed and reapply theme if it has."""
+        from ui.theme_manager import ThemeManager
+
+        # Only check if we have a theme manager
+        if not hasattr(self, "theme_manager") or self.theme_manager is None:
+            return
+
+        # Get current system accent color
+        tm = self.theme_manager
+        is_dark = tm.is_dark
+        current_accent = tm.get_system_accent(is_dark)
+
+        # If color changed, reapply theme
+        if self.last_accent_color is not None and current_accent != self.last_accent_color:
+            logger.info(f"System accent color changed from {self.last_accent_color} to {current_accent}")
+            self.apply_theme()
+
+        self.last_accent_color = current_accent
+
+    def apply_theme(self) -> None:
+        """Create (or reuse) the ThemeManager and apply the current theme + scale."""
+        from ui.theme_manager import ThemeManager
+
+        appearance = self.settings.get("appearance", {})
+
+        def val(key, default):
+            v = appearance.get(key, {})
+            return v.get("value", default) if isinstance(v, dict) else default
+
+        theme_val  = val("theme",        "system")
+        scale_pct  = max(50, int(val("ui_scale",     100)))
+        accent_col = val("accent_color", "system")
+
+        if not hasattr(self, "theme_manager") or self.theme_manager is None:
+            # `main=self` is what every widget uses to reach the scaled QFont
+            # attributes (see ThemeManager.app_instance / ThemeManager.font).
+            self.theme_manager = ThemeManager(self.app, main=self)
+        else:
+            self.theme_manager.main = self
+
+        resolved  = self.theme_manager.resolve_theme(theme_val)
+        prev_theme = self.theme_manager.theme_name  # theme from the last apply()
+
+        if resolved not in ("dark", "light"):
+            # Pink / Nord: always use their own built-in accent
+            accent_col = "system"
+        elif theme_val == "system" or (prev_theme not in ("dark", "light") and prev_theme):
+            # "System" theme explicitly selected, or switching back from pink/nord:
+            # revert accent to system color and persist the change.
+            accent_col = "system"
+            acc_node = appearance.get("accent_color")
+            if isinstance(acc_node, dict) and acc_node.get("value") != "system":
+                acc_node["value"] = "system"
+                from utils import FileUtils
+                FileUtils.write_yaml(self.settings_file, self.settings)
+
+        btn_pad_x = getattr(self, 'button_padding_x_raw', 8)
+        btn_pad_y = getattr(self, 'button_padding_y_raw', 6)
+        self.theme_manager.apply(theme_val, scale_pct, accent_col, btn_pad_x, btn_pad_y)
 
     def fix_image_paths(self) -> None:
         """
-        Update image paths to use the resolved images directory.
+        Resolve all image/icon asset paths with intelligent fallback.
 
-        Prefixes configured image filenames with the absolute images path.
+        Resolution strategy for icons (assets/icons/):
+        1. External assets/icons/ folder (development priority)
+        2. Bundled resources (PyInstaller) - only if external missing AND in PyInstaller
+
+        Resolution strategy for images (assets/images/):
+        1. External assets/images/ folder (development priority)
+        2. Bundled resources (PyInstaller) - only if external missing AND in PyInstaller
+
+        For development mode (not in PyInstaller): raises error if critical assets missing
+        to prevent runaway app with missing tray icon.
+
+        Uses OS-specific icon format (*.ico on Windows, *.icns on macOS/Linux).
 
         Returns:
             None
+
+        Raises:
+            SystemExit: If in development and required assets cannot be resolved.
         """
-        for image in self.images:
-            old_val = self.images[image]
-            self.images[image] = os.path.join(self.images_path, old_val)
-            
-        logger.debug(f"Images Path: {self.images_path}")
+        icon_names = {"QSnippet.ico", "QSnippet.icns"}
+        icon_prefixes = ("icon_",)
+        critical_assets = {"icon"}
+
+        logger.info("Resolving image/icon asset paths")
+
+        # Work on a private copy. self.images started out as the *same* dict
+        # object as self.cfg["images"], and self.cfg gets written back to
+        # config.yaml verbatim elsewhere (e.g. handle_log_level, vault settings
+        # saves). Resolving in place would leak absolute, run-specific paths
+        # (including PyInstaller's ephemeral _MEI* temp dir) into the persisted
+        # config, permanently overwriting the real filenames on disk.
+        self.images = dict(self.images)
+
+        # Get the resolved images path (already determined during init)
+        images_path = self.images_path
+        icons_path = images_path.parent / "icons"  # assets/icons/
+
+        missing_critical = []
+
+        for image_key in self.images:
+            old_val = self.images[image_key]
+
+            # Nothing configured (or already-corrupted empty value) - treat as missing
+            # rather than resolving os.path.join(dir, "") down to the bare directory.
+            if not old_val:
+                logger.warning(f"Asset '{image_key}' has no configured filename; treating as missing")
+                if image_key in critical_assets:
+                    missing_critical.append((image_key, old_val, "assets/icons"))
+                self.images[image_key] = ""
+                continue
+
+            # Handle generic "QSnippet" icon name with OS-specific resolution
+            if old_val == "QSnippet":
+                old_val = FileUtils.get_os_specific_icon()
+                logger.debug(f"Resolved generic 'QSnippet' icon to OS-specific: {old_val}")
+
+            # Determine if this is an icon file
+            is_icon = (old_val in icon_names or
+                      any(old_val.startswith(prefix) for prefix in icon_prefixes))
+
+            # Build the primary path based on asset type
+            if is_icon:
+                primary_path = os.path.join(str(icons_path), old_val)
+            else:
+                primary_path = os.path.join(str(images_path), old_val)
+
+            # Try primary path first (external development assets).
+            # isfile (not exists) so a bare directory is never mistaken for a resolved asset.
+            if os.path.isfile(primary_path):
+                logger.info(f"Asset '{image_key}' ({old_val}) resolved to: {primary_path}")
+                self.images[image_key] = primary_path
+            else:
+                # Only try fallback if in PyInstaller environment
+                if FileUtils.is_running_in_pyinstaller():
+                    asset_dir = "icons" if is_icon else "images"
+                    fallback_path = FileUtils.resolve_asset_with_fallback(old_val, asset_dir=asset_dir)
+                    if fallback_path:
+                        logger.info(f"Asset '{image_key}' ({old_val}) resolved to bundled: {fallback_path}")
+                        self.images[image_key] = fallback_path
+                    else:
+                        logger.warning(f"Asset '{image_key}' ({old_val}) not found in primary or bundled")
+                        self.images[image_key] = ""
+                else:
+                    # In development, fail loudly on missing critical assets
+                    asset_type = "icon" if is_icon else "image"
+                    asset_dir = "assets/icons" if is_icon else "assets/images"
+                    logger.warning(f"Asset '{image_key}' ({old_val}) not found at: {primary_path}")
+                    if image_key in critical_assets:
+                        logger.error(f"Critical {asset_type} '{image_key}' missing in development mode")
+                        missing_critical.append((image_key, old_val, asset_dir))
+                    self.images[image_key] = ""
+
+        # In development mode, fail loudly if critical assets are missing
+        # (prevents runaway app with no tray icon in taskbar)
+        if missing_critical:
+            msg = (
+                "Critical application assets are missing.\n\n"
+                "The following required files could not be found:\n"
+            )
+            for key, filename, asset_dir in missing_critical:
+                msg += f"  • {key}: {asset_dir}/{filename}\n"
+            msg += (
+                "\nMake sure the assets/ directory structure exists in the project root "
+                "with all required files."
+            )
+            logger.critical(msg)
+            self.QMessageBox.critical(None, "Missing Assets Error", msg)
+            sys.exit(1)
 
     def scale_width(self, original_width, screen_geometry) -> int:
         """
@@ -488,42 +806,47 @@ class main():
                 ):  # If auto-start exists and setting is false, disable auto-start
                 LinuxUtils.disable_autostart()
                 
-    def check_if_already_running(self, app_name="QSnippet"):
+    def check_if_already_running(self, app_name="QSnippet") -> bool:
         """
-        Check whether another instance of the application is running.
+        Check whether another instance of the application is already running.
 
-        Uses a lock file in the system temporary directory to determine
-        if an existing process with the stored PID is active. If another
-        instance is detected, displays a message and exits.
+        Uses kernel-enforced locking for atomic, cross-platform single instance detection:
+        - Windows: Named mutex via CreateMutex (kernel-enforced, atomic)
+        - Linux/macOS: fcntl.flock() (kernel-enforced, atomic, auto-released on crash)
 
         Args:
-            app_name (str): Name of the application.
+            app_name (str): Name of the application used for single instance detection.
 
         Returns:
-            bool: False if no other instance is running.
+            bool: True if startup can continue, otherwise exits the process.
 
         Raises:
-            SystemExit: If another instance is already running.
+            SystemExit: If another running instance is detected.
         """
-        lock_file = os.path.join(tempfile.gettempdir(), f"{app_name}.lock")
-        current_pid = os.getpid()
+        if sys.platform == "win32":
+            lock_id = f"Local\\{app_name}.Lock"
+        else:
+            lock_id = str(self.app_data_dir / f".{app_name}.lock")
 
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, "r") as f:
-                    pid = int(f.read().strip())
-                if psutil.pid_exists(pid):
-                    # Already running
-                    self.message_box.info(f"Another instance of '{app_name}' is already running.\nPlease check the task tray for the app icon.",
-                                          title="Already Running")
-                    sys.exit(1)
-            except Exception:
-                pass  # corrupt lock file, ignore
+        logger.debug("Checking single-instance lock: %s", lock_id)
 
-        # Write our PID
-        with open(lock_file, "w") as f:
-            f.write(str(current_pid))
-        return False
+        try:
+            # Moving to new lock_utils with better cross-platform support and automatic cleanup on crashes
+            self.lock_file = LockFile(lock_id)
+            if self.lock_file.try_acquire():
+                self.app.aboutToQuit.connect(self.lock_file.release)
+                logger.debug("Single-instance lock acquired successfully")
+                return True
+
+            logger.warning("Another instance detected. Exiting.")
+            self.message_box.info(
+                f"Another instance of '{app_name}' is already running.\nPlease check the task tray for the app icon.",
+                title="Already Running"
+            )
+            sys.exit(1)
+        except Exception as e:
+            logger.exception("Single-instance check failed: %s", e)
+            raise RuntimeError(f"Failed to initialize single-instance lock: {e}") from e
     
     def check_sys_requirements(self):
         """
@@ -689,6 +1012,57 @@ class main():
         FileUtils.write_yaml(self.settings_file, self.settings)
         logger.debug("Finished checking notices")
 
+    def show_release_history(self) -> None:
+        """
+        Help menu action: browse every past release notice.
+
+        Unlike check_notices, this ignores dismissed state and never
+        marks anything as read - it's a read-only viewer over the full
+        notice archive (active and history/ alike).
+
+        Returns:
+            None
+        """
+        notices_dir = Path(self.working_dir) / "notices"
+        notices_dir.mkdir(exist_ok=True)
+
+        history = self.NoticeCarouselDialog.load_release_history(notices_dir)
+
+        if not history:
+            logger.debug("No release history to display")
+            return
+
+        dialog = self.NoticeCarouselDialog(
+            history,
+            icon_path=self.QIcon(self.images["icon"]),
+            parent=self,
+            window_title="Release History",
+            header_text="QSnippet release history",
+            dismissible=False,
+        )
+        dialog.exec()
+
+    def clear_vault_crypto_from_config(self) -> None:
+        """Clear vault cryptographic material after a fresh DB creation.
+
+        When the snippets database is recreated from scratch, any vault secrets
+        stored in config.yaml (salt, HMAC, wrapped recovery key) are orphaned -
+        they reference data that no longer exists.  This method removes those
+        keys so the vault is treated as unconfigured while preserving user
+        preferences (auto_lock_minutes, unlock_on_launch).
+        """
+        try:
+            vault_cfg = self.config.get("vault", {})
+            crypto_keys = ("configured", "salt", "hmac", "rec_wrapped_key", "rec_salt")
+            if any(vault_cfg.get(k) for k in crypto_keys):
+                for k in crypto_keys:
+                    vault_cfg.pop(k, None)
+                self.config["vault"] = vault_cfg
+                FileUtils.write_yaml(self.config_file, self.config)
+                logger.warning("Fresh DB detected. Cleared orphaned vault crypto material from config")
+        except Exception:
+            logger.exception("Failed to clear vault crypto from config after fresh DB creation")
+
     def start_program(self):
         """
         Create and launch the main application window.
@@ -721,10 +1095,16 @@ if __name__ == '__main__':
         ex = main()
         sys.exit(ex.app.exec())
     except Exception as e:
-        # Leaving as built-in QMessageBox to ensure it shows
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
-        msg.setWindowIcon(QIcon("images/QSnippet.ico")) # fallback location
+        try:
+            from utils.file_utils import FileUtils
+            icon_name = FileUtils.get_os_specific_icon()
+            icon_path = FileUtils.resolve_asset_with_fallback(icon_name, asset_dir="images")
+            if icon_path:
+                msg.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
         msg.setWindowTitle("Fatal Error")
         msg.setText(f"A fatal error was encountered. Please contact the app administrator.\nError: {str(e)}")
         msg.exec()

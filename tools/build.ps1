@@ -8,12 +8,13 @@ Set-Location (Join-Path $ScriptDir "..")
 
 # Extract version from config.yaml using Python
 # updating dir 12/22/25 to reflect new config path
-$VERSION = python -c "import yaml; print(yaml.safe_load(open('config\config.yaml'))['version'])"
+$VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])"
 
 $APP_NAME     = "QSnippet"
 $ENTRY        = "QSnippet.py"
-$ICON_WINDOWS = (Resolve-Path "./images/QSnippet.ico").Path
-$ImageDir     = Resolve-Path "./images"
+$IconsDir     = Resolve-Path "./assets/icons"
+$ImagesDir    = Resolve-Path "./assets/images"
+$ICON_WINDOWS = (Join-Path $IconsDir "QSnippet.ico")
 
 # Define custom paths
 $BUILD_DIR = "build"
@@ -28,7 +29,8 @@ $PYINSTALLER_ARGS = @(
     "--workpath", "$BUILD_DIR/work",
     "--specpath", "$BUILD_DIR/spec",
     "--name", $APP_NAME,
-    "--add-data", "$ImageDir;images",
+    "--add-data", "$IconsDir;assets/icons",
+    "--add-data", "$ImagesDir;assets/images",
     $ENTRY
 )
 
@@ -55,18 +57,57 @@ Write-Host "Generated build_info.py ($BUILD_DATE, commit $GIT_COMMIT)" -Foregrou
 Write-Host "Running PyInstaller..."
 & pyinstaller @PYINSTALLER_ARGS
 
-# Create portable version
-# NOTE:
-# exePath (QSnippet.exe) is intentionally left for Inno Setup.
-# It is not uploaded as an artifact.
-$exePath     = Join-Path $DIST_DIR "$APP_NAME.exe"
-$portableExe = Join-Path $DIST_DIR "$APP_NAME-$VERSION-windows-portable.exe"
+# Create portable zip package
+Write-Host "Creating portable zip package..." -ForegroundColor Cyan
 
+$exePath     = Join-Path $DIST_DIR "$APP_NAME.exe"
+$portableDir = Join-Path $DIST_DIR "QSnippet-$VERSION-windows-portable"
+$portableZip = Join-Path $DIST_DIR "$APP_NAME-$VERSION-windows-portable.zip"
+
+# Remove existing portable zip if it exists
+if (Test-Path $portableZip) {
+    Write-Host "Removing existing portable zip: $portableZip" -ForegroundColor Yellow
+    Remove-Item $portableZip -Force
+}
+
+# Create temporary directory for packaging
+if (Test-Path $portableDir) {
+    Remove-Item $portableDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $portableDir | Out-Null
+
+# Copy executable directly to portable directory
 if (Test-Path $exePath) {
-    Copy-Item $exePath $portableExe -Force
-    Write-Host "Created portable binary: $portableExe" -ForegroundColor Cyan
+    Copy-Item $exePath (Join-Path $portableDir "$APP_NAME.exe") -Force
 } else {
     Write-Error "Expected binary not found: $exePath" -ForegroundColor Yellow
 }
+
+# Copy config folder (excluding __pycache__ and build_info.py which are build artifacts)
+$configDest = Join-Path $portableDir "config"
+Copy-Item "config" $configDest -Recurse -Force
+Remove-Item (Join-Path $configDest "__pycache__") -Recurse -Force -ErrorAction SilentlyContinue
+$buildInfoPath = Join-Path $configDest "build_info.py"
+if (Test-Path $buildInfoPath) {
+    Remove-Item $buildInfoPath -Force -ErrorAction SilentlyContinue
+}
+
+# Copy assets folder (icons, images required for bundled app)
+Copy-Item "assets" (Join-Path $portableDir "assets") -Recurse -Force
+
+# Copy notices folder
+Copy-Item "notices" (Join-Path $portableDir "notices") -Recurse -Force
+
+# Copy license
+Copy-Item "LICENSE" (Join-Path $portableDir "LICENSE") -Force
+
+# Create zip file
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory($portableDir, $portableZip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+
+Write-Host "Created portable zip: $portableZip" -ForegroundColor Cyan
+
+# Clean up temporary directory
+Remove-Item $portableDir -Recurse -Force
 
 Write-Host "Build complete: $DIST_DIR" -ForegroundColor Green

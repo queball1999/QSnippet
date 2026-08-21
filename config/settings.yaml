@@ -1,40 +1,274 @@
 # Default Settings Configuration
+appearance:
+  description: Visual appearance and layout settings.
+  theme:
+    type: string
+    value: "system"
+    default: "system"
+    options:
+      - "system"
+      - "dark"
+      - "light"
+      - "nord"
+      - "pink"
+    description: Color theme. "System" automatically follows your OS light/dark preference.
+  ui_scale:
+    type: integer
+    element: slider
+    value: 100
+    default: 100
+    min: 75
+    max: 150
+    description: Scales all text in the application. Changes take effect immediately.
+  accent_color:
+    type: string
+    element: colorpicker
+    value: "system"
+    default: "system"
+    description: Accent color for selections and highlights. Click the swatch to customise.
+
+  advanced:
+    description: Advanced font and spacing customization.
+    font_family:
+      type: string
+      element: dropdown
+      value: "Inter"
+      default: "Inter"
+      options: []
+      description: Primary font family used throughout the application.
+
+    font_sizes:
+      description: Base font sizes (before UI scaling is applied).
+      small:
+        type: integer
+        element: spinbox
+        value: 10
+        default: 10
+        min: 6
+        max: 14
+        description: Small font size.
+      medium:
+        type: integer
+        element: spinbox
+        value: 12
+        default: 12
+        min: 8
+        max: 16
+        description: Medium font size.
+      large:
+        type: integer
+        element: spinbox
+        value: 16
+        default: 16
+        min: 12
+        max: 20
+        description: Large font size.
+      extra_large:
+        type: integer
+        element: spinbox
+        value: 18
+        default: 18
+        min: 14
+        max: 22
+        description: Extra large font size.
+      humongous:
+        type: integer
+        element: spinbox
+        value: 26
+        default: 26
+        min: 22
+        max: 30
+        description: Humongous font size.
+
+    button_padding:
+      description: Button padding applied inside buttons (before UI scaling).
+      x:
+        type: integer
+        element: spinbox
+        value: 8
+        default: 8
+        min: 0
+        max: 40
+        description: Horizontal (left/right) padding in pixels.
+      y:
+        type: integer
+        element: spinbox
+        value: 6
+        default: 6
+        min: 0
+        max: 40
+        description: Vertical (top/bottom) padding in pixels.
+
+    toggle_sizes:
+      description: Base toggle/switch dimensions (before screen scaling).
+      small:
+        width:
+          type: integer
+          element: spinbox
+          value: 60
+          default: 60
+          min: 40
+          max: 120
+          description: Small toggle width.
+        height:
+          type: integer
+          element: spinbox
+          value: 45
+          default: 45
+          min: 25
+          max: 75
+          description: Small toggle height.
+
+    window_sizes:
+      description: Main window dimensions (before screen scaling).
+      main:
+        width:
+          type: integer
+          element: spinbox
+          value: 1200
+          default: 1200
+          min: 800
+          max: 2560
+          description: Main window width.
+        height:
+          type: integer
+          element: spinbox
+          value: 800
+          default: 800
+          min: 600
+          max: 1440
+          description: Main window height.
+
 general:
   startup_behavior:
+    description: Control how the application behaves on system startup.
     start_at_boot:
       type: bool
       value: true
+      default: true
       description: Launch the application automatically when the system starts.
 
     show_ui_at_start:
       type: bool
       value: true
+      default: true
       description: Display the user interface when the application starts.
 
-    expand_folders_on_load:
-      type: bool
-      value: false
-      description: Expand all folder views when loading the application.
-
   extra_features:
+    description: Optional features and fun extras that can be toggled on or off.
     easter_eggs_enabled:
       type: bool
       value: true
+      default: true
       description: Enable or disable easter eggs within the application.
+
+  table_behavior:
+    description: Configure how the snippet table and folder views behave.
+    expand_folders_on_load:
+      type: bool
+      value: false
+      default: false
+      description: Expand all folder views when loading the application.
+
+    expand_on_search:
+      type: bool
+      value: true
+      default: true
+      description: Automatically expand all folder views when a search is performed.
+
+  keyboard_behavior:
+    description: Configure snippet trigger detection while typing.
+    trigger_timeout:
+      type: string
+      value: "5s"
+      default: "5s"
+      description: >
+        How long you can pause mid-trigger before QSnippet forgets what you've
+        typed so far. Accepts a plain number of seconds, or a value with units
+        such as "500ms" or "5s". Set to "off" to disable the timeout so a
+        partially-typed trigger never expires from inactivity.
+
+  dynamic_placeholders:
+    description: Configure how [[placeholder]] input prompts are shown before pasting.
+    dialog_mode:
+      type: string
+      value: "single_form"
+      default: "single_form"
+      options:
+        - "single_form"
+        - "sequential"
+      description: >
+        When a snippet contains [[placeholder]] fields, show them all at
+        once in a single form ("single_form") or one at a time as a
+        step-by-step wizard ("sequential").
+
+  clipboard_behavior:
+    description: Control how and when clipboard contents are cleared after copying a snippet.
+    clipboard_timeout:
+      type: string
+      value: "15"
+      default: "15"
+      options:
+        - "15"
+        - "30"
+        - "60"
+        - "120"
+        - "off"
+      description: Clear snippet clipboard contents after the specified number of seconds.
+
+  form_behavior:
+    description: Configure how the new snippet form behaves when left idle.
+    inactivity_timeout:
+      type: string
+      value: "60"
+      default: "60"
+      options:
+        - "30"
+        - "60"
+        - "120"
+        - "300"
+        - "600"
+        - "off"
+      description: >
+        Seconds of inactivity before the new snippet form is closed automatically.
+        If no content has been entered the form closes silently; otherwise you are
+        prompted to save or discard. Set to "off" to disable.
 
 notices:
   disable_notices:
     type: bool
     value: false
+    default: false
     description: Disable all in-app notices and notifications.
   dismissed_notices:
     type: list
     value: []
+    default: []
     hidden: true
     description: List of notices that have been dismissed by the user.
+
+backups:
+  database_backups:
+    type: list
+    value: []
+    default: []
+    hidden: true
+    description: >
+      History of automatic pre-migration database backups (timestamp and
+      file paths), shown as sub-cards under Settings > Backups (also reachable
+      from Help > Backup History) so a backup can be found again later even if
+      its one-time notice was dismissed.
 
 saving:
   navigate_home_after_save:
     type: bool
     value: true
+    default: true
     description: Return to the home view after saving. If unchecked, remain on the current page.
+
+  db_path:
+    type: string
+    value: ""
+    default: ""
+    hidden: true
+    description: Custom directory path for the snippets database. Supports cloud-synced folders (NextCloud, OneDrive, Dropbox) and network shares (SMB/NFS). Leave blank to use the default app data location.

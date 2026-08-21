@@ -1,16 +1,10 @@
 #!/bin/bash
 set -e
 
-LOG_DIR="/var/log/QSnippet"
+# Remove log files
+if [ "$1" = "purge" ]; then
+    rm -rf /var/log/QSnippet
+fi
 
-case "$1" in
-    remove)
-        # Only remove user data on remove
-        rm -rf ~/.local/share/QSnippet
-        ;;
-    purge)
-        # Remove logs and user data on purge
-        rm -rf "$LOG_DIR"
-        rm -rf ~/.local/share/QSnippet
-        ;;
-esac
+# Remove user data
+rm -rf ~/.local/share/QSnippet

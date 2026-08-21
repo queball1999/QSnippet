@@ -10,32 +10,33 @@ class SettingsToast(QLabel):
         self.setObjectName("SettingsToast")
         self.setAlignment(Qt.AlignCenter)
 
-        self.setStyleSheet("""
-            QLabel#SettingsToast {
-                background-color: #00cc6a;
-                color: white;
-                padding: 8px 14px;
-                border-radius: 6px;
-                font-size: 13px;
-            }
-        """)
-
         self.hide()
 
-        self._hide_timer = QTimer(self)
-        self._hide_timer.setSingleShot(True)
-        self._hide_timer.timeout.connect(self.hide)
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self.hide)
 
-    def show_toast(self, duration_ms: int = 1200):
+    def show_toast(self, message: str = None, duration_ms: int = 1200):
         """ Show the toast for a specified duration in milliseconds """
+        if message is not None:
+            self.setText(message)
         self.adjustSize()
-        self._reposition()
-        self.show()
+        self.reposition()
+        QTimer.singleShot(0, self.show)
         self.raise_()
 
-        self._hide_timer.start(duration_ms)
+        self.hide_timer.start(duration_ms)
 
-    def _reposition(self):
+    def applyStyles(self):
+        """Update the toast font from the main app's scaled font set."""
+        try:
+            from ui.theme_manager import ThemeManager
+            self.setFont(ThemeManager.font("medium"))
+            self.adjustSize()
+        except Exception:
+            pass
+
+    def reposition(self):
         """ Move the toast to the top-right corner of the parent """
         parent = self.parentWidget()
         if not parent:

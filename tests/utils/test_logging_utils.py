@@ -2,18 +2,13 @@ import logging
 import zipfile
 from pathlib import Path
 
-import pytest
-
 from utils.logging_utils import (
     CompressedRotatingFileHandler,
     AppLogger,
 )
 
 
-# -------------------------
 # CompressedRotatingFileHandler
-# -------------------------
-
 def test_compressed_handler_creates_zip_on_rollover(tmp_path):
     """Rollover should compress the existing log file into a .zip."""
     log_path = tmp_path / "test.log"
@@ -96,10 +91,7 @@ def test_compress_log_file_removes_original(tmp_path):
     assert not source.exists()
 
 
-# -------------------------
 # AppLogger
-# -------------------------
-
 def test_app_logger_configures_root_logger(tmp_path):
     """
     AppLogger should configure root logger with correct handler and level.

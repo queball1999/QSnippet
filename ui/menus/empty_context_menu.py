@@ -24,9 +24,9 @@ class EmptyContextMenu(QMenu):
             None
         """
         super().__init__(parent)
-        self._build()
+        self.build()
 
-    def _build(self):
+    def build(self):
         """
         Build the empty context menu with all available actions.
 
@@ -43,3 +43,4 @@ class EmptyContextMenu(QMenu):
         self.addAction("Collapse All", self.collapseAllRequested.emit)
         self.addSeparator()
         self.addAction("Refresh", self.refreshRequested.emit)
+

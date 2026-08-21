@@ -4,6 +4,7 @@ from .keyboard_utils import *
 from .logging_utils import *
 from .sys_utils import *
 from .snippet_db import SnippetDB
+from .vault_manager import VaultManager
 
 import sys
 if sys.platform == "win32":

@@ -50,6 +50,32 @@ case "$OS" in
       --distpath "$DIST_DIR/linux" \
       --name "$APP_NAME-$VERSION" \
       "$ENTRY"
+
+    # Create portable zip package
+    echo "Creating portable zip package..."
+    PORTABLE_DIR="$DIST_DIR/linux/$APP_NAME-$VERSION-portable"
+    PORTABLE_ZIP="$DIST_DIR/$APP_NAME-$VERSION-linux-portable.zip"
+
+    mkdir -p "$PORTABLE_DIR"
+
+    # Copy executable
+    cp "$DIST_DIR/linux/$APP_NAME-$VERSION" "$PORTABLE_DIR/$APP_NAME"
+
+    # Copy config folder (excluding __pycache__ and build_info.py)
+    cp -r config "$PORTABLE_DIR/config"
+    rm -rf "$PORTABLE_DIR/config/__pycache__"
+    rm -f "$PORTABLE_DIR/config/build_info.py"
+
+    # Copy notices folder
+    cp -r notices "$PORTABLE_DIR/notices"
+
+    # Copy license
+    cp LICENSE "$PORTABLE_DIR/LICENSE"
+
+    # Create zip file
+    (cd "$DIST_DIR/linux" && zip -r "../../$(basename $PORTABLE_ZIP)" "$(basename $PORTABLE_DIR)")
+
+    echo "Created portable zip: $PORTABLE_ZIP"
     ;;
 
   Darwin*)
@@ -59,6 +85,32 @@ case "$OS" in
       --distpath "$DIST_DIR/macos" \
       --name "$APP_NAME-$VERSION" \
       "$ENTRY"
+
+    # Create portable zip package
+    echo "Creating portable zip package..."
+    PORTABLE_DIR="$DIST_DIR/macos/$APP_NAME-$VERSION-portable"
+    PORTABLE_ZIP="$DIST_DIR/$APP_NAME-$VERSION-macos-portable.zip"
+
+    mkdir -p "$PORTABLE_DIR"
+
+    # Copy executable
+    cp "$DIST_DIR/macos/$APP_NAME-$VERSION" "$PORTABLE_DIR/$APP_NAME"
+
+    # Copy config folder (excluding __pycache__ and build_info.py)
+    cp -r config "$PORTABLE_DIR/config"
+    rm -rf "$PORTABLE_DIR/config/__pycache__"
+    rm -f "$PORTABLE_DIR/config/build_info.py"
+
+    # Copy notices folder
+    cp -r notices "$PORTABLE_DIR/notices"
+
+    # Copy license
+    cp LICENSE "$PORTABLE_DIR/LICENSE"
+
+    # Create zip file
+    (cd "$DIST_DIR/macos" && zip -r "../../$(basename $PORTABLE_ZIP)" "$(basename $PORTABLE_DIR)")
+
+    echo "Created portable zip: $PORTABLE_ZIP"
     ;;
 
   *)

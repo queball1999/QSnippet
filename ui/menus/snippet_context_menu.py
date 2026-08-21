@@ -24,9 +24,9 @@ class SnippetContextMenu(QMenu):
         """
         super().__init__(parent)
         self.entry = entry
-        self._build()
+        self.build()
 
-    def _build(self):
+    def build(self):
         """
         Build the snippet context menu with all available snippet actions.
 
@@ -48,3 +48,4 @@ class SnippetContextMenu(QMenu):
             "Delete Item",
             lambda: self.deleteRequested.emit(self.entry)
         )
+
