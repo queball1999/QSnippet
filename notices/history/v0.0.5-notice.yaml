@@ -1,0 +1,24 @@
+id: "v0.0.5"
+title: "QSnippet 0.0.5"
+message: |
+  ## License Change
+  Starting with this release, QSnippet is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+  - All releases published prior to January 2026 remain licensed under the MIT License.
+  - All new releases and future updates are governed by GPLv3.
+
+  See the LICENSE file for full details.
+
+  ## What's New
+  - Added a dynamic **Settings dialog** with search and highlighted matches.
+  - Added debounce handling to improve search box responsiveness throughout the app.
+  - Added rename support using **F2**, with updated menu shortcut mappings.
+  - Reworked the in-app notice system to support **multiple notices** with **markdown rendering** in a single dialog, instead of one-at-a-time plain-text popups.
+  - General application styling improvements, primarily padding adjustments.
+
+  ## Improvements
+  - Updated the `settings.yaml` schema.
+  - Updated unit tests to match the above changes.
+
+  ## Fixes
+  - Fixed a bug preventing folders from being added correctly.

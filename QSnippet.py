@@ -1012,6 +1012,36 @@ class main():
         FileUtils.write_yaml(self.settings_file, self.settings)
         logger.debug("Finished checking notices")
 
+    def show_release_history(self) -> None:
+        """
+        Help menu action: browse every past release notice.
+
+        Unlike check_notices, this ignores dismissed state and never
+        marks anything as read - it's a read-only viewer over the full
+        notice archive (active and history/ alike).
+
+        Returns:
+            None
+        """
+        notices_dir = Path(self.working_dir) / "notices"
+        notices_dir.mkdir(exist_ok=True)
+
+        history = self.NoticeCarouselDialog.load_release_history(notices_dir)
+
+        if not history:
+            logger.debug("No release history to display")
+            return
+
+        dialog = self.NoticeCarouselDialog(
+            history,
+            icon_path=self.QIcon(self.images["icon"]),
+            parent=self,
+            window_title="Release History",
+            header_text="QSnippet release history",
+            dismissible=False,
+        )
+        dialog.exec()
+
     def clear_vault_crypto_from_config(self) -> None:
         """Clear vault cryptographic material after a fresh DB creation.
 

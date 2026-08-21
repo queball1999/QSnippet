@@ -256,6 +256,7 @@ class QSnippet(QMainWindow):
         self.menubar.renameAction.connect(self.handle_rename_action)
         self.menubar.collectLogsRequested.connect(self.handle_collect_logs)
         self.menubar.viewBackupHistoryRequested.connect(self.handle_view_backup_history)
+        self.menubar.viewReleaseHistoryRequested.connect(self.handle_view_release_history)
         self.menubar.logLevelChanged.connect(self.handle_log_level)
         self.menubar.showAppInfo.connect(self.handle_show_info)
         self.menubar.show_settings.connect(self.show_settings_window)
@@ -1300,6 +1301,10 @@ class QSnippet(QMainWindow):
         actions that operate on them.
         """
         self.show_settings_window(page="Backups")
+
+    def handle_view_release_history(self) -> None:
+        """Help menu action: open the read-only Release History viewer."""
+        self.parent.show_release_history()
 
     def show_backup_links_dialog(self, title: str, intro: str, entries: list) -> None:
         """Show *entries* (each with timestamp/db_backup_path/export_path) as a

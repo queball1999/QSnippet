@@ -15,6 +15,7 @@ class MenuBar(QMenuBar):
     renameAction = Signal()
     collectLogsRequested = Signal()
     viewBackupHistoryRequested = Signal()
+    viewReleaseHistoryRequested = Signal()
     logLevelChanged = Signal(str)
     showAppInfo = Signal()
     show_settings = Signal()
@@ -206,6 +207,13 @@ class MenuBar(QMenuBar):
         backup_history_act.setStatusTip("View automatic database backups made before updates")
         backup_history_act.triggered.connect(self.viewBackupHistoryRequested.emit)
         help_menu.addAction(backup_history_act)
+
+        # Release History
+        release_history_icon = QIcon(FileUtils.icon_path("calendar-clock-outline.svg"))
+        release_history_act = QAction(release_history_icon, "Release History", self)
+        release_history_act.setStatusTip("Browse past release notes")
+        release_history_act.triggered.connect(self.viewReleaseHistoryRequested.emit)
+        help_menu.addAction(release_history_act)
 
         # Report a Bug
         bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))

@@ -1,7 +1,6 @@
 import re
 import yaml
 from pathlib import Path
-from datetime import datetime, timedelta
 import logging
 
 from PySide6.QtWidgets import (
@@ -17,20 +16,23 @@ logger = logging.getLogger(__name__)
 # This will avoid loading in too many notices
 NOTICE_LIMIT = 10
 
-# Set limit to how old notices can be
-# Any notice older than this will not
-# be shown, and automatically deleted.
-MAX_DAY_COUNT = 30
+# Subfolder that holds archived (superseded) release notices.
+# Notices here are never shown as unread popups; they're only
+# browsable through the read-only Release History viewer.
+HISTORY_DIRNAME = "history"
 
 
 class NoticeCarouselDialog(QDialog):
-    # Matches the following: mm-dd-yyyy-notice
-    DATE_PATTERN = re.compile(r"^(?P<mm>\d{2})-(?P<dd>\d{2})-(?P<yyyy>\d{4})-notice$")
+    # Matches the following: v0.0.7-notice, v0.0.7-dev-notice
+    VERSION_PATTERN = re.compile(r"^v(?P<version>\d+(?:\.\d+)*(?:[-.][0-9A-Za-z]+)*)-notice$")
 
-    def __init__(self, 
+    def __init__(self,
                  notices: list[dict],
                  icon_path=QIcon,
-                 parent=None) -> None:
+                 parent=None,
+                 window_title: str = "Updates",
+                 header_text: str = "What’s new in QSnippet",
+                 dismissible: bool = True) -> None:
         """
         Initialize the NoticeCarouselDialog.
 
@@ -42,6 +44,11 @@ class NoticeCarouselDialog(QDialog):
                 id, title, and message fields.
             icon_path (QIcon): The window icon to display.
             parent (Any): Optional parent widget.
+            window_title (str): Title bar text.
+            header_text (str): Heading shown above the notice title.
+            dismissible (bool): Whether to show the "Do not show again"
+                checkbox. Set to False for a read-only viewer (e.g. the
+                Release History dialog) where dismissal doesn't apply.
 
         Returns:
             None
@@ -51,27 +58,31 @@ class NoticeCarouselDialog(QDialog):
         self.notices = notices
         self.index = 0
         self.disable_future = False
+        self.dismissible = dismissible
 
-        self.setWindowTitle("Updates")
+        self.setWindowTitle(window_title)
         self.setWindowIcon(icon_path)
         self.setModal(True)
-        self.setMinimumSize(520, 340)
+        self.setMinimumSize(800, 500)
 
-        self.initUI()
+        self.initUI(header_text)
         self.load_notice()
         self.applyStyles()
 
-    def initUI(self) -> None:
+    def initUI(self, header_text: str = "What’s new in QSnippet") -> None:
         """
         Initialize the dialog user interface.
 
         Creates labels, text display, navigation buttons, pagination
         indicator, and footer controls, and arranges them in layouts.
 
+        Args:
+            header_text (str): Heading shown above the notice title.
+
         Returns:
             None
         """
-        self.top_label = QLabel("What’s new in QSnippet")
+        self.top_label = QLabel(header_text)
         self.top_label.setObjectName("NoticeTopLabel")
 
         self.title_label = QLabel()
@@ -106,6 +117,7 @@ class NoticeCarouselDialog(QDialog):
         # Footer
         self.disable_checkbox = QCheckBox("Do not show again")
         self.disable_checkbox.setObjectName("DisableCheckbox")
+        self.disable_checkbox.setVisible(self.dismissible)
 
         self.close_btn = QPushButton("Close")
         self.close_btn.setObjectName("CloseBtn")
@@ -197,144 +209,126 @@ class NoticeCarouselDialog(QDialog):
         ThemeManager.apply_fonts(self)
 
     @staticmethod
-    def parse_notice_dt(stem: str, path: Path) -> datetime:
+    def parse_notice_version(stem: str) -> tuple[int, ...]:
         """
-        Parse a datetime from a notice filename stem.
+        Parse a sortable version tuple from a notice filename stem.
 
-        If the filename matches the expected pattern, extracts the date.
-        Otherwise, falls back to the file modification time.
+        Extracts the numeric segments of the version (e.g. "0.0.7" from
+        "v0.0.7-notice" or "v0.0.7-dev-notice") so notices can be ordered
+        newest-release-first. Filenames that don't match the expected
+        pattern sort as the oldest.
 
         Args:
             stem (str): The filename stem without extension.
-            path (Path): The full path to the notice file.
 
         Returns:
-            datetime: The parsed or fallback datetime.
+            tuple[int, ...]: The parsed version segments, or an empty
+                tuple if the stem doesn't match the expected pattern.
         """
-        m = NoticeCarouselDialog.DATE_PATTERN.match(stem)
+        m = NoticeCarouselDialog.VERSION_PATTERN.match(stem)
         if not m:
-            return datetime.fromtimestamp(path.stat().st_mtime)
+            return ()
 
-        try:
-            return datetime(
-                int(m.group("yyyy")),
-                int(m.group("mm")),
-                int(m.group("dd")),
-            )
-        except ValueError:
-            return datetime.fromtimestamp(path.stat().st_mtime)
+        return tuple(int(part) for part in re.findall(r"\d+", m.group("version")))
 
     @staticmethod
     def notice_cycle(
         notices_dir: Path,
-        limit: int = NOTICE_LIMIT,
-        max_day_count: int = MAX_DAY_COUNT) -> int:
+        limit: int = NOTICE_LIMIT) -> int:
         """
-        Clean up outdated or excess notice files.
+        Archive excess notice files.
 
-        Deletes notices older than the specified maximum age and
-        ensures only the newest files within the limit are retained.
+        Ensures only the newest-version files within the limit stay
+        active (eligible to pop up as unread); anything older is moved
+        into the "history" subfolder instead of being deleted, so it
+        stays browsable in the Release History viewer.
 
         Args:
             notices_dir (Path): Directory containing notice YAML files.
-            limit (int): Maximum number of notice files to retain.
-            max_day_count (int): Maximum age in days before deletion.
+            limit (int): Maximum number of notice files to keep active.
 
         Returns:
-            int: The number of files deleted.
+            int: The number of files archived.
         """
         if not notices_dir.exists():
             logger.debug(f"notices dir does not exist: {notices_dir}")
             return 0
 
-        now = datetime.now()
-        cutoff = now - timedelta(days=max_day_count) if (max_day_count and max_day_count > 0) else None
-
-        kept: list[tuple[datetime, Path]] = []
-        deleted = 0
+        kept: list[tuple[tuple[int, ...], Path]] = []
+        archived = 0
 
         for path in notices_dir.glob("*.yaml"):
             # Check if path is file
             if not path.is_file():
                 continue
 
-            # Trim stemp and check regex match
+            # Trim stem and check regex match
             stem = path.stem
-            if not NoticeCarouselDialog.DATE_PATTERN.match(stem):
+            if not NoticeCarouselDialog.VERSION_PATTERN.match(stem):
                 continue
 
-            dt = NoticeCarouselDialog.parse_notice_dt(stem, path)
+            version = NoticeCarouselDialog.parse_notice_version(stem)
+            kept.append((version, path))
 
-            # Delete notices older than max_day_count
-            if cutoff is not None and dt < cutoff:
-                try:
-                    path.unlink(missing_ok=True)
-                    deleted += 1
-                    logger.info(f"deleted old (age) notice: {path.name}")
-                except Exception as e:
-                    logger.warning(f"failed deleting {path}: {e}")
-                continue
-
-            kept.append((dt, path))
-
-        # Check if we have too many notices
+        # Check if we have too many active notices
         if limit is not None and limit > 0 and len(kept) > limit:
             kept.sort(key=lambda t: t[0], reverse=True)
-            to_delete = kept[limit:]
+            to_archive = kept[limit:]
 
-            for _, path in to_delete:
+            history_dir = notices_dir / HISTORY_DIRNAME
+            history_dir.mkdir(exist_ok=True)
+
+            for _, path in to_archive:
                 try:
-                    path.unlink(missing_ok=True)
-                    deleted += 1
-                    logger.info(f"deleted old (limit) notice: {path.name}")
+                    path.rename(history_dir / path.name)
+                    archived += 1
+                    logger.info(f"archived old (limit) notice: {path.name}")
                 except Exception as e:
-                    logger.warning(f"failed deleting {path}: {e}")
+                    logger.warning(f"failed archiving {path}: {e}")
 
-        # Return deleted file count
-        return deleted
+        # Return archived file count
+        return archived
 
     @staticmethod
     def load_notices(
         notices_dir: Path,
         dismissed: set[str],
-        limit: int = NOTICE_LIMIT,
-        max_day_count: int = MAX_DAY_COUNT) -> list[dict]:
+        limit: int = NOTICE_LIMIT) -> list[dict]:
         """
         Load unread notices from a directory.
 
-        Filters valid notice files, removes outdated ones, excludes
-        dismissed notices, and returns structured notice data.
+        Filters valid notice files, removes excess ones beyond the
+        retention limit, excludes dismissed notices, and returns
+        structured notice data ordered newest-release-first.
 
         Args:
             notices_dir (Path): Directory containing notice YAML files.
             dismissed (set[str]): Set of dismissed notice identifiers.
             limit (int): Maximum number of notice files to retain.
-            max_day_count (int): Maximum age in days before deletion.
 
         Returns:
             list[dict]: A list of unread notice dictionaries.
         """
         logger.debug(f"loading notices from {notices_dir}")
 
-        # Run notice_cycle to cleanup old notices
+        # Run notice_cycle to cleanup excess notices
         NoticeCarouselDialog.notice_cycle(
             notices_dir,
-            limit=limit,
-            max_day_count=max_day_count
+            limit=limit
         )
 
-        candidates: list[tuple[datetime, str, Path]] = []
+        candidates: list[tuple[tuple[int, ...], str, Path]] = []
 
         for path in notices_dir.glob("*.yaml"):
             if not path.is_file():
                 continue
 
             stem = path.stem
-            if not NoticeCarouselDialog.DATE_PATTERN.match(stem):
+            if not NoticeCarouselDialog.VERSION_PATTERN.match(stem):
                 continue
 
-            dt = NoticeCarouselDialog.parse_notice_dt(stem, path)
-            candidates.append((dt, stem, path))
+            version = NoticeCarouselDialog.parse_notice_version(stem)
+            candidates.append((version, stem, path))
 
         if not candidates:
             logger.debug("no notice files found")
@@ -359,3 +353,57 @@ class NoticeCarouselDialog(QDialog):
                 logger.error(f"failed to load {path}: {e}")
 
         return unread
+
+    @staticmethod
+    def load_release_history(notices_dir: Path) -> list[dict]:
+        """
+        Load every release notice for browsing, active and archived alike.
+
+        Unlike load_notices, this ignores dismissed state and never
+        prunes or archives anything - it's meant for the read-only
+        Release History viewer, not the unread-notice popup.
+
+        Args:
+            notices_dir (Path): Directory containing notice YAML files
+                (its "history" subfolder is included automatically).
+
+        Returns:
+            list[dict]: All notices, sorted newest-release-first.
+        """
+        search_dirs = [notices_dir, notices_dir / HISTORY_DIRNAME]
+
+        candidates: list[tuple[tuple[int, ...], str, Path]] = []
+        for d in search_dirs:
+            if not d.exists():
+                continue
+
+            for path in d.glob("*.yaml"):
+                if not path.is_file():
+                    continue
+
+                stem = path.stem
+                if not NoticeCarouselDialog.VERSION_PATTERN.match(stem):
+                    continue
+
+                version = NoticeCarouselDialog.parse_notice_version(stem)
+                candidates.append((version, stem, path))
+
+        if not candidates:
+            logger.debug("no notice files found for release history")
+            return []
+
+        candidates.sort(key=lambda t: t[0], reverse=True)
+
+        history: list[dict] = []
+        for _, nid, path in candidates:
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                history.append({
+                    "id": nid,
+                    "title": data.get("title", "Update Notice"),
+                    "message": data.get("message", "")
+                })
+            except Exception as e:
+                logger.error(f"failed to load {path}: {e}")
+
+        return history

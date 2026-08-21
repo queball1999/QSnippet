@@ -1,0 +1,25 @@
+id: "v0.0.4"
+title: "QSnippet 0.0.4"
+message: |
+  ### Features
+  - Added detection to prevent multiple instances of QSnippet from running at once.
+  - Standardized message boxes for a consistent look throughout the app.
+  - Snippets generate a random trigger on the home screen to make discovery easier.
+  - Added dropdowns for folders and tags for better snippet organization.
+  - Added an in-app notice system (the one you're reading right now) with CI/CD-driven build automation behind it.
+  - Verified compatibility with Python 3.14 through testing.
+  - Improved reliability of snippet expansion, especially with embedded or nested snippets.
+
+  ### Fixes
+  - Improved cross-platform process detection used for the single-instance check.
+  - Resolved snippet expansion issues that could block functionality entirely.
+  - Fixed a bug where `RegUtils` wasn't defined in `main`.
+  - The snippet table now refreshes automatically after importing/exporting.
+  - The snippet service now pauses automatically while editing to prevent accidental triggers.
+  - Fixed issues that required restarting the app after creating or importing snippets.
+  - Resolved crashes caused by embedding snippets inside other snippets.
+  - Removed Shiboken console spam (`Cannot copy-convert NoneType to C++`) triggered by clearing selections in the snippet table.
+
+  ### CI/CD
+  - Stood up the build/release pipeline, including automated testing and multi-platform build automation.
+  - Multiple hot-fixes for pipeline stability: permissions, version detection, artifact naming, and build scripts.
