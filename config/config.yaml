@@ -1,6 +1,6 @@
 # Default Config
 program_name: QSnippet
-version: "0.0.7-dev"
+version: "0.0.8-dev"
 log_level: ERROR
 
 support_info:
