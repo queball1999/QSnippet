@@ -141,15 +141,27 @@ def mock_qt_app(monkeypatch):
     return mock_app """
 
 @pytest.fixture(scope="session", autouse=True)
-def mock_qt_app():
+def mock_qt_app(request):
     """Provide a single Qt application instance for the entire test session.
 
-    Uses QCoreApplication to avoid GUI initialization.
+    Defaults to QCoreApplication so the non-GUI suite never initializes a
+    display. Widgets cannot be created under a QCoreApplication - Qt
+    aborts the process - so a full QApplication is built instead when the
+    GUI suite is enabled with --gui. It renders offscreen unless the
+    platform has already been chosen.
 
     Yields:
-        QCoreApplication: The shared application instance.
+        QCoreApplication | QApplication: The shared application instance.
     """
     from PySide6.QtCore import QCoreApplication
+
+    if request.config.getoption("--gui"):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        yield app
+        return
 
     app = QCoreApplication.instance()
     if app is None:

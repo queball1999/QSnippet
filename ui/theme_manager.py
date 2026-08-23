@@ -643,7 +643,39 @@ class ThemeManager(QObject):
 
     # Font scale
     def apply_font_scale(self, scale_pct: int) -> None:
+        """
+        Set the application font.
+
+        This is the only font the widgets outside apply_fonts' reach ever
+        get: QMenuBar, the popup QMenus, QToolBar and the tray menu all
+        inherit it rather than being visited by the sweep.
+
+        It must be the app's own scaled "medium" role, which already folds
+        in the screen ratio and the user's UI scale. This used to compute a
+        second size of its own from a fixed 10pt base, which disagreed with
+        the medium role; the menu bar and toolbar latched onto that other
+        number and so came back a size bigger than they started whenever
+        the scale was raised and put back to 100%.
+
+        The fixed base survives only as a fallback for when the main app
+        object isn't reachable, such as an isolated widget test.
+
+        Args:
+            scale_pct (int): The user's UI scale percentage.
+
+        Returns:
+            None
+        """
         from PySide6.QtGui import QFont
+
+        app = self.app_instance()
+        medium = getattr(app, "medium_font_size", None) if app else None
+
+        if medium is not None:
+            # Hand Qt a copy; the main app's QFont objects are shared
+            self.app.setFont(QFont(medium))
+            return
+
         base_pt = 10
         scaled  = max(7, round(base_pt * scale_pct / 100))
         font = self.app.font()
@@ -973,9 +1005,25 @@ QMenuBar {{
     color: {c['text']};
     border-bottom: 1px solid {c['border']};
 }}
+/* The base ::item rule has to exist. Styling only ::item:selected leaves the
+   normal state on Qt's built-in metrics and the hovered state on the
+   stylesheet box model, so entries visibly grew as the mouse crossed them. */
+QMenuBar::item {{
+    background: transparent;
+    color: {c['text']};
+    padding: {p4}px {p8}px;
+    margin: 0px;
+    border: none;
+    border-radius: {r4}px;
+}}
 QMenuBar::item:selected {{
     background-color: {c['hover']};
-    border-radius: {r4}px;
+}}
+QMenuBar::item:pressed {{
+    background-color: {c['selected']};
+}}
+QMenuBar::item:disabled {{
+    color: {c['text_muted']};
 }}
 
 /* Slider */
