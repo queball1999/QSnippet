@@ -11,7 +11,7 @@ from PySide6.QtCore import Signal, Qt, QThread, QSize
 from PySide6.QtGui import QKeySequence, QShortcut, QFont, QIcon
 
 from utils.file_utils import FileUtils
-from utils.vault_manager import VaultManager
+from utils.vault_manager import VaultManager, VAULT_STALE_KEYS
 from .password_field import PasswordField
 from .QAnimatedSwitch import QAnimatedSwitch
 from .settings.settings_toast import SettingsToast
@@ -53,6 +53,11 @@ class VaultWorker(QThread):
             self.finished.emit(False, {})
 
 
+# Page metrics, shared by every vault page so they line up with each other
+PAGE_PAD = 20
+HEADER_PAD = 16
+PAGE_SPACING = 12
+
 PASSWORD_RULES = [
     (re.compile(r'.{8,}'),        "At least 8 characters"),
     (re.compile(r'[A-Z]'),        "1 uppercase letter"),
@@ -76,6 +81,9 @@ class VaultSetupDialog(QDialog):
     """
 
     vaultConfigured = Signal(dict)
+    # Raised from the orphaned-data page, handled by the main window
+    recoveryRequested = Signal()
+    restartSetupRequested = Signal()
 
     def __init__(self, config: dict, db, mode: str = "setup", parent=None):
         super().__init__(parent)
@@ -100,6 +108,45 @@ class VaultSetupDialog(QDialog):
         flags = Qt.Dialog if self.force_reset else Qt.Dialog | Qt.WindowCloseButtonHint
         self.setWindowFlags(flags)
 
+        # Running the setup wizard against a vault that already exists would
+        # generate a fresh key and recovery code, orphaning everything the
+        # current key encrypted. Say so and stop, rather than let it happen.
+        # The key material lives in the config and the data it protects lives
+        # in the database, so they can disagree. Classify before building
+        # anything: setting up over an existing vault, or over data whose key
+        # is gone, mints a new key and strands what the old one protected.
+        self.status = self.vm.describe(self.config, self.db)
+        self.orphan_snippets = self.status.snippets
+        self.orphan_placeholders = self.status.placeholders
+
+        if mode == "setup" and self.status.is_ready:
+            logger.warning("Vault setup opened while the vault is already configured")
+            self.mode = "already_setup"
+            self.setWindowTitle("Vault Already Set Up")
+            self.build_already_setup_ui()
+            self.applyStyles()
+            return
+
+        if mode == "setup" and self.status.is_orphaned:
+            logger.warning(
+                "Vault setup opened with orphaned data: %s snippets, %s placeholders, "
+                "recovery=%s, partial_config=%s",
+                self.status.snippets, self.status.placeholders,
+                self.status.has_recovery, self.status.partial_config,
+            )
+            self.mode = "orphaned"
+            self.setWindowTitle("Existing Vault Data Found")
+            self.build_orphaned_ui()
+            self.applyStyles()
+            return
+
+        if mode == "setup" and self.status.state == VAULT_STALE_KEYS:
+            # Key material with nothing left to protect. Harmless, but it
+            # would look like a recoverable vault later, so clear it now.
+            logger.warning("Clearing leftover vault key material before setup")
+            self.config = self.vm.strip_crypto_material(self.config)
+            self.save_config(self.config)
+
         if mode in ("setup", "force_reset"):
             self.build_wizard_ui()
         elif mode == "change":
@@ -108,6 +155,361 @@ class VaultSetupDialog(QDialog):
             self.build_disable_ui()
 
         self.applyStyles()
+
+    # Shared page scaffold
+
+    def vault_icon_label(self, name: str = "lock.svg", size: int = 32) -> QLabel:
+        """
+        Return a theme-tinted icon label, or an empty one if it won't load.
+
+        Args:
+            name (str): Icon file name under assets/icons.
+            size (int): Pixel size to render at.
+
+        Returns:
+            QLabel: The icon label.
+        """
+        label = QLabel()
+        label.setObjectName("VaultWelcomeIcon")
+        label.setAlignment(Qt.AlignCenter)
+        try:
+            from ui.theme_manager import ThemeManager
+            icon = QIcon(FileUtils.icon_path(name))
+            if not icon.isNull():
+                tm = ThemeManager.get_instance()
+                if tm:
+                    icon = tm.recolor_icon(icon, tm.icon_color())
+                label.setPixmap(icon.pixmap(size, size))
+        except Exception:
+            logger.debug("Vault page icon %s could not be loaded", name)
+
+        return label
+
+    def build_header(self, title: str, description: str,
+                     icon: str = "lock.svg") -> QFrame:
+        """
+        Build the header block every vault page opens with.
+
+        Left-aligned icon, title and supporting text on a card surface, the
+        same shape the settings and placeholder dialogs use, so the vault
+        stops looking like a different application.
+
+        Args:
+            title (str): Page heading.
+            description (str): Supporting text under the heading.
+            icon (str): Icon file name.
+
+        Returns:
+            QFrame: The header frame.
+        """
+        header = QFrame()
+        header.setObjectName("VaultHeader")
+
+        row = QHBoxLayout(header)
+        row.setContentsMargins(PAGE_PAD, HEADER_PAD, PAGE_PAD, HEADER_PAD)
+        row.setSpacing(PAGE_SPACING)
+
+        row.addWidget(self.vault_icon_label(icon), 0, Qt.AlignTop)
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(PAGE_SPACING // 2)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("VaultHeaderTitle")
+        title_label.setWordWrap(True)
+        text.addWidget(title_label)
+
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setObjectName("VaultHeaderDesc")
+            desc_label.setWordWrap(True)
+            text.addWidget(desc_label)
+
+        row.addLayout(text, 1)
+        return header
+
+    def build_page(self, title: str, description: str,
+                   icon: str = "lock.svg") -> tuple[QFrame, QVBoxLayout]:
+        """
+        Build a standard vault page with its header already in place.
+
+        Args:
+            title (str): Page heading.
+            description (str): Supporting text under the heading.
+            icon (str): Icon file name.
+
+        Returns:
+            tuple[QFrame, QVBoxLayout]: The page and its content layout,
+                ready for body widgets followed by build_footer().
+        """
+        page = QFrame()
+        page.setObjectName("VaultWizardPage")
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(PAGE_PAD, PAGE_PAD, PAGE_PAD, PAGE_PAD)
+        layout.setSpacing(PAGE_SPACING)
+        layout.addWidget(self.build_header(title, description, icon))
+
+        return page, layout
+
+    def build_footer(self, layout, left=None, right=None) -> None:
+        """
+        Add the separator and button row every vault page closes with.
+
+        Args:
+            layout (QVBoxLayout): The page layout to append to.
+            left (list): Buttons pinned to the left, typically Cancel.
+            right (list): Buttons pinned to the right, primary action last.
+
+        Returns:
+            None
+        """
+        layout.addStretch()
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setObjectName("VaultSeparator")
+        layout.addWidget(sep)
+
+        row = QHBoxLayout()
+        row.setSpacing(PAGE_SPACING)
+        for button in (left or []):
+            row.addWidget(button)
+        row.addStretch()
+        for button in (right or []):
+            row.addWidget(button)
+
+        layout.addLayout(row)
+
+    # Orphaned vault data
+
+    def count_orphaned_data(self) -> tuple[int, int]:
+        """
+        Count encrypted rows left in the database without key material.
+
+        Returns:
+            tuple[int, int]: (snippets, placeholders); zeros when the
+                database can't be queried, so a failure here never blocks
+                setting the vault up.
+        """
+        if self.db is None:
+            return 0, 0
+
+        try:
+            return self.db.count_encrypted_rows()
+        except Exception:
+            logger.exception("Could not count orphaned vault data")
+            return 0, 0
+
+    def orphan_summary(self) -> str:
+        """
+        Describe what was found, in plain terms.
+
+        Returns:
+            str: A phrase such as "2 snippets and 1 placeholder".
+        """
+        parts = []
+        if self.orphan_snippets:
+            noun = "snippet" if self.orphan_snippets == 1 else "snippets"
+            parts.append(f"{self.orphan_snippets} {noun}")
+        if self.orphan_placeholders:
+            noun = "placeholder" if self.orphan_placeholders == 1 else "placeholders"
+            parts.append(f"{self.orphan_placeholders} {noun}")
+
+        return " and ".join(parts) if parts else "no items"
+
+    def build_orphaned_ui(self) -> None:
+        """
+        Offer recovery or a clear-out instead of a fresh setup.
+
+        Returns:
+            None
+        """
+        can_recover = self.status.has_recovery
+
+        if self.status.partial_config:
+            cause = (
+                "but your vault configuration is incomplete, so the key cannot "
+                "be rebuilt from it."
+            )
+        else:
+            cause = (
+                "but the key material for it is missing from your configuration. "
+                "That happens if the vault was disabled or the config was reset "
+                "while the database was kept, or if the database was copied to a "
+                "machine that never had the vault set up."
+            )
+
+        page, layout = self.build_page(
+            "Existing vault data found",
+            f"Your database still holds {self.orphan_summary()} encrypted by a "
+            f"previous vault, {cause}",
+        )
+
+        if can_recover:
+            body = (
+                "A recovery code was saved for that vault. Enter it to unlock the "
+                "data and set a new password.\n\n"
+                "If you no longer have the code, you can clear the old data and "
+                "start over. That cannot be undone."
+            )
+        else:
+            body = (
+                "No recovery code was saved for it, so this data cannot be "
+                "decrypted by anyone, including us. Setting up a new vault will "
+                "not bring it back.\n\n"
+                "Before clearing it, check whether an older copy of config.yaml "
+                "survives on another machine or in a backup: it holds the key "
+                "material, and restoring it would make your password work again."
+            )
+
+        desc = QLabel(body)
+        desc.setObjectName("VaultDialogDesc")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        pill = QLabel(
+            f"Encrypted snippets: {self.status.snippets}    "
+            f"Encrypted placeholders: {self.status.placeholders}    "
+            f"Recovery code saved: {'yes' if can_recover else 'no'}"
+        )
+        pill.setObjectName("VaultStatusPill")
+        layout.addWidget(pill)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("SnippetFormBtn")
+        cancel_btn.clicked.connect(self.reject)
+
+        self.clear_vault_btn = QPushButton("Clear Old Vault Data")
+        self.clear_vault_btn.setObjectName(
+            "SnippetFormBtn" if can_recover else "VaultDangerBtn"
+        )
+        self.clear_vault_btn.clicked.connect(self.clear_orphaned_data)
+
+        right = [self.clear_vault_btn]
+        if can_recover:
+            self.recover_btn = QPushButton("Use Recovery Code")
+            self.recover_btn.setObjectName("VaultConfirmBtn")
+            self.recover_btn.setDefault(True)
+            self.recover_btn.clicked.connect(self.request_recovery)
+            right.append(self.recover_btn)
+
+        self.build_footer(layout, left=[cancel_btn], right=right)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(page)
+
+    def request_recovery(self) -> None:
+        """
+        Hand off to the recovery flow and close.
+
+        Returns:
+            None
+        """
+        logger.info("User chose recovery for orphaned vault data")
+        self.recoveryRequested.emit()
+        self.reject()
+
+    def clear_orphaned_data(self) -> None:
+        """
+        Delete the undecryptable rows, after confirming and backing up.
+
+        Returns:
+            None
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        summary = self.orphan_summary()
+        confirmed = QMessageBox.warning(
+            self,
+            "Clear old vault data?",
+            f"This permanently deletes {summary} that can no longer be "
+            "decrypted.\n\n"
+            "A backup of your database is written to the backups folder first, "
+            "but the data inside it stays encrypted and unreadable without the "
+            "original password.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirmed != QMessageBox.Yes:
+            return
+
+        try:
+            self.db.backup_before_migration()
+        except Exception:
+            logger.exception("Backup before clearing orphaned vault data failed")
+
+        try:
+            snippets, placeholders = self.db.delete_encrypted_rows()
+        except Exception:
+            logger.exception("Failed to clear orphaned vault data")
+            QMessageBox.critical(
+                self,
+                "Could not clear vault data",
+                "The old vault data could not be removed. The log has details.",
+            )
+            return
+
+        logger.info(
+            "Cleared orphaned vault data: %s snippets, %s placeholders",
+            snippets, placeholders,
+        )
+        QMessageBox.information(
+            self,
+            "Old vault data cleared",
+            f"Removed {snippets} snippets and {placeholders} placeholders.\n\n"
+            "You can now set up a new vault.",
+        )
+        self.restartSetupRequested.emit()
+        self.reject()
+
+    # Already-configured guard
+
+    def build_already_setup_ui(self) -> None:
+        """
+        Explain that the vault exists already and offer only a way out.
+
+        Returns:
+            None
+        """
+        page, layout = self.build_page(
+            "Your vault is already set up",
+            "There is nothing more to do here; you can close this dialog.",
+            icon="lock-open.svg",
+        )
+
+        desc = QLabel(
+            "Setting the vault up a second time would create a new password and "
+            "recovery code, and everything encrypted with the current one would "
+            "no longer be readable.\n\n"
+            "To change your password, use Change Vault Password in Settings. To "
+            "unlock the vault, use the padlock in the toolbar."
+        )
+        desc.setObjectName("VaultDialogDesc")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        if self.status.counted and self.status.has_data:
+            pill = QLabel(
+                f"Protecting {self.status.snippets} snippets and "
+                f"{self.status.placeholders} placeholders"
+            )
+            pill.setObjectName("VaultStatusPill")
+            layout.addWidget(pill)
+
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setObjectName("VaultConfirmBtn")
+        self.close_btn.setDefault(True)
+        self.close_btn.clicked.connect(self.reject)
+
+        self.build_footer(layout, right=[self.close_btn])
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(page)
 
     # Setup wizard (3 pages)
 
@@ -135,62 +537,34 @@ class VaultSetupDialog(QDialog):
             self.stack.setCurrentIndex(0)
 
     def build_welcome_page(self) -> QFrame:
-        page = QFrame()
-        page.setObjectName("VaultWizardPage")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(36, 32, 36, 24)
-        layout.setSpacing(16)
-
-        icon_lbl = QLabel()
-        icon_lbl.setObjectName("VaultWelcomeIcon")
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        try:
-            from ui.theme_manager import ThemeManager
-            svg_icon = QIcon(FileUtils.icon_path("lock.svg"))
-            tm = ThemeManager.get_instance()
-            if not svg_icon.isNull():
-                display_icon = tm.recolor_icon(svg_icon, tm.icon_color()) if tm else svg_icon
-                icon_lbl.setPixmap(display_icon.pixmap(48, 48))
-        except Exception:
-            pass
-        layout.addWidget(icon_lbl)
-
-        title = QLabel("Welcome to QSnippet Vault")
-        title.setObjectName("VaultDialogTitle")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        page, layout = self.build_page(
+            "Welcome to QSnippet Vault",
+            "A vault folder encrypts its snippets with AES-256-GCM, for personal "
+            "information you paste often: addresses, account numbers and the like.",
+        )
 
         desc = QLabel(
-            "The Vault is a special folder that encrypts it's snippets using AES-256-GCM, protecting personal "
-            "information you paste frequently, such as addresses, account numbers, and similar data.\n\n"
-            "Important: The Vault is NOT a replacement for a dedicated password manager. "
-            "Encryption protects against casual access, not against a determined attacker "
-            "with full physical access to your device."
+            "The vault is not a replacement for a dedicated password manager. "
+            "Encryption protects against casual access, not against a determined "
+            "attacker with full physical access to your device.\n\n"
+            "You will choose a password, then be given a one-time recovery code. "
+            "Keep both somewhere safe: without one of them, the contents cannot "
+            "be recovered by anyone, including us."
         )
         desc.setObjectName("VaultDialogDesc")
         desc.setWordWrap(True)
-        desc.setAlignment(Qt.AlignCenter)
         layout.addWidget(desc)
 
-        layout.addStretch()
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setObjectName("VaultSeparator")
-        layout.addWidget(sep)
-
-        btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setObjectName("SnippetFormBtn")
         cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-        btn_row.addStretch()
+
         next_btn = QPushButton("Get Started")
         next_btn.setObjectName("VaultConfirmBtn")
+        next_btn.setDefault(True)
         next_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        btn_row.addWidget(next_btn)
-        layout.addLayout(btn_row)
 
+        self.build_footer(layout, left=[cancel_btn], right=[next_btn])
         return page
 
     def build_password_page(self) -> QFrame:
@@ -795,6 +1169,20 @@ class VaultSetupDialog(QDialog):
         if not ok:
             self.confirm_btn.setEnabled(True)
             self.confirm_btn.setText("Disable Vault")
+
+            # A disable that authenticated but could not decrypt everything
+            # stops with the key material intact rather than stranding what
+            # is left, and has to say so instead of blaming the password.
+            failures = getattr(self.vm, "last_disable_failures", [])
+            if failures:
+                count = len(failures)
+                noun = "item" if count == 1 else "items"
+                self.show_error(
+                    f"{count} {noun} could not be decrypted, so the vault was left "
+                    "enabled. Nothing was lost. See the log for details."
+                )
+                return
+
             self.show_error(
                 "Incorrect recovery code." if use_recovery else "Incorrect vault password."
             )

@@ -32,6 +32,7 @@ import hashlib
 import base64
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,71 @@ logger = logging.getLogger(__name__)
 
 class VaultError(Exception):
     """Raised when a vault operation cannot proceed (e.g. vault is locked)."""
+
+
+# Vault states. The key material lives in config.yaml while the data it
+# protects lives in the database, so the two can disagree; every combination
+# is named here so the UI can say something true about each one.
+VAULT_NOT_SET_UP = "not_set_up"                      # nothing anywhere
+VAULT_READY = "ready"                                # usable key material
+VAULT_ORPHANED_RECOVERABLE = "orphaned_recoverable"  # data + recovery, no password key
+VAULT_ORPHANED_LOST = "orphaned_lost"                # data, nothing to open it with
+VAULT_STALE_KEYS = "stale_keys"                      # leftover key material, no data
+
+
+@dataclass
+class VaultStatus:
+    """
+    What the vault actually looks like right now.
+
+    Args:
+        state (str): One of the VAULT_* constants.
+        snippets (int): Encrypted snippets in the database.
+        placeholders (int): Encrypted placeholders in the database.
+        has_recovery (bool): Recovery material is present and complete.
+        partial_config (bool): Some but not all password key material is
+            present, which means the config was damaged or half-written
+            rather than simply absent.
+        counted (bool): The database was actually queried. False means the
+            row counts are unknown, not zero.
+    """
+    state: str
+    snippets: int = 0
+    placeholders: int = 0
+    has_recovery: bool = False
+    partial_config: bool = False
+    counted: bool = True
+
+    @property
+    def rows(self) -> int:
+        """Total encrypted rows found."""
+        return self.snippets + self.placeholders
+
+    @property
+    def has_data(self) -> bool:
+        """Whether any encrypted data exists."""
+        return self.rows > 0
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the vault can be unlocked with a password."""
+        return self.state == VAULT_READY
+
+    @property
+    def is_orphaned(self) -> bool:
+        """Whether encrypted data exists with no password key for it."""
+        return self.state in (VAULT_ORPHANED_RECOVERABLE, VAULT_ORPHANED_LOST)
+
+    @property
+    def blocks_setup(self) -> bool:
+        """
+        Whether running the setup wizard now would be wrong.
+
+        Setting up over an existing vault, or over data whose key is
+        missing, mints a new key and strands whatever the old one
+        protected.
+        """
+        return self.is_ready or self.is_orphaned
 
 
 class VaultManager:
@@ -78,8 +144,82 @@ class VaultManager:
         self._failed_unlock_attempts: int = 0
         self._aad_migration_done: bool = False
         self._brace_migration_done: bool = False
+        # Populated by disable_vault; read afterwards to tell an aborted
+        # disable apart from a rejected password
+        self.last_disable_failures: list[str] = []
 
     # --State
+
+    def describe(self, config: dict, db=None) -> VaultStatus:
+        """Classify the vault by comparing the config against the database.
+
+        The password key material lives in config.yaml and the data it
+        protects lives in the database, so the two can drift apart: a synced
+        database on a new machine, a reset config, a half-finished disable.
+        Every combination is classified here so callers never have to infer
+        it from a bare ``is_setup`` boolean.
+
+        Args:
+            config: Application config dict.
+            db: Optional :class:`~utils.snippet_db.SnippetDB`. Without it the
+                row counts are unknown and the result says so via ``counted``.
+
+        Returns:
+            VaultStatus: The current state and the evidence behind it.
+        """
+        vault = (config or {}).get("vault", {}) or {}
+        has_salt = bool(vault.get("salt"))
+        has_verifier = bool(vault.get("verifier"))
+        has_recovery = self.has_recovery(config or {})
+        partial = (has_salt or has_verifier) and not (has_salt and has_verifier)
+
+        snippets = placeholders = 0
+        counted = False
+        if db is not None:
+            try:
+                snippets, placeholders = db.count_encrypted_rows()
+                counted = True
+            except Exception:
+                logger.exception("Could not count encrypted rows for vault state")
+
+        if has_salt and has_verifier:
+            state = VAULT_READY
+        elif snippets or placeholders:
+            state = VAULT_ORPHANED_RECOVERABLE if has_recovery else VAULT_ORPHANED_LOST
+        elif has_salt or has_verifier or has_recovery:
+            state = VAULT_STALE_KEYS
+        else:
+            state = VAULT_NOT_SET_UP
+
+        return VaultStatus(
+            state=state,
+            snippets=snippets,
+            placeholders=placeholders,
+            has_recovery=has_recovery,
+            partial_config=partial,
+            counted=counted,
+        )
+
+    @staticmethod
+    def strip_crypto_material(config: dict) -> dict:
+        """Return *config* with vault key material removed, preferences kept.
+
+        Used to clear leftovers that protect nothing, so they cannot be
+        mistaken later for a vault that needs recovering.
+
+        Args:
+            config: Application config dict.
+
+        Returns:
+            dict: A copy with the vault crypto keys dropped.
+        """
+        config = dict(config or {})
+        vault = dict(config.get("vault", {}) or {})
+        for key in ("configured", "salt", "verifier",
+                    "rec_salt", "rec_verifier", "rec_key_blob"):
+            vault.pop(key, None)
+        config["vault"] = vault
+        return config
 
     def is_setup(self, config: dict) -> bool:
         """Return ``True`` if the vault has been configured (salt + verifier present).
@@ -352,6 +492,10 @@ class VaultManager:
             tuple[bool, dict]: ``(True, updated_config)`` on success or
             ``(False, original_config)`` on authentication failure.
         """
+        # Reset before authenticating: callers read this afterwards to tell an
+        # aborted disable apart from a wrong password
+        self.last_disable_failures = []
+
         if use_recovery:
             if not self.unlock_with_recovery_code(password, config):
                 return False, config
@@ -365,6 +509,9 @@ class VaultManager:
                 try:
                     db.delete_snippet(s["id"])
                 except Exception as exc:
+                    # A row that survives deletion is still encrypted, so the
+                    # keys have to stay too
+                    self.last_disable_failures.append(f"snippet {s.get('id')}: {exc}")
                     logger.error(
                         "Failed to delete vault snippet %s: %s", s.get("id"), exc
                     )
@@ -374,6 +521,7 @@ class VaultManager:
                 try:
                     db.delete_custom_placeholder(p["id"])
                 except Exception as exc:
+                    self.last_disable_failures.append(f"placeholder {p.get('id')}: {exc}")
                     logger.error(
                         "Failed to delete vault placeholder %s: %s", p.get("id"), exc
                     )
@@ -387,6 +535,9 @@ class VaultManager:
                     db.set_snippet_encrypted(s["id"], False)
                     db.set_snippet_vault_uuid(s["id"], None)
                 except Exception as exc:
+                    self.last_disable_failures.append(
+                        f"snippet {s.get('id')}: {exc}"
+                    )
                     logger.error(
                         "Decrypt failed for snippet %s during vault disable: %s",
                         s.get("id"), exc,
@@ -406,10 +557,25 @@ class VaultManager:
                         "vault_uuid": None,
                     })
                 except Exception as exc:
+                    self.last_disable_failures.append(
+                        f"placeholder {p.get('id')}: {exc}"
+                    )
                     logger.error(
                         "Decrypt failed for placeholder %s during vault disable: %s",
                         p.get("id"), exc,
                     )
+
+        # Anything that failed to decrypt is still encrypted. Clearing the key
+        # material now would strand it for good, so stop and keep the keys:
+        # the vault stays usable and the user can retry or investigate.
+        if self.last_disable_failures:
+            logger.error(
+                "Vault disable aborted: %d item(s) could not be decrypted; "
+                "key material left intact",
+                len(self.last_disable_failures),
+            )
+            self.resume_timer()
+            return False, config
 
         db.clear_vault_folders()
 

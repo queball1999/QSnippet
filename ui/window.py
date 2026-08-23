@@ -1183,7 +1183,8 @@ class QSnippet(QMainWindow):
         """Sync toolbar vault button, table lock state, and clipboard with VaultManager state."""
         vm = self.vault_manager()
         cfg = self.vault_config()
-        is_setup = vm.is_setup(cfg)
+        status = vm.describe(cfg, self.vault_db())
+        is_setup = status.is_ready
         is_unlocked = vm.is_unlocked()
         if is_unlocked and not vm._aad_migration_done:
             vm._aad_migration_done = True  # set before dispatch to avoid duplicate threads
@@ -1200,7 +1201,9 @@ class QSnippet(QMainWindow):
                 daemon=True,
             ).start()
         if hasattr(self, "toolbar"):
-            self.toolbar.update_vault_state(is_setup, is_unlocked)
+            self.toolbar.update_vault_state(
+                is_setup, is_unlocked, needs_attention=status.is_orphaned
+            )
         if hasattr(self, "menubar"):
             self.menubar.update_vault_state(is_setup, is_unlocked)
         if hasattr(self, "tray_menu"):
@@ -1744,7 +1747,33 @@ class QSnippet(QMainWindow):
                 QTimer.singleShot(0, lambda: self.mark_folder_vault("Vault"))
 
         dlg.vaultConfigured.connect(on_vault_configured)
+
+        # The orphaned-data page hands back to one of these. Both are deferred
+        # so this dialog has finished closing before the next one opens.
+        dlg.recoveryRequested.connect(
+            lambda: QTimer.singleShot(0, self.recover_orphaned_vault)
+        )
+        dlg.restartSetupRequested.connect(
+            lambda: QTimer.singleShot(0, self.show_vault_settings)
+        )
         dlg.exec()
+
+    def recover_orphaned_vault(self) -> None:
+        """
+        Unlock vault data whose password is gone using its recovery code.
+
+        Reuses the unlock dialog's recovery mode, then the forced password
+        reset, so the user ends up with a working password again.
+
+        Returns:
+            None
+        """
+        logger.info("Starting recovery for orphaned vault data")
+        # show_vault_unlock already runs the forced password reset when a
+        # recovery code was the thing that opened it
+        self.show_vault_unlock(
+            message="Enter your recovery code to restore access to your vault."
+        )
 
     def disable_vault(self) -> None:
         from ui.widgets.vault_setup_dialog import VaultSetupDialog

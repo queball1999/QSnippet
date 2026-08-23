@@ -46,9 +46,20 @@ class ToolbarMenu(QToolBar):
         self.addAction(self.settings_action)
         self.icon_sources[self.settings_action] = self.settings_icon
 
-    def update_vault_state(self, is_setup: bool, is_unlocked: bool) -> None:
-        """Update the vault toolbar button icon and tooltip to reflect current state."""
-        if not is_setup:
+    def update_vault_state(self, is_setup: bool, is_unlocked: bool,
+                           needs_attention: bool = False) -> None:
+        """Update the vault toolbar button icon and tooltip to reflect current state.
+
+        Args:
+            is_setup (bool): Vault has usable key material.
+            is_unlocked (bool): Vault is currently unlocked.
+            needs_attention (bool): Encrypted data exists with no key for it,
+                so clicking leads to recovery rather than to setup.
+        """
+        if not is_setup and needs_attention:
+            icon = self.vault_lock_icon
+            tooltip = "Vault data found without its key - click to recover or clear"
+        elif not is_setup:
             icon = self.vault_lock_icon
             tooltip = "Vault not configured - click to set up"
         elif is_unlocked:

@@ -168,6 +168,9 @@ OBJECT_NAME_FONTS: dict[str, tuple[str, bool]] = {
     "VaultRecoveryLink":         ("small",  False),
     "VaultHintLabel":            ("small",  False),
     "VaultConfirmCheck":         ("small",  False),
+    "VaultHeaderTitle":          ("large",  True),
+    "VaultHeaderDesc":           ("small",  False),
+    "VaultStatusPill":           ("small",  False),
     # Import / export wizard
     "ImportExportTitle":         ("large",  True),
     "CountLabel":                ("small",  False),
@@ -1230,21 +1233,61 @@ QFrame#VaultWarningBox {{
 QLabel#VaultWarningText {{
     color: {c['warning_text']};
 }}
+/* Primary action. Geometry is inherited from the base QPushButton rule so it
+   matches every other button in the app; only the accent fill is added. */
 QPushButton#VaultConfirmBtn {{
     background-color: {c['accent']};
     color: {c['on_accent']};
-    border: none;
-    border-radius: {r4}px;
-    padding: {bp_y}px {bp_x}px;
+    border: 1px solid {c['accent']};
     font-weight: 600;
 }}
 QPushButton#VaultConfirmBtn:hover {{
     background-color: {c['accent']};
-    opacity: 0.85;
+    border-color: {c['text']};
+}}
+QPushButton#VaultConfirmBtn:pressed {{
+    background-color: {c['accent']};
+    border-color: {c['on_accent']};
 }}
 QPushButton#VaultConfirmBtn:disabled {{
     background-color: {c['border']};
     color: {c['text_muted']};
+    border-color: {c['border']};
+}}
+/* Destructive action, styled like the primary but in the danger colour */
+QPushButton#VaultDangerBtn {{
+    background-color: {c['danger']};
+    color: #ffffff;
+    border: 1px solid {c['danger']};
+    font-weight: 600;
+}}
+QPushButton#VaultDangerBtn:hover {{
+    background-color: {c['danger']};
+    border-color: {c['text']};
+}}
+QPushButton#VaultDangerBtn:disabled {{
+    background-color: {c['border']};
+    color: {c['text_muted']};
+    border-color: {c['border']};
+}}
+/* Page header block, matching the card surfaces used elsewhere */
+QFrame#VaultHeader {{
+    background-color: {c['card']};
+    border: 1px solid {c['border']};
+    border-radius: {r8}px;
+}}
+QLabel#VaultHeaderTitle {{
+    font-weight: 700;
+}}
+QLabel#VaultHeaderDesc {{
+    color: {c['text_muted']};
+}}
+QLabel#VaultStatusPill {{
+    color: {c['text_muted']};
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r4}px;
+    padding: {p4}px {p8}px;
 }}
 QFrame#VaultSeparator {{
     color: {c['border']};

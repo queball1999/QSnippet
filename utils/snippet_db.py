@@ -1611,6 +1611,59 @@ class SnippetDB:
         except sqlite3.Error as exc:
             raise DatabaseOperationError(f"Failed to clear vault folders: {exc}") from exc
 
+    def count_encrypted_rows(self) -> tuple[int, int]:
+        """Count encrypted snippets and placeholders still in the database.
+
+        Used to detect vault data that outlived its key material, which
+        happens if the vault config is reset or lost while the encrypted
+        rows remain.
+
+        Returns:
+            tuple[int, int]: (encrypted snippets, encrypted placeholders).
+        """
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                snippets = cur.execute(
+                    "SELECT COUNT(*) FROM snippets WHERE is_encrypted = 1"
+                ).fetchone()[0]
+                placeholders = cur.execute(
+                    "SELECT COUNT(*) FROM custom_placeholders WHERE is_encrypted = 1"
+                ).fetchone()[0]
+                return int(snippets), int(placeholders)
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to count encrypted rows: {exc}") from exc
+
+    def delete_encrypted_rows(self) -> tuple[int, int]:
+        """Delete every encrypted snippet and placeholder, and vault folders.
+
+        This is irreversible and is only ever correct when the key material
+        for those rows is gone, leaving them permanently undecryptable.
+        Callers must back the database up first and confirm with the user.
+
+        Returns:
+            tuple[int, int]: (snippets deleted, placeholders deleted).
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                cur = conn.cursor()
+                snippets = cur.execute(
+                    "DELETE FROM snippets WHERE is_encrypted = 1"
+                ).rowcount
+                placeholders = cur.execute(
+                    "DELETE FROM custom_placeholders WHERE is_encrypted = 1"
+                ).rowcount
+                cur.execute("DELETE FROM vault_folders")
+                logger.warning(
+                    "Deleted orphaned vault data: %s snippets, %s placeholders",
+                    snippets, placeholders,
+                )
+                return int(max(snippets, 0)), int(max(placeholders, 0))
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(
+                f"Failed to delete orphaned vault rows: {exc}"
+            ) from exc
+
     def get_vault_snippets(self) -> List[Dict[str, Any]]:
         """Return all snippets that are marked is_encrypted=1."""
         try:
