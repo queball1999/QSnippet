@@ -115,6 +115,9 @@ class DbSettingsPage(QWidget):
             "Set a custom directory for the snippets database file (snippets.db).\n\n"
             "Supported locations include cloud-synced folders (NextCloud, OneDrive, Dropbox, etc.) "
             "and network shares (SMB/NFS). This allows your snippets to follow you across devices.\n\n"
+            "Vault snippets are the exception: their key material lives in this device's config "
+            "file rather than in the database, so a synced database cannot be unlocked on another "
+            "device. Move vault content with an encrypted export and import.\n\n"
             "Leave blank to use the default app data location."
         )
         desc.setObjectName("SettingsCardDescription")
@@ -240,11 +243,11 @@ class DbSettingsPage(QWidget):
                     self.pending_action = "use_existing"
                     self.show_status("Click Apply to switch to the existing database in this folder.")
                     return
-                elif action == "move_current":
+                elif action == "copy_current":
                     # Set the path and track the action
                     self.path_edit.setText(directory)
-                    self.pending_action = "move_current"
-                    self.show_status("Click Apply to move your current database here.")
+                    self.pending_action = "copy_current"
+                    self.show_status("Click Apply to copy your current database here.")
                     return
                 # If cancelled, don't set the path
                 return
@@ -278,58 +281,46 @@ class DbSettingsPage(QWidget):
                 )
                 return
 
-        path_changing = new_db.resolve() != current_db.resolve()
-
-        # If user selected via browse dialog, use their choice
-        if self.pending_action == "use_existing":
+        if new_db.resolve() == current_db.resolve():
+            # Same file; only the stored setting needs updating.
             self.finalize_apply(new_dir, new_db)
             return
 
-        if self.pending_action == "move_current":
-            should_copy = True
-        else:
-            # Fallback: if path typed manually and destination has a database, ask user
-            if path_changing and new_db.exists():
+        # Work out what the change actually does before warning about it, so the
+        # warning always matches the scenario the user is in.
+        action = self.pending_action
+        if action is None:
+            if new_db.exists():
                 action = self.prompt_for_existing_db(new_db)
-                if action is None:  # Cancelled
-                    return
-                if action == "use_existing":
-                    self.finalize_apply(new_dir, new_db)
-                    return
-                should_copy = True
+            elif current_db.exists():
+                action = self.prompt_for_empty_destination(current_db, new_db)
             else:
-                should_copy = False
-
-        # Security confirmation whenever a custom (external) location is being set.
-        if new_dir and path_changing:
-            if not self.confirm_external_location():
+                action = "use_existing"
+            if action is None:  # Cancelled
                 return
 
-        # Copy DB to new location when requested
-        if should_copy and path_changing and current_db.exists():
-            # Ask for overwrite confirmation if destination has a database
-            if new_db.exists():
-                reply = QMessageBox.question(
-                    self,
-                    "File Exists",
-                    f"A database file already exists at:\n{new_db}\n\n"
-                    "Overwrite it with the current database?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if reply != QMessageBox.Yes:
-                    return
+        # Security confirmation whenever a custom (external) location is being set.
+        if new_dir and not self.confirm_external_location():
+            return
 
-            self.set_controls_enabled(False)
-            self.show_status("Copying database…")
-
-            self.copy_worker = DbCopyWorker(current_db, new_db, parent=self)
-            self.copy_worker.finished.connect(
-                lambda ok, err: self.on_copy_finished(ok, err, new_dir, new_db)
-            )
-            self.copy_worker.start()
-        else:
+        if action == "use_existing" or not current_db.exists():
+            if not self.confirm_use_existing(current_db, new_db):
+                return
             self.finalize_apply(new_dir, new_db)
+            return
+
+        # action == "copy_current"
+        if not self.confirm_copy_current(current_db, new_db):
+            return
+
+        self.set_controls_enabled(False)
+        self.show_status("Copying database\u2026")
+
+        self.copy_worker = DbCopyWorker(current_db, new_db, parent=self)
+        self.copy_worker.finished.connect(
+            lambda ok, err: self.on_copy_finished(ok, err, new_dir, new_db)
+        )
+        self.copy_worker.start()
 
     def on_copy_finished(self, success: bool, error: str, new_dir: str, new_db: Path):
         self.set_controls_enabled(True)
@@ -376,6 +367,59 @@ class DbSettingsPage(QWidget):
         self.refresh_state()
         self.show_status("Database location updated.")
 
+    def probe_encrypted_rows(self, db_file: Path):
+        """Count encrypted rows in a database file that is not the live one.
+
+        Vault key material lives in this device's config file rather than in
+        the database, so the encrypted row counts of a database decide what a
+        location change actually costs the user.
+
+        Args:
+            db_file: Path to a snippets.db file.
+
+        Returns:
+            tuple[int, int] | None: (encrypted snippets, encrypted
+            placeholders), or None when the file could not be read.
+        """
+        if not db_file.exists():
+            return 0, 0
+        try:
+            conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+            try:
+                cur = conn.cursor()
+                snippets = cur.execute(
+                    "SELECT COUNT(*) FROM snippets WHERE is_encrypted = 1"
+                ).fetchone()[0]
+                placeholders = cur.execute(
+                    "SELECT COUNT(*) FROM custom_placeholders WHERE is_encrypted = 1"
+                ).fetchone()[0]
+                return int(snippets), int(placeholders)
+            finally:
+                conn.close()
+        except Exception:
+            logger.warning("Could not read encrypted row counts from %s", db_file)
+            return None
+
+    @staticmethod
+    def describe_vault_rows(counts) -> str:
+        """Render encrypted row counts as a short phrase for a warning dialog."""
+        snippets, placeholders = counts
+        parts = []
+        if snippets:
+            parts.append(f"{snippets} vault snippet{'s' if snippets != 1 else ''}")
+        if placeholders:
+            parts.append(
+                f"{placeholders} encrypted placeholder{'s' if placeholders != 1 else ''}"
+            )
+        return " and ".join(parts)
+
+    def vault_is_configured(self) -> bool:
+        """Whether this device holds vault key material in its config."""
+        try:
+            return self.window.vault_manager().is_setup(self.window.vault_config())
+        except Exception:
+            return False
+
     def prompt_for_existing_db(self, destination: Path):
         """
         Prompt the user when destination folder already contains a database.
@@ -385,7 +429,7 @@ class DbSettingsPage(QWidget):
 
         Returns:
             "use_existing" - use the existing database at destination
-            "move_current" - move current database and overwrite existing
+            "copy_current" - copy the current database over the existing one
             None - cancelled
         """
         msg = QMessageBox(self)
@@ -396,22 +440,190 @@ class DbSettingsPage(QWidget):
         )
         msg.setInformativeText(
             "What would you like to do?\n\n"
-            "• Use Existing: Switch to the database in this folder\n"
-            "• Move Current: Copy your current database here and overwrite the existing one\n"
-            "• Cancel: Don't change anything"
+            "\u2022 Use Existing: open the database in that folder. Your current "
+            "snippets stay in their current file; nothing is merged.\n\n"
+            "\u2022 Copy Current: copy your current database over the one in that "
+            "folder. The existing file is overwritten and cannot be recovered.\n\n"
+            "\u2022 Cancel: don't change anything"
         )
 
         use_btn = msg.addButton("Use Existing", QMessageBox.ActionRole)
-        move_btn = msg.addButton("Move Current", QMessageBox.ActionRole)
+        copy_btn = msg.addButton("Copy Current", QMessageBox.ActionRole)
         msg.addButton(QMessageBox.Cancel)
         msg.setDefaultButton(QMessageBox.Cancel)
 
-        result = msg.exec()
+        msg.exec()
         if msg.clickedButton() == use_btn:
             return "use_existing"
-        elif msg.clickedButton() == move_btn:
-            return "move_current"
+        elif msg.clickedButton() == copy_btn:
+            return "copy_current"
         return None
+
+    def prompt_for_empty_destination(self, current_db: Path, destination: Path):
+        """
+        Prompt when the chosen folder holds no database yet.
+
+        Args:
+            current_db: The database currently in use.
+            destination: Where the database would live after the change.
+
+        Returns:
+            "copy_current" - copy the current database to the new location
+            "use_existing" - start a new, empty database there
+            None - cancelled
+        """
+        msg = QMessageBox(self)
+        msg.setWindowTitle("No Database In That Folder")
+        msg.setIcon(QMessageBox.Question)
+        msg.setText(f"There is no database at:\n{destination}")
+        msg.setInformativeText(
+            "What would you like to do?\n\n"
+            f"\u2022 Copy Current: copy the database you are using now "
+            f"({current_db}) to that folder and carry on with your existing "
+            "snippets.\n\n"
+            "\u2022 Start Empty: create a new, empty database there. Your current "
+            "snippets are left behind in the old file and will not appear in "
+            "QSnippet until you switch back.\n\n"
+            "\u2022 Cancel: don't change anything"
+        )
+
+        copy_btn = msg.addButton("Copy Current", QMessageBox.ActionRole)
+        empty_btn = msg.addButton("Start Empty", QMessageBox.ActionRole)
+        msg.addButton(QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Cancel)
+
+        msg.exec()
+        if msg.clickedButton() == copy_btn:
+            return "copy_current"
+        if msg.clickedButton() == empty_btn:
+            return "use_existing"
+        return None
+
+    def confirm_copy_current(self, current_db: Path, new_db: Path) -> bool:
+        """Confirm copying the current database to a new location.
+
+        Spells out the two things that are easy to get wrong here: the copy
+        overwrites whatever already sits at the destination, and the vault key
+        stays behind on this device even though the encrypted rows travel.
+
+        Args:
+            current_db: The database currently in use.
+            new_db: Destination database file.
+
+        Returns:
+            bool: True when the user confirmed.
+        """
+        points = []
+        if new_db.exists():
+            points.append(
+                f"\u2022 A database already exists at {new_db}. It will be "
+                "overwritten and permanently lost. Anything in it that is not also "
+                "in your current database cannot be recovered."
+            )
+        points.append(
+            f"\u2022 This is a copy, not a move. The original file stays at "
+            f"{current_db}. Delete it yourself only once you have confirmed the new "
+            "location works."
+        )
+
+        counts = self.probe_encrypted_rows(current_db)
+        if counts is None:
+            points.append(
+                "\u2022 Your current database could not be inspected for vault "
+                "content, so treat the vault note below as applying to it."
+            )
+            counts = (1, 0)
+        if counts[0] or counts[1]:
+            described = self.describe_vault_rows(counts)
+            points.append(
+                f"\u2022 Your {described} are copied across and keep working on "
+                "this device: the vault key is derived from your password and the "
+                "salt held in this device's config file, which does not move with "
+                "the database."
+            )
+            points.append(
+                "\u2022 Another device that opens this same file cannot read those "
+                "entries. It derives its own key from its own config, so vault "
+                "content fails to decrypt there even with the right password. To "
+                "share vault snippets, unlock the vault, export them "
+                "(File \u2192 Export, encrypted with your vault password), and "
+                "import that file on the other device."
+            )
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Copy Database To New Location")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            f"Your current database will be copied to:\n{new_db}\n\n"
+            "QSnippet will then use the copy."
+        )
+        msg.setInformativeText("\n\n".join(points) + "\n\nContinue?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Cancel)
+        return msg.exec() == QMessageBox.Yes
+
+    def confirm_use_existing(self, current_db: Path, new_db: Path) -> bool:
+        """Confirm switching to a different database without copying.
+
+        The costly case is a database that already carries vault rows from
+        another install: this device cannot decrypt them, and no password will
+        change that, so the warning has to say so plainly.
+
+        Args:
+            current_db: The database currently in use.
+            new_db: The database to switch to.
+
+        Returns:
+            bool: True when the user confirmed.
+        """
+        points = [
+            f"\u2022 Your current snippets stay in {current_db}. Nothing is merged "
+            "or transferred, and they will not appear in QSnippet until you switch "
+            "back to that location."
+        ]
+
+        counts = self.probe_encrypted_rows(new_db)
+        if counts is None:
+            points.append(
+                f"\u2022 {new_db} could not be read. It may not be a QSnippet "
+                "database, in which case the switch will fail or leave you with an "
+                "empty one."
+            )
+        elif counts[0] or counts[1]:
+            described = self.describe_vault_rows(counts)
+            if self.vault_is_configured():
+                points.append(
+                    f"\u2022 That database contains {described}. Vault content is "
+                    "encrypted with a key derived from the vault password and the "
+                    "salt in the config file of the install that created it, and "
+                    "none of that key material lives in the database. If those "
+                    "entries came from another install, this device cannot decrypt "
+                    "them: they stay unreadable whatever password you enter, while "
+                    "your own vault password still applies to entries you create "
+                    "from now on."
+                )
+            else:
+                points.append(
+                    f"\u2022 That database contains {described}, but no vault is "
+                    "set up on this device. QSnippet will flag the vault as needing "
+                    "attention and those entries cannot be opened here. Setting up "
+                    "a new vault mints a new key and will not recover them."
+                )
+            points.append(
+                "\u2022 The only way to bring vault content across is to export it "
+                "from the install that created it (unlock the vault, then "
+                "File \u2192 Export, encrypted with that vault password) and import "
+                "the file here after switching."
+            )
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Switch To A Different Database")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(f"QSnippet will start using the database at:\n{new_db}")
+        msg.setInformativeText("\n\n".join(points) + "\n\nContinue?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Cancel)
+        return msg.exec() == QMessageBox.Yes
 
     def confirm_external_location(self) -> bool:
         """Show a security warning and ask the user to confirm the external location."""
@@ -432,6 +644,11 @@ class DbSettingsPage(QWidget):
             "Vault snippets are encrypted with AES-256-GCM and are safe to sync.\n\n"
             "• Back up your existing snippets before proceeding. Use "
             "File → Export Snippets to create a local YAML backup.\n\n"
+            "\u2022 The vault key does not travel with the database. Its salt and "
+            "verifier stay in this device's config file, so a synced database "
+            "opened on another device cannot decrypt vault entries created here, "
+            "and the reverse is true too. Move vault content between devices with "
+            "an encrypted export and import instead.\n\n"
             "Do you understand the risks and want to continue?"
         )
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
@@ -443,7 +660,6 @@ class DbSettingsPage(QWidget):
         self.browse_btn.setEnabled(enabled)
         self.clear_btn.setEnabled(enabled)
         self.path_edit.setEnabled(enabled)
-        self.move_switch.setEnabled(enabled)
 
     def show_status(self, message: str):
         self.status_label.setText(message)
