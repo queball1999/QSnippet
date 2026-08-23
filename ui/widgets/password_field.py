@@ -55,6 +55,12 @@ class PasswordField(QLineEdit):
         self.toggle_action.setToolTip("Show password")
         self.addAction(self.toggle_action, QLineEdit.TrailingPosition)
         self.toggle_action.triggered.connect(self.toggle)
+
+        # Setup keyboard toggle; scope it to this field so several password
+        # fields in one window do not register an ambiguous shortcut.
+        self.toggle_action.setShortcut(Qt.CTRL | Qt.Key_Space)
+        self.toggle_action.setShortcutContext(Qt.WidgetShortcut)
+
         self.applyStyles()
 
     def applyStyles(self) -> None:
