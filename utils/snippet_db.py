@@ -234,16 +234,41 @@ class SnippetDB:
         """Directory holding backup archives, alongside the database file."""
         return self.db_path.parent / "backups"
 
+    @staticmethod
+    def config_source() -> Path | None:
+        """Return the live config.yaml path, or None if it isn't there.
+
+        The vault's salt and verifier live in config.yaml while the data
+        they protect lives in the database. A backup of one without the
+        other is not a backup: restoring the database alone leaves every
+        encrypted snippet permanently unreadable.
+
+        Returns:
+            Path | None: Path to config.yaml when it exists.
+        """
+        try:
+            path = Path(FileUtils.get_default_paths()["app_data"]) / "config.yaml"
+            return path if path.is_file() else None
+        except Exception:
+            logger.exception("Could not resolve config.yaml for backup")
+            return None
+
     def backup_before_migration(self, export_dir: Path | None = None) -> tuple[Path | None, Path | None, Path | None]:
         """
-        Copy the raw database file and export a portable YAML snapshot
-        before a migration modifies anything.
+        Copy the raw database file, export a portable YAML snapshot, and
+        copy config.yaml, before a migration modifies anything.
 
-        When both artefacts are produced they are bundled into a single
-        timestamped zip in the backups directory and the loose files are
-        removed, so one backup is one self-contained file rather than a .db
-        beside the database and a .yaml stranded in Downloads. If either
-        step fails, whatever succeeded is left in place unzipped rather than
+        config.yaml is part of the backup because it holds the vault's salt
+        and verifier. Restoring a database without it leaves every encrypted
+        snippet permanently unreadable, so the two have to travel together.
+        Note that this makes the archive as sensitive as the config itself:
+        it contains the material needed to attempt the vault password.
+
+        When more than one artefact is produced they are bundled into a
+        single timestamped zip in the backups directory and the loose files
+        are removed, so one backup is one self-contained file rather than a
+        .db beside the database and a .yaml stranded in Downloads. If a step
+        fails, whatever succeeded is left in place unzipped rather than
         discarded.
 
         Vault-encrypted snippet bodies are exported with their ciphertext
@@ -290,14 +315,31 @@ class SnippetDB:
             logger.exception("Pre-migration snippet export failed")
             export_path = None
 
-        if db_backup_path and export_path:
+        # The vault salt and verifier live here, not in the database. Without
+        # them a restored database is just unreadable ciphertext.
+        config_backup_path: Path | None = None
+        try:
+            source = self.config_source()
+            if source is not None:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                config_backup_path = target_dir / f"config-backup-{timestamp}.yaml"
+                shutil.copy2(source, config_backup_path)
+                logger.info("Config backup written to %s", config_backup_path)
+            else:
+                logger.warning("No config.yaml found to back up alongside the database")
+        except Exception:
+            logger.exception("Config backup failed")
+            config_backup_path = None
+
+        members = [p for p in (db_backup_path, export_path, config_backup_path) if p]
+        if len(members) > 1:
             # Guarded as a whole: this method promises never to raise, because
             # it runs during startup migration. A failed archive must leave the
-            # two loose files in place rather than costing the user a backup.
+            # loose files in place rather than costing the user a backup.
             try:
                 archive_path = self.archive_backup(
                     target_dir / f"qsnippet-backup-{timestamp}.zip",
-                    [db_backup_path, export_path],
+                    members,
                 )
             except Exception:
                 logger.exception("Backup archiving failed")
