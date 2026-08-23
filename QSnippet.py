@@ -77,11 +77,12 @@ class main():
         self.scale_ui_cfg()
         self.start_accent_color_monitor()
 
-        # Check if we need to show notices
+        # Startup dialogs (notices, then the first-run tutorial) only make
+        # sense when the window is actually on screen.
         # Default to True if setting missing
         if self.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", True):
             # Use time to avoid interfering with main thread
-            self.QTimer.singleShot(1000, self.check_notices)
+            self.QTimer.singleShot(1000, self.run_startup_dialogs)
 
         self.start_program()    # start program
         
@@ -933,6 +934,27 @@ class main():
             sys.exit(1)
 
         logger.info("System requirements check complete")
+
+    def run_startup_dialogs(self):
+        """
+        Run the post-launch dialogs in order.
+
+        Unread notices are modal, so the first-run tutorial only starts
+        once they have been dismissed; otherwise the tour would spotlight
+        a window sitting behind a dialog.
+
+        Returns:
+            None
+        """
+        try:
+            self.check_notices()
+        except Exception:
+            logger.exception("Failed while checking notices")
+
+        try:
+            self.qsnippet.maybe_show_tutorial()
+        except Exception:
+            logger.exception("Failed while starting the first-run tutorial")
 
     def check_notices(self):
         """

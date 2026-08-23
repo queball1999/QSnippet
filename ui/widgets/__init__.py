@@ -6,3 +6,4 @@ from .import_export_wizard import ImportExportWizard
 from .password_field import PasswordField
 from .vault_setup_dialog import VaultSetupDialog
 from .vault_unlock_dialog import VaultUnlockDialog
+from .tutorial_overlay import TutorialController, TutorialOverlay, TutorialStep, TypingDemo

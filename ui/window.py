@@ -66,6 +66,9 @@ class QSnippet(QMainWindow):
         self.app = parent.app
         self.state = "stopped"
 
+        # Guided tour controller; only set while the tour is on screen
+        self.tutorial = None
+
         # Live countdown for the "Detected Trigger" status bar notification
         self.trigger_countdown_timer = QTimer(self)
         self.trigger_countdown_timer.timeout.connect(self.tick_trigger_countdown)
@@ -269,6 +272,7 @@ class QSnippet(QMainWindow):
         self.menubar.showAppInfo.connect(self.handle_show_info)
         self.menubar.show_settings.connect(self.show_settings_window)
         self.menubar.showPlaceholderManager.connect(self.show_placeholder_manager)
+        self.menubar.showTutorialRequested.connect(self.show_tutorial)
         self.setMenuBar(self.menubar)
 
         # Populate any already-saved custom placeholders into the menu
@@ -1094,15 +1098,20 @@ class QSnippet(QMainWindow):
             logging.exception("Failed to build about info")
             return False
         
-    def show_placeholder_manager(self) -> None:
+    def show_placeholder_manager(self, blocking: bool = True):
         """
         Show the placeholder manager dialog.
 
         Lets users add, edit, or delete user-defined placeholders.
         Refreshes the menu and intellisense after any change.
 
+        Args:
+            blocking (bool): Block until the dialog closes. The guided tour
+                passes False so it can keep driving while it is up; the
+                dialog stays modal to the user either way.
+
         Returns:
-            None
+            PlaceholderDialog | None: The dialog when opened non-blocking.
         """
         logger.info("Showing placeholder manager")
 
@@ -1113,7 +1122,17 @@ class QSnippet(QMainWindow):
             parent=self,
         )
         self.placeholder_dialog.placeholders_updated.connect(self.refresh_placeholder_integrations)
+
+        if not blocking:
+            # See show_settings_window: modal to the user, non-blocking here
+            self.placeholder_dialog.setModal(True)
+            self.placeholder_dialog.show()
+            self.placeholder_dialog.raise_()
+            self.placeholder_dialog.activateWindow()
+            return self.placeholder_dialog
+
         self.placeholder_dialog.exec()
+        return None
 
     def refresh_placeholder_integrations(self) -> None:
         """
@@ -1134,12 +1153,128 @@ class QSnippet(QMainWindow):
         except Exception:
             logger.warning("Failed to refresh placeholder integrations", exc_info=True)
 
-    def show_settings_window(self, page: str = None) -> None:
+    # ----- TUTORIAL -----
+
+    def tutorial_settings(self) -> dict:
         """
-        Show the settings window dialog.
+        Return the startup_behavior settings block that holds tutorial state.
+
+        Returns:
+            dict: The startup_behavior mapping, creating it if missing.
+        """
+        general = self.parent.settings.setdefault("general", {})
+        return general.setdefault("startup_behavior", {})
+
+    def maybe_show_tutorial(self) -> None:
+        """
+        Show the guided tour on first run.
+
+        show_tutorial is the single source of truth: it ships on, and is
+        switched off once the tour has been seen so it never reopens by
+        itself. Turning it back on in Settings re-arms it for the next
+        launch, and Help > Tutorial replays it on demand.
 
         Returns:
             None
+        """
+        behavior = self.tutorial_settings()
+        enabled = behavior.get("show_tutorial", {}).get("value", True)
+
+        if not enabled:
+            logger.debug("Tutorial already seen or disabled; not showing at startup")
+            return
+
+        self.show_tutorial(first_run=True)
+
+    def show_tutorial(self, first_run: bool = False) -> None:
+        """
+        Start the guided tour over the main window.
+
+        Args:
+            first_run (bool): True when launched automatically on first
+                run rather than from the Help menu. Only the automatic
+                run needs the window brought forward first.
+
+        Returns:
+            None
+        """
+        if getattr(self, "tutorial", None) is not None and self.tutorial.active:
+            logger.debug("Tutorial already running")
+            return
+
+        from .widgets.tutorial_overlay import TutorialController
+        from .widgets.tutorial_steps import build_tutorial_steps
+
+        if first_run or not self.isVisible():
+            self.show_window()
+
+        try:
+            steps = build_tutorial_steps(self)
+        except Exception:
+            logger.exception("Could not build the tutorial steps")
+            return
+
+        self.tutorial = TutorialController(self, steps, parent=self)
+        self.tutorial.finished.connect(self.on_tutorial_finished)
+        self.tutorial.start()
+
+    def on_tutorial_finished(self, completed: bool) -> None:
+        """
+        Persist that the tour has been seen.
+
+        Both outcomes count as seen: a user who skipped the tour does not
+        want it reopening on the next launch either.
+
+        Args:
+            completed (bool): True when every step was viewed.
+
+        Returns:
+            None
+        """
+        controller, self.tutorial = self.tutorial, None
+        if controller is not None:
+            # Safe to schedule from inside the controller's own signal
+            controller.deleteLater()
+
+        behavior = self.tutorial_settings()
+        flag = behavior.setdefault(
+            "show_tutorial",
+            {
+                "type": "bool",
+                "value": True,
+                "default": True,
+                "description": (
+                    "Show the guided tour of the interface when the application starts."
+                ),
+            },
+        )
+
+        if flag.get("value") is False:
+            return
+
+        flag["value"] = False
+
+        try:
+            FileUtils.write_yaml(self.parent.settings_file, self.parent.settings)
+            logger.info("Tutorial marked as seen (completed=%s)", completed)
+        except Exception:
+            logger.exception("Failed to persist tutorial completion state")
+
+    def show_settings_window(self, page: str = None, blocking: bool = True):
+        """
+        Show the settings window dialog.
+
+        Args:
+            page (str): Optional page to select on open.
+            blocking (bool): Block until the dialog closes, which is what
+                every menu and toolbar route wants. The guided tour passes
+                False so it can keep driving while the dialog is up; the
+                dialog is still modal to the user either way, so it can't
+                be buried behind the main window.
+
+        Returns:
+            SettingsDialog | None: The dialog when opened non-blocking, so
+                the caller can point at it and close it again.
         """
         logger.info("Showing settings window")
 
@@ -1164,7 +1299,19 @@ class QSnippet(QMainWindow):
         )
         if page:
             self.settings_dialog.select_page(page)
+
+        if not blocking:
+            # Modal to the user, but show() returns immediately so the tour
+            # keeps running. Without the modality a click on the main window
+            # would drop this dialog behind it, taking the tour with it.
+            self.settings_dialog.setModal(True)
+            self.settings_dialog.show()
+            self.settings_dialog.raise_()
+            self.settings_dialog.activateWindow()
+            return self.settings_dialog
+
         self.settings_dialog.exec()
+        return None
 
     def save_settings(self, settings: dict) -> None:
         """

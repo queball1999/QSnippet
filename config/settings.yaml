@@ -154,6 +154,16 @@ general:
       default: true
       description: Display the user interface when the application starts.
 
+    show_tutorial:
+      type: bool
+      value: true
+      default: true
+      description: >
+        Show the guided tour of the interface when the application starts.
+        This switches itself off once the tour has been seen; turn it back on
+        to get the tour again on the next launch. The tour can also be
+        replayed at any time from Help > Tutorial.
+
   extra_features:
     description: Optional features and fun extras that can be toggled on or off.
     easter_eggs_enabled:

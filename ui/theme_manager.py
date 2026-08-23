@@ -190,6 +190,12 @@ OBJECT_NAME_FONTS: dict[str, tuple[str, bool]] = {
     # Notice carousel
     "NoticeTopLabel":            ("large",  True),
     "NoticeTitleLabel":          ("medium", True),
+    # Tutorial overlay
+    "TutorialTitle":             ("large",  True),
+    "TutorialBody":              ("medium", False),
+    "TutorialProgress":          ("small",  False),
+    "TutorialBtn":               ("medium", False),
+    "TutorialNextBtn":           ("medium", True),
 }
 
 # Themes that should inherit the Windows system accent color
@@ -1466,6 +1472,58 @@ QPushButton#BackupPageBtnCurrent {{
 QPushButton#BackupPageBtnCurrent:disabled {{
     background-color: {c['accent']};
     color: {c['on_accent']};
+}}
+
+/* Tutorial overlay coach mark */
+QWidget#TutorialOverlay {{
+    background: transparent;
+}}
+QFrame#TutorialBubble {{
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r12}px;
+}}
+QFrame#TutorialBubble QLabel {{
+    background: transparent;
+}}
+QLabel#TutorialTitle {{
+    color: {c['accent']};
+}}
+QLabel#TutorialBody {{
+    color: {c['text']};
+}}
+QLabel#TutorialProgress {{
+    color: {c['text_muted']};
+}}
+/* Back and Skip inherit the base QPushButton geometry, so they follow the
+   user's button padding and the UI scale like every other button. Only the
+   primary action adds the accent fill on top. */
+QPushButton#TutorialNextBtn {{
+    background-color: {c['accent']};
+    color: {c['on_accent']};
+    border: 1px solid {c['accent']};
+}}
+QPushButton#TutorialNextBtn:hover {{
+    background-color: {c['accent']};
+    border-color: {c['text']};
+}}
+QPushButton#TutorialNextBtn:pressed {{
+    background-color: {c['accent']};
+    border-color: {c['on_accent']};
+}}
+QPushButton#TutorialReplayBtn, QPushButton#TutorialCloseBtn {{
+    background: transparent;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 2px;
+    border-radius: {r4}px;
+}}
+QPushButton#TutorialReplayBtn:hover, QPushButton#TutorialCloseBtn:hover {{
+    background-color: {c['hover']};
+}}
+QPushButton#TutorialReplayBtn:pressed, QPushButton#TutorialCloseBtn:pressed {{
+    background-color: {c['selected']};
 }}
 
 /* Settings toast */

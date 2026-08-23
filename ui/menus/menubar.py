@@ -20,6 +20,7 @@ class MenuBar(QMenuBar):
     showAppInfo = Signal()
     show_settings = Signal()
     showPlaceholderManager = Signal()
+    showTutorialRequested = Signal()
 
     def __init__(self, main=None, parent=None):
         """
@@ -193,42 +194,31 @@ class MenuBar(QMenuBar):
         help_menu = self.addMenu("Help")
         help_menu.setMinimumWidth(150)
 
+        # Guided tour
+        tutorial_icon = QIcon(FileUtils.icon_path("information-outline.svg"))
+        tutorial_act = QAction(tutorial_icon, "Tutorial", self)
+        tutorial_act.setShortcut("F1")
+        tutorial_act.setStatusTip("Replay the guided tour of the interface")
+        tutorial_act.triggered.connect(self.showTutorialRequested.emit)
+        help_menu.addAction(tutorial_act)
+
+        help_menu.addSeparator()
+
+        # Logging Submenu
+        logging_icon = QIcon(FileUtils.icon_path("wrench-outline.svg"))
+        logging_menu = help_menu.addMenu(logging_icon, "Logging")
+
         # Collect Logs
         logs_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
         collect_logs_act = QAction(logs_icon, "Collect Logs", self)
         collect_logs_act.setShortcut("F7")
         collect_logs_act.setStatusTip("Export logs to Downloads folder")
         collect_logs_act.triggered.connect(self.collectLogsRequested.emit)
-        help_menu.addAction(collect_logs_act)
-
-        # Backup History
-        backup_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
-        backup_history_act = QAction(backup_icon, "Backup History", self)
-        backup_history_act.setStatusTip("View automatic database backups made before updates")
-        backup_history_act.triggered.connect(self.viewBackupHistoryRequested.emit)
-        help_menu.addAction(backup_history_act)
-
-        # Release History
-        release_history_icon = QIcon(FileUtils.icon_path("calendar-clock-outline.svg"))
-        release_history_act = QAction(release_history_icon, "Release History", self)
-        release_history_act.setStatusTip("Browse past release notes")
-        release_history_act.triggered.connect(self.viewReleaseHistoryRequested.emit)
-        help_menu.addAction(release_history_act)
-
-        # Report a Bug
-        bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))
-        report_bug_act = QAction(bug_icon, "Report a Bug", self)
-        report_bug_act.setStatusTip("Open the GitHub bug report form")
-        report_bug_act.triggered.connect(
-            lambda: QDesktopServices.openUrl(
-                QUrl("https://github.com/queball1999/QSnippet/issues/new?template=bug_report.md")
-            )
-        )
-        help_menu.addAction(report_bug_act)
+        logging_menu.addAction(collect_logs_act)
 
         # Log Level submenu
         debug_icon = QIcon(FileUtils.icon_path("wrench-outline.svg"))
-        log_level_menu = help_menu.addMenu(debug_icon, "Log Level")
+        log_level_menu = logging_menu.addMenu(debug_icon, "Log Level")
         log_level_menu.setStatusTip("Set log level within application")
 
         # Create an exclusive action group (only one checked at a time)
@@ -250,6 +240,35 @@ class MenuBar(QMenuBar):
             act.triggered.connect(lambda checked=False, lvl=level: self.set_log_level(lvl))
             log_level_menu.addAction(act)
 
+
+        # History Submenu
+        history_icon = QIcon(FileUtils.icon_path("history.svg"))
+        history_menu = help_menu.addMenu(history_icon, "History")
+
+        # Backup History
+        backup_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
+        backup_history_act = QAction(backup_icon, "Backup History", self)
+        backup_history_act.setStatusTip("View automatic database backups made before updates")
+        backup_history_act.triggered.connect(self.viewBackupHistoryRequested.emit)
+        history_menu.addAction(backup_history_act)
+
+        # Release History
+        release_history_icon = QIcon(FileUtils.icon_path("calendar-clock-outline.svg"))
+        release_history_act = QAction(release_history_icon, "Release History", self)
+        release_history_act.setStatusTip("Browse past release notes")
+        release_history_act.triggered.connect(self.viewReleaseHistoryRequested.emit)
+        history_menu.addAction(release_history_act)
+
+        # Report a Bug
+        bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))
+        report_bug_act = QAction(bug_icon, "Report a Bug", self)
+        report_bug_act.setStatusTip("Open the GitHub bug report form")
+        report_bug_act.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/queball1999/QSnippet/issues/new?template=bug_report.md")
+            )
+        )
+        help_menu.addAction(report_bug_act)
 
         # About App
         about_icon = QIcon(FileUtils.icon_path("information-outline.svg"))
