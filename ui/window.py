@@ -30,6 +30,9 @@ from .service import *
 # Setup logging
 logger = logging.getLogger(__name__)
 
+# How long the transient "Clipboard cleared" status bar notice stays up.
+CLIPBOARD_CLEARED_MESSAGE_MS = 5000
+
 
 
 class QSnippet(QMainWindow):
@@ -38,6 +41,7 @@ class QSnippet(QMainWindow):
     trigger_detected_signal = Signal(str, object)
     dynamic_placeholder_signal = Signal(str, object, str, bool)
     migration_backup_signal = Signal(object, object, object)
+    clipboard_cleared_signal = Signal()
 
     def __init__(self, parent=None) -> None:
         """
@@ -205,6 +209,10 @@ class QSnippet(QMainWindow):
         # Dynamic [[placeholder]] fields → main-thread input dialog via Signal
         self.dynamic_placeholder_signal.connect(self.handle_dynamic_placeholder_main)
         self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
+
+        # Clipboard cleanup → status bar notification via Signal (thread-safe queued connection)
+        self.clipboard_cleared_signal.connect(self.on_clipboard_cleared)
+        self.snippet_service.expander.clipboard_cleared_callback = self.on_clipboard_cleared_from_expander
 
         # Database migration backup notice → main-thread dialog via Signal
         # (fired from a background thread by the vault-unlock migration pass)
@@ -382,6 +390,7 @@ class QSnippet(QMainWindow):
         self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
         self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
         self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
+        self.snippet_service.expander.clipboard_cleared_callback = self.on_clipboard_cleared_from_expander
 
         if was_running:
             self.start_service()
@@ -474,6 +483,60 @@ class QSnippet(QMainWindow):
 
         except Exception as e:
             logger.exception(f"Failed to show snippets loaded message: {e}")
+
+    def on_clipboard_cleared_from_expander(self) -> None:
+        """
+        Called from the clipboard cleanup timer thread when managed clipboard
+        content is cleared. Re-emits as a Qt signal so the status bar update
+        happens on the main thread.
+
+        Returns:
+            None
+        """
+        self.clipboard_cleared_signal.emit()
+
+    def on_clipboard_cleared(self) -> None:
+        """
+        Show "Clipboard cleared" in the status bar for 5 seconds, then put the
+        previous message back.
+
+        Returns:
+            None
+        """
+        try:
+            status_bar = self.statusBar()
+            previous_message = status_bar.currentMessage()
+            status_bar.showMessage("Clipboard cleared")
+            QTimer.singleShot(
+                CLIPBOARD_CLEARED_MESSAGE_MS,
+                lambda: self.restore_status_message(previous_message),
+            )
+        except Exception:
+            logger.exception("Failed to show clipboard cleared message")
+
+    def restore_status_message(self, previous_message: str) -> None:
+        """
+        Put back the status bar message that a temporary notice replaced.
+
+        Leaves the status bar alone when something else has already replaced the
+        notice, so a newer message is not overwritten by a stale one.
+
+        Args:
+            previous_message (str): The message displayed before the notice.
+
+        Returns:
+            None
+        """
+        try:
+            status_bar = self.statusBar()
+            if status_bar.currentMessage() != "Clipboard cleared":
+                return
+            if previous_message:
+                status_bar.showMessage(previous_message)
+            else:
+                self.check_service_status()
+        except Exception:
+            logger.exception("Failed to restore the status bar message")
 
     def on_trigger_detected_from_expander(self, prefix_char: str, timeout_seconds) -> None:
         """
@@ -1217,13 +1280,31 @@ class QSnippet(QMainWindow):
             table.set_vault_lock_state(new_locked, is_setup=is_setup)
             if prev_locked != new_locked:
                 self.editor.load_snippets()
-        # Clear clipboard when vault locks to prevent lingering sensitive content
-        if is_setup and not is_unlocked:
-            try:
-                from PySide6.QtWidgets import QApplication
-                QApplication.clipboard().clear()
-            except Exception:
-                pass
+        # Clear lingering vault content when the vault transitions to locked.
+        # Only snippet content QSnippet itself placed on the clipboard is
+        # touched, so the user's own clipboard is never wiped out from under them.
+        now_locked = is_setup and not is_unlocked
+        was_locked = getattr(self, "vault_clipboard_locked", None)
+        if now_locked and was_locked is not True:
+            self.clear_managed_clipboard_on_lock()
+        self.vault_clipboard_locked = now_locked
+
+    def clear_managed_clipboard_on_lock(self) -> None:
+        """Clear snippet content QSnippet put on the clipboard when the vault locks."""
+        try:
+            expander = getattr(self.snippet_service, "expander", None)
+            if expander is None:
+                return
+            expected = expander.last_managed_clipboard
+            if not expected:
+                return
+            expander.cancel_clipboard_timer()
+            expander.clear_managed_clipboard(
+                expected_text=expected,
+                generation=expander.clipboard_generation,
+            )
+        except Exception:
+            logger.exception("Failed to clear managed clipboard on vault lock")
 
     def _run_vault_brace_migration(self, vm, db) -> None:
         """Background-thread worker: run the vault-unlock placeholder-brace

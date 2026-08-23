@@ -432,15 +432,352 @@ def testempty_clipboard_windows_fallback_on_error(dummy_pynput, monkeypatch):
     mock_open = MagicMock(side_effect=OSError("Cannot access clipboard"))
     mock_close = MagicMock()
 
+    monkeypatch.setattr("utils.keyboard_utils.CLIPBOARD_OPEN_ATTEMPTS", 3)
+    monkeypatch.setattr("utils.keyboard_utils.CLIPBOARD_OPEN_RETRY_SECONDS", 0)
     monkeypatch.setattr("utils.keyboard_utils.win32clipboard.OpenClipboard", mock_open)
     monkeypatch.setattr("utils.keyboard_utils.win32clipboard.CloseClipboard", mock_close)
 
-    expander.empty_clipboard_windows()
+    assert expander.empty_clipboard_windows() is True
 
+    # A locked clipboard is retried before giving up
+    assert mock_open.call_count == 3
     # Fallback to pyperclip occurred
     mock_copy.assert_called_once_with("")
     # OpenClipboard failed, so CloseClipboard should not be called
     mock_close.assert_not_called()
+
+
+def test_copy_clipboard_windows_sets_history_exclusion_formats(dummy_pynput, monkeypatch):
+    """Snippets copied on Windows are marked as excluded from clipboard history."""
+    import platform
+
+    if platform.system() != "Windows":
+        pytest.skip("Windows-only test")
+
+    import utils.keyboard_utils as ku
+
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = []
+
+    expander = SnippetExpander(snippets_db=db, parent=MagicMock())
+
+    format_ids = {name: 5000 + i for i, name in enumerate(ku.WINDOWS_PRIVATE_CLIPBOARD_FORMATS)}
+    monkeypatch.setattr(ku, "windows_clipboard_format_ids", dict(format_ids))
+
+    mock_set = MagicMock()
+    monkeypatch.setattr("utils.keyboard_utils.win32clipboard.OpenClipboard", MagicMock())
+    monkeypatch.setattr("utils.keyboard_utils.win32clipboard.EmptyClipboard", MagicMock())
+    monkeypatch.setattr("utils.keyboard_utils.win32clipboard.CloseClipboard", MagicMock())
+    monkeypatch.setattr("utils.keyboard_utils.win32clipboard.SetClipboardData", mock_set)
+
+    assert expander.copy_clipboard_windows("hunter2") is True
+
+    written = {call.args[0]: call.args[1] for call in mock_set.call_args_list}
+    assert written[ku.win32clipboard.CF_UNICODETEXT] == "hunter2"
+    for format_id in format_ids.values():
+        assert format_id in written
+
+
+def make_expander():
+    """Build a SnippetExpander with a stubbed database for clipboard tests."""
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = []
+    return SnippetExpander(snippets_db=db, parent=MagicMock())
+
+
+def force_platform(monkeypatch, name):
+    """Pin the module-level platform flags to a single OS."""
+    import utils.keyboard_utils as ku
+
+    monkeypatch.setattr(ku, "IS_WINDOWS", name == "windows")
+    monkeypatch.setattr(ku, "IS_MACOS", name == "macos")
+    monkeypatch.setattr(ku, "IS_LINUX", name == "linux")
+
+
+def test_clear_managed_clipboard_notifies_the_ui(dummy_pynput, monkeypatch):
+    """A successful clear fires the callback that raises the status bar notice."""
+    expander = make_expander()
+    monkeypatch.setattr(expander, "read_clipboard", lambda: (True, "secret"))
+    monkeypatch.setattr(expander, "empty_clipboard", lambda: True)
+
+    notified = []
+    expander.clipboard_cleared_callback = lambda: notified.append(1)
+
+    expander.clipboard_generation = 1
+    expander.last_managed_clipboard = "secret"
+    expander.clear_managed_clipboard(expected_text="secret", generation=1)
+
+    assert notified == [1]
+
+
+def test_clear_managed_clipboard_does_not_notify_when_skipped(dummy_pynput, monkeypatch):
+    """No notice when the user replaced the clipboard and nothing was cleared."""
+    expander = make_expander()
+    monkeypatch.setattr(expander, "read_clipboard", lambda: (True, "user content"))
+    monkeypatch.setattr(expander, "empty_clipboard", lambda: pytest.fail("should not clear"))
+
+    notified = []
+    expander.clipboard_cleared_callback = lambda: notified.append(1)
+
+    expander.clipboard_generation = 1
+    expander.last_managed_clipboard = "secret"
+    expander.clear_managed_clipboard(expected_text="secret", generation=1)
+
+    assert notified == []
+
+
+def test_clipboard_cleared_callback_errors_are_contained(dummy_pynput, monkeypatch):
+    """A failing UI callback must not break clipboard cleanup."""
+    expander = make_expander()
+    monkeypatch.setattr(expander, "read_clipboard", lambda: (True, "secret"))
+    cleared = []
+    monkeypatch.setattr(expander, "empty_clipboard", lambda: cleared.append(1) or True)
+
+    def boom():
+        raise RuntimeError("status bar is gone")
+
+    expander.clipboard_cleared_callback = boom
+
+    expander.clipboard_generation = 1
+    expander.last_managed_clipboard = "secret"
+    expander.clear_managed_clipboard(expected_text="secret", generation=1)
+
+    assert cleared == [1]
+    assert expander.last_managed_clipboard is None
+
+
+def test_copy_clipboard_macos_marks_item_concealed(dummy_pynput, monkeypatch):
+    """macOS copies declare the concealed type alongside the text."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "macos")
+
+    pasteboard = MagicMock()
+    pasteboard.setString_forType_.return_value = True
+    pasteboard.stringForType_.return_value = "hunter2"
+    pasteboard_cls = MagicMock()
+    pasteboard_cls.generalPasteboard.return_value = pasteboard
+
+    monkeypatch.setattr(
+        ku, "clipboard_backend_probe", {"macos": (pasteboard_cls, "public.utf8-plain-text")}
+    )
+
+    assert expander.copy_clipboard_macos("hunter2") is True
+
+    declared = pasteboard.declareTypes_owner_.call_args.args[0]
+    assert ku.MACOS_CONCEALED_PASTEBOARD_TYPE in declared
+    written = {call.args[1]: call.args[0] for call in pasteboard.setString_forType_.call_args_list}
+    assert written["public.utf8-plain-text"] == "hunter2"
+    assert ku.MACOS_CONCEALED_PASTEBOARD_TYPE in written
+
+
+def test_copy_clipboard_macos_falls_back_without_pyobjc(dummy_pynput, monkeypatch):
+    """A macOS build without pyobjc reports failure so pyperclip takes over."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "macos")
+    monkeypatch.setattr(ku, "clipboard_backend_probe", {"macos": None})
+
+    assert expander.copy_clipboard_macos("hunter2") is False
+
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+    expander.copy_to_clipboard("hunter2")
+    mock_copy.assert_called_once_with("hunter2")
+
+
+def test_copy_clipboard_macos_falls_back_on_readback_mismatch(dummy_pynput, monkeypatch):
+    """A pasteboard that did not take the text is treated as a failure."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "macos")
+
+    pasteboard = MagicMock()
+    pasteboard.setString_forType_.return_value = True
+    pasteboard.stringForType_.return_value = "something else"
+    pasteboard_cls = MagicMock()
+    pasteboard_cls.generalPasteboard.return_value = pasteboard
+    monkeypatch.setattr(
+        ku, "clipboard_backend_probe", {"macos": (pasteboard_cls, "public.utf8-plain-text")}
+    )
+
+    assert expander.copy_clipboard_macos("hunter2") is False
+
+
+def test_copy_clipboard_linux_sets_password_manager_hint(dummy_pynput, monkeypatch):
+    """Linux copies advertise the KDE password-manager MIME hint with the text."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "linux")
+    monkeypatch.setattr(ku, "get_linux_session_type", lambda: "wayland")
+
+    clipboard = MagicMock()
+    app = MagicMock()
+    app.clipboard.return_value = clipboard
+    monkeypatch.setattr(ku, "load_qt_clipboard_api", lambda: (app, MagicMock, MagicMock()))
+
+    assert expander.copy_clipboard_linux("hunter2") is True
+
+    mime = clipboard.setMimeData.call_args.args[0]
+    mime.setText.assert_called_once_with("hunter2")
+    mime.setData.assert_called_once_with(
+        ku.LINUX_PASSWORD_HINT_MIME, ku.LINUX_PASSWORD_HINT_VALUE
+    )
+
+
+def test_copy_clipboard_linux_skips_headless_session(dummy_pynput, monkeypatch):
+    """Without a graphical session the Qt path is not attempted at all."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "linux")
+    monkeypatch.setattr(ku, "get_linux_session_type", lambda: "none")
+
+    def fail_load():
+        raise AssertionError("Qt clipboard should not be probed without a session")
+
+    monkeypatch.setattr(ku, "load_qt_clipboard_api", fail_load)
+
+    assert expander.copy_clipboard_linux("hunter2") is False
+
+
+def test_copy_clipboard_linux_falls_back_without_qapplication(dummy_pynput, monkeypatch):
+    """No running QApplication means the copy defers to pyperclip."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "linux")
+    monkeypatch.setattr(ku, "get_linux_session_type", lambda: "x11")
+    monkeypatch.setattr(ku, "load_qt_clipboard_api", lambda: None)
+
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+
+    expander.copy_to_clipboard("hunter2")
+    mock_copy.assert_called_once_with("hunter2")
+
+
+def test_get_linux_session_type_detection(monkeypatch):
+    """Session detection prefers XDG_SESSION_TYPE, then the display variables."""
+    import utils.keyboard_utils as ku
+
+    for name in ("XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+    assert ku.get_linux_session_type() == "none"
+
+    monkeypatch.setenv("DISPLAY", ":0")
+    assert ku.get_linux_session_type() == "x11"
+
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    assert ku.get_linux_session_type() == "wayland"
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "X11")
+    assert ku.get_linux_session_type() == "x11"
+
+
+def test_copy_to_clipboard_unknown_platform_uses_pyperclip(dummy_pynput, monkeypatch):
+    """An unrecognized OS copies through pyperclip without raising."""
+    expander = make_expander()
+    force_platform(monkeypatch, "other")
+
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+
+    expander.copy_to_clipboard("hunter2")
+    mock_copy.assert_called_once_with("hunter2")
+
+
+def test_copy_to_clipboard_falls_back_when_handler_raises(dummy_pynput, monkeypatch):
+    """A platform handler that blows up must not stop the snippet from pasting."""
+    expander = make_expander()
+    force_platform(monkeypatch, "macos")
+
+    def exploding_copy(text):
+        raise OSError("pasteboard on fire")
+
+    monkeypatch.setattr(expander, "copy_clipboard_macos", exploding_copy)
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+
+    expander.copy_to_clipboard("hunter2")
+    mock_copy.assert_called_once_with("hunter2")
+
+
+def test_empty_clipboard_macos_falls_back_to_pyperclip(dummy_pynput, monkeypatch):
+    """When AppKit cannot clear the pasteboard, the pyperclip clear still runs."""
+    import utils.keyboard_utils as ku
+
+    expander = make_expander()
+    force_platform(monkeypatch, "macos")
+    monkeypatch.setattr(ku, "clipboard_backend_probe", {"macos": None})
+
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+
+    assert expander.empty_clipboard() is True
+    mock_copy.assert_called_once_with("")
+
+
+def test_copy_to_clipboard_uses_pyperclip_off_windows(dummy_pynput, monkeypatch):
+    """Non-Windows platforms keep using pyperclip for snippet copies."""
+    import utils.keyboard_utils as ku
+
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = []
+
+    expander = SnippetExpander(snippets_db=db, parent=MagicMock())
+
+    monkeypatch.setattr(ku, "IS_WINDOWS", False)
+    mock_copy = MagicMock()
+    monkeypatch.setattr("pyperclip.copy", mock_copy)
+    mock_private = MagicMock()
+    monkeypatch.setattr(expander, "copy_clipboard_windows", mock_private)
+
+    expander.copy_to_clipboard("plain text")
+
+    mock_copy.assert_called_once_with("plain text")
+    mock_private.assert_not_called()
+
+
+def test_clear_managed_clipboard_retries_when_clear_fails(dummy_pynput, monkeypatch):
+    """A clipboard that cannot be emptied is retried instead of abandoned."""
+    import utils.keyboard_utils as ku
+
+    db = MagicMock()
+    db.get_all_custom_placeholders.return_value = []
+    db.get_enabled_trigger_index.return_value = []
+
+    expander = SnippetExpander(snippets_db=db, parent=MagicMock())
+    monkeypatch.setattr(ku, "CLIPBOARD_CLEAR_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(expander, "read_clipboard", lambda: (True, "secret"))
+
+    attempts = []
+
+    def failing_empty():
+        attempts.append(1)
+        return False
+
+    monkeypatch.setattr(expander, "empty_clipboard", failing_empty)
+
+    expander.clipboard_generation = 1
+    expander.last_managed_clipboard = "secret"
+    expander.clear_managed_clipboard(expected_text="secret", generation=1)
+
+    deadline = time.time() + 5
+    while len(attempts) < ku.CLIPBOARD_CLEAR_RETRY_ATTEMPTS and time.time() < deadline:
+        time.sleep(0.01)
+
+    expander.cancel_clipboard_timer()
+    assert len(attempts) == ku.CLIPBOARD_CLEAR_RETRY_ATTEMPTS
+    # The snippet is still tracked, so shutdown can make one final attempt
+    assert expander.last_managed_clipboard == "secret"
 
 def test_clear_managed_clipboard_callsempty_clipboard(dummy_pynput, monkeypatch):
     """Verify that clear_managed_clipboard() uses the appropriate clipboard clearing method."""

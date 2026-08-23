@@ -1,21 +1,201 @@
 import logging
+import os
 import platform
 import pyperclip
 import re
 import datetime
+import struct
 import threading
 import time
 from functools import lru_cache
 
 from utils.snippet_db import SnippetDB
 
+IS_WINDOWS = platform.system() == "Windows"
+
 # Windows clipboard API via pywin32
-if platform.system() == "Windows":
+if IS_WINDOWS:
     import win32clipboard
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TRIGGER_TIMEOUT_SECONDS = 5.0
+
+IS_MACOS = platform.system() == "Darwin"
+IS_LINUX = platform.system() == "Linux"
+
+# macOS. Clipboard managers following the NSPasteboard convention skip any
+# pasteboard item that also carries this type. The value is irrelevant; the
+# presence of the type is the signal.
+MACOS_CONCEALED_PASTEBOARD_TYPE = "org.nspasteboard.ConcealedType"
+MACOS_STRING_PASTEBOARD_TYPE = "public.utf8-plain-text"
+
+# Linux. KDE Klipper, and the clipboard managers that follow it, skip a
+# clipboard offer that also advertises this MIME type.
+LINUX_PASSWORD_HINT_MIME = "x-kde-passwordManagerHint"
+LINUX_PASSWORD_HINT_VALUE = b"secret"
+
+# How long a worker thread waits for the Qt GUI thread to finish a clipboard
+# write before giving up and falling back to pyperclip.
+QT_CLIPBOARD_TIMEOUT_SECONDS = 2.0
+
+# Cache for backend probes that cannot change during a run (an absent import
+# stays absent). Probes that can change, such as whether a QApplication exists
+# yet, are re-checked on every copy.
+clipboard_backend_probe: dict[str, object] = {}
+
+
+def load_macos_pasteboard_api():
+    """
+    Resolve the AppKit NSPasteboard API used for concealed pasteboard writes.
+
+    pyobjc is optional. When it is missing the caller falls back to pyperclip,
+    which still copies correctly but cannot mark the entry as concealed.
+
+    Returns:
+        tuple | None: (NSPasteboard class, string type) or None when unavailable.
+    """
+    if "macos" in clipboard_backend_probe:
+        return clipboard_backend_probe["macos"]
+
+    api = None
+    if IS_MACOS:
+        try:
+            from AppKit import NSPasteboard
+
+            try:
+                from AppKit import NSPasteboardTypeString as string_type
+            except Exception:
+                string_type = MACOS_STRING_PASTEBOARD_TYPE
+            api = (NSPasteboard, string_type)
+        except Exception as e:
+            logger.info(
+                "AppKit/pyobjc unavailable (%s); macOS clipboard falls back to pyperclip", e
+            )
+    clipboard_backend_probe["macos"] = api
+    return api
+
+
+def get_linux_session_type() -> str:
+    """
+    Detect the graphical session type on Linux.
+
+    Returns:
+        str: "wayland", "x11", or "none" when no graphical session is present.
+    """
+    session = (os.environ.get("XDG_SESSION_TYPE") or "").strip().lower()
+    if session in ("wayland", "x11"):
+        return session
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return "wayland"
+    if os.environ.get("DISPLAY"):
+        return "x11"
+    return "none"
+
+
+def load_qt_clipboard_api():
+    """
+    Resolve the Qt classes needed for a MIME-aware clipboard write.
+
+    The QApplication instance is looked up fresh each call because it may not
+    exist yet the first time a snippet is expanded.
+
+    Returns:
+        tuple | None: (app, QMimeData, QTimer) or None when Qt is unusable.
+    """
+    try:
+        from PySide6.QtCore import QMimeData, QTimer
+        from PySide6.QtWidgets import QApplication
+    except Exception as e:
+        logger.info("PySide6 clipboard API unavailable (%s)", e)
+        return None
+
+    app = QApplication.instance()
+    if app is None:
+        logger.info("No running QApplication; clipboard falls back to pyperclip")
+        return None
+    return app, QMimeData, QTimer
+
+
+# Windows only. Another process can hold the clipboard open for short periods,
+# which makes OpenClipboard fail with ERROR_ACCESS_DENIED. Retry briefly.
+CLIPBOARD_OPEN_ATTEMPTS = 12
+CLIPBOARD_OPEN_RETRY_SECONDS = 0.05
+
+# When a scheduled clear cannot reach the clipboard, re-arm rather than giving
+# up, otherwise the snippet stays on the clipboard indefinitely.
+CLIPBOARD_CLEAR_RETRY_ATTEMPTS = 6
+CLIPBOARD_CLEAR_RETRY_SECONDS = 1.0
+
+# Windows shell clipboard formats that opt a clipboard entry out of clipboard
+# history (Win+V) and Cloud Clipboard sync. They only take effect when set in
+# the same OpenClipboard session that sets the text, so snippets have to be
+# copied through win32clipboard rather than pyperclip on Windows.
+WINDOWS_PRIVATE_CLIPBOARD_FORMATS = (
+    "ExcludeClipboardContentFromMonitorProcessing",
+    "CanIncludeInClipboardHistory",
+    "CanUploadToCloudClipboard",
+)
+
+windows_clipboard_format_ids: dict[str, int | None] = {}
+
+
+def get_windows_clipboard_format_id(name: str) -> int | None:
+    """
+    Resolve and cache a registered Windows clipboard format id.
+
+    Args:
+        name (str): The clipboard format name to register.
+
+    Returns:
+        int | None: The format id, or None when registration failed.
+    """
+    if name in windows_clipboard_format_ids:
+        return windows_clipboard_format_ids[name]
+    try:
+        format_id = win32clipboard.RegisterClipboardFormat(name)
+    except Exception:
+        logger.exception("Failed to register clipboard format %s", name)
+        format_id = None
+    windows_clipboard_format_ids[name] = format_id
+    return format_id
+
+
+def open_clipboard_windows() -> bool:
+    """
+    Open the Windows clipboard, retrying while another process holds it.
+
+    Returns:
+        bool: True when the clipboard was opened and must be closed by the caller.
+    """
+    last_error = None
+    for attempt in range(CLIPBOARD_OPEN_ATTEMPTS):
+        try:
+            win32clipboard.OpenClipboard()
+            return True
+        except Exception as e:
+            last_error = e
+            if attempt < CLIPBOARD_OPEN_ATTEMPTS - 1:
+                time.sleep(CLIPBOARD_OPEN_RETRY_SECONDS)
+    logger.warning(
+        "Could not open the Windows clipboard after %s attempts: %s",
+        CLIPBOARD_OPEN_ATTEMPTS,
+        last_error,
+    )
+    return False
+
+
+def close_clipboard_windows() -> None:
+    """
+    Close the Windows clipboard handle, logging but swallowing failures.
+
+    Returns:
+        None
+    """
+    try:
+        win32clipboard.CloseClipboard()
+    except Exception:
+        logger.exception("Failed to close Windows clipboard handle")
 
 _DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*$")
 
@@ -217,6 +397,7 @@ class SnippetExpander:
         self.trigger_prefixes: set = set()  # first character of every enabled trigger
         self.vault_unlock_callback = None  # Callable[[trigger, entry, style, return_press], None]
         self.trigger_detected_callback = None  # Callable[[prefix_char, timeout_seconds], None]
+        self.clipboard_cleared_callback = None  # Callable[[], None]
         self.dynamic_placeholder_callback = None  # Callable[[trigger, entry, style, return_press], None]
         self.vault_folder_set: set = set()  # paths of vault-protected folders
 
@@ -495,59 +676,270 @@ class SnippetExpander:
                 self.clipboard_timer.cancel()
                 self.clipboard_timer = None
 
-    def empty_clipboard_windows(self) -> None:
+    def copy_clipboard_windows(self, text: str) -> bool:
+        """
+        Copy text on Windows while opting out of clipboard history and cloud sync.
+
+        The exclusion markers only apply to the clipboard entry created in the
+        same OpenClipboard session, so the text and the markers are written
+        together here instead of going through pyperclip.
+
+        Args:
+            text (str): The text to place on the clipboard.
+
+        Returns:
+            bool: True when the private copy succeeded.
+        """
+        if not open_clipboard_windows():
+            return False
+        try:
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+            for name in WINDOWS_PRIVATE_CLIPBOARD_FORMATS:
+                format_id = get_windows_clipboard_format_id(name)
+                if format_id is None:
+                    continue
+                try:
+                    win32clipboard.SetClipboardData(format_id, struct.pack("<I", 0))
+                except Exception:
+                    # A missing marker degrades privacy but must not break the paste.
+                    logger.warning("Could not apply clipboard format %s", name)
+            logger.debug("Snippet copied with clipboard history exclusion markers")
+            return True
+        except Exception:
+            logger.exception("Private Windows clipboard copy failed")
+            return False
+        finally:
+            close_clipboard_windows()
+
+    def copy_clipboard_macos(self, text: str) -> bool:
+        """
+        Copy text on macOS while marking the pasteboard item as concealed.
+
+        Clipboard managers that honor the NSPasteboard convention skip items
+        carrying org.nspasteboard.ConcealedType. Requires pyobjc; without it
+        the caller falls back to pyperclip.
+
+        Args:
+            text (str): The text to place on the clipboard.
+
+        Returns:
+            bool: True when the concealed copy succeeded and read back intact.
+        """
+        api = load_macos_pasteboard_api()
+        if api is None:
+            return False
+
+        pasteboard_cls, string_type = api
+        pasteboard = pasteboard_cls.generalPasteboard()
+        if pasteboard is None:
+            logger.warning("No general pasteboard available")
+            return False
+
+        pasteboard.declareTypes_owner_([string_type, MACOS_CONCEALED_PASTEBOARD_TYPE], None)
+        if not pasteboard.setString_forType_(text, string_type):
+            logger.warning("Pasteboard rejected the snippet text")
+            return False
+        if not pasteboard.setString_forType_("", MACOS_CONCEALED_PASTEBOARD_TYPE):
+            # A missing marker degrades privacy but must not break the paste.
+            logger.warning("Could not mark the pasteboard item as concealed")
+
+        if pasteboard.stringForType_(string_type) != text:
+            logger.warning("Pasteboard read-back mismatch; falling back")
+            return False
+        logger.debug("Snippet copied to the macOS pasteboard as a concealed item")
+        return True
+
+    def copy_clipboard_linux(self, text: str) -> bool:
+        """
+        Copy text on Linux while advertising the password-manager MIME hint.
+
+        Qt is used rather than pyperclip because the hint has to be offered on
+        the same clipboard offer as the text, which the xclip/xsel helpers
+        pyperclip shells out to cannot do. The write is marshalled onto the GUI
+        thread, since QClipboard may only be touched there.
+
+        Args:
+            text (str): The text to place on the clipboard.
+
+        Returns:
+            bool: True when the hinted copy succeeded.
+        """
+        session = get_linux_session_type()
+        if session == "none":
+            logger.info("No graphical session detected; clipboard falls back to pyperclip")
+            return False
+
+        api = load_qt_clipboard_api()
+        if api is None:
+            return False
+        app, mime_cls, timer_cls = api
+
+        done = threading.Event()
+        outcome = {"ok": False}
+
+        def write_clipboard() -> None:
+            try:
+                mime = mime_cls()
+                mime.setText(text)
+                mime.setData(LINUX_PASSWORD_HINT_MIME, LINUX_PASSWORD_HINT_VALUE)
+                app.clipboard().setMimeData(mime)
+                outcome["ok"] = True
+            except Exception:
+                logger.exception("Qt clipboard write failed")
+            finally:
+                done.set()
+
+        if threading.current_thread() is threading.main_thread():
+            write_clipboard()
+        else:
+            # Passing app as the context object runs the callable on the GUI thread.
+            timer_cls.singleShot(0, app, write_clipboard)
+            if not done.wait(QT_CLIPBOARD_TIMEOUT_SECONDS):
+                logger.warning("Qt clipboard write timed out after %ss", QT_CLIPBOARD_TIMEOUT_SECONDS)
+                return False
+
+        if outcome["ok"]:
+            logger.debug("Snippet copied with the %s hint (%s session)", LINUX_PASSWORD_HINT_MIME, session)
+        return outcome["ok"]
+
+    def get_private_copy_handler(self):
+        """
+        Pick the platform handler that copies without leaking to clipboard history.
+
+        Returns:
+            tuple | None: (description, callable) or None when the platform has no
+            private copy path and pyperclip should be used directly.
+        """
+        if IS_WINDOWS:
+            return "Windows clipboard history exclusion", self.copy_clipboard_windows
+        if IS_MACOS:
+            return "macOS concealed pasteboard", self.copy_clipboard_macos
+        if IS_LINUX:
+            return "Linux password-manager clipboard hint", self.copy_clipboard_linux
+        logger.debug("Unrecognized platform %r; using pyperclip", platform.system())
+        return None
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """
+        Copy snippet text to the clipboard using the best method for the platform.
+
+        Each platform gets a copy path that asks the OS and any clipboard manager
+        not to retain the entry: clipboard history and Cloud Clipboard exclusion on
+        Windows, a concealed pasteboard item on macOS, and the password-manager MIME
+        hint on Linux. If the platform is not recognized, its API is unavailable, or
+        the write fails for any reason, the copy falls back to pyperclip so the
+        snippet still pastes.
+
+        Args:
+            text (str): The text to place on the clipboard.
+
+        Returns:
+            None
+        """
+        handler = self.get_private_copy_handler()
+        if handler is not None:
+            label, copy_privately = handler
+            try:
+                if copy_privately(text):
+                    return
+            except Exception:
+                logger.exception("%s failed", label)
+            logger.warning("%s unavailable; falling back to pyperclip", label)
+        pyperclip.copy(text)
+
+    def empty_clipboard_windows(self) -> bool:
         """
         Empty clipboard on Windows using pywin32.
 
         Uses win32clipboard API and always closes the clipboard handle
         to avoid locking it for other applications.
-        
-        Returns:
-            None
-        """
-        opened = False
-        try:
-            win32clipboard.OpenClipboard()
-            opened = True
-            win32clipboard.EmptyClipboard()
-            logger.debug("Active clipboard cleared via win32clipboard.EmptyClipboard()")
-        except Exception as e:
-            logger.warning("win32clipboard clear failed: %s; falling back to pyperclip", e)
-            try:
-                pyperclip.copy("")
-            except Exception:
-                logger.exception("pyperclip fallback also failed")
-        finally:
-            if opened:
-                try:
-                    win32clipboard.CloseClipboard()
-                except Exception:
-                    logger.exception("Failed to close Windows clipboard handle")
 
-    def empty_clipboard_generic(self) -> None:
+        Returns:
+            bool: True when the clipboard was emptied.
+        """
+        if open_clipboard_windows():
+            try:
+                win32clipboard.EmptyClipboard()
+                logger.debug("Active clipboard cleared via win32clipboard.EmptyClipboard()")
+                return True
+            except Exception as e:
+                logger.warning("win32clipboard clear failed: %s; falling back to pyperclip", e)
+            finally:
+                close_clipboard_windows()
+
+        try:
+            pyperclip.copy("")
+            return True
+        except Exception:
+            logger.exception("pyperclip fallback also failed")
+            return False
+
+    def empty_clipboard_generic(self) -> bool:
         """
         Empty clipboard using cross-platform method.
-        
+
         Returns:
-            None
+            bool: True when the clipboard was emptied.
         """
         try:
             pyperclip.copy("")
             logger.debug("Clipboard cleared")
+            return True
         except Exception:
             logger.exception("Failed to clear clipboard")
+            return False
 
-    def empty_clipboard(self) -> None:
+    def empty_clipboard_macos(self) -> bool:
+        """
+        Empty the macOS pasteboard via AppKit, dropping the concealed item.
+
+        Returns:
+            bool: True when the pasteboard was cleared.
+        """
+        api = load_macos_pasteboard_api()
+        if api is None:
+            return False
+        pasteboard_cls, _string_type = api
+        try:
+            pasteboard = pasteboard_cls.generalPasteboard()
+            if pasteboard is None:
+                return False
+            pasteboard.clearContents()
+            logger.debug("Pasteboard cleared via NSPasteboard.clearContents()")
+            return True
+        except Exception:
+            logger.exception("NSPasteboard clear failed")
+            return False
+
+    def empty_clipboard(self) -> bool:
         """
         Empty the clipboard using the most appropriate method for the platform.
-        
+
+        Every platform-specific path falls through to the pyperclip clear when it
+        is unavailable or fails, so an unrecognized platform still gets cleaned up.
+
         Returns:
-            None
+            bool: True when the clipboard was emptied.
         """
-        if platform.system() == "Windows":
-            self.empty_clipboard_windows()
-        else:
-            self.empty_clipboard_generic()
+        if IS_WINDOWS:
+            return self.empty_clipboard_windows()
+        if IS_MACOS and self.empty_clipboard_macos():
+            return True
+        return self.empty_clipboard_generic()
+
+    def read_clipboard(self) -> tuple[bool, str]:
+        """
+        Read the current clipboard text without raising.
+
+        Returns:
+            tuple[bool, str]: Whether the read succeeded, and the text read.
+        """
+        try:
+            return True, pyperclip.paste()
+        except Exception as e:
+            logger.warning("Could not read the clipboard: %s", e)
+            return False, ""
 
     def schedule_clipboard_clear(self, expected_text: str) -> None:
         """
@@ -555,7 +947,7 @@ class SnippetExpander:
 
         Args:
             expected_text (str): The clipboard content to clear if unchanged.
-        
+
         Returns:
             None
         """
@@ -571,34 +963,67 @@ class SnippetExpander:
                 logger.info("Clipboard cleanup disabled by settings")
                 return
 
-            timer = threading.Timer(
-                timeout_seconds,
-                self.clear_managed_clipboard,
-                kwargs={
-                    "expected_text": expected_text,
-                    "generation": generation,
-                    "force": False,
-                },
+            self.arm_clipboard_timer(
+                delay_seconds=timeout_seconds,
+                expected_text=expected_text,
+                generation=generation,
+                attempt=0,
             )
-            timer.daemon = True
-            self.clipboard_timer = timer
-            timer.start()
             logger.debug("Scheduled clipboard cleanup in %s seconds", timeout_seconds)
+
+    def arm_clipboard_timer(
+        self,
+        delay_seconds: float,
+        expected_text: str | None,
+        generation: int,
+        attempt: int,
+    ) -> None:
+        """
+        Start the clipboard cleanup timer. Callers must hold clipboard_lock.
+
+        Args:
+            delay_seconds (float): Delay before the cleanup runs.
+            expected_text (str | None): Expected clipboard content.
+            generation (int): Clipboard generation token.
+            attempt (int): Zero-based retry attempt for this generation.
+
+        Returns:
+            None
+        """
+        timer = threading.Timer(
+            delay_seconds,
+            self.clear_managed_clipboard,
+            kwargs={
+                "expected_text": expected_text,
+                "generation": generation,
+                "force": False,
+                "attempt": attempt,
+            },
+        )
+        timer.daemon = True
+        self.clipboard_timer = timer
+        timer.start()
 
     def clear_managed_clipboard(
         self,
         expected_text: str | None = None,
         generation: int | None = None,
         force: bool = False,
+        attempt: int = 0,
     ) -> None:
         """
         Clear clipboard content managed by snippet expansion.
+
+        When the clipboard cannot be reached, the cleanup is retried instead of
+        being abandoned, so a clipboard briefly locked by another application
+        does not leave snippet content behind.
 
         Args:
             expected_text (str | None): Expected clipboard content.
             generation (int | None): Clipboard generation token.
             force (bool): When True, clear regardless of current clipboard text.
-        
+            attempt (int): Zero-based retry attempt for this generation.
+
         Returns:
             None
         """
@@ -607,20 +1032,97 @@ class SnippetExpander:
                 if generation is not None and generation != self.clipboard_generation:
                     return
 
-            current_text = ""
             if not force:
-                current_text = pyperclip.paste()
+                readable, current_text = self.read_clipboard()
+                if not readable:
+                    self.retry_clipboard_clear(expected_text, generation, attempt)
+                    return
                 if expected_text is not None and current_text != expected_text:
                     logger.debug("Clipboard changed since expansion. Skipping cleanup.")
+                    self.reset_clipboard_state(generation)
                     return
 
-            self.empty_clipboard()
-            with self.clipboard_lock:
-                self.last_managed_clipboard = None
-                self.clipboard_timer = None
+            if not self.empty_clipboard():
+                self.retry_clipboard_clear(expected_text, generation, attempt)
+                return
+
+            self.reset_clipboard_state(generation)
             logger.info("Managed clipboard content cleared")
+            self.notify_clipboard_cleared()
         except Exception:
             logger.exception("Failed to clear managed clipboard content")
+
+    def notify_clipboard_cleared(self) -> None:
+        """
+        Tell the UI that managed clipboard content was cleared.
+
+        Runs on the cleanup timer thread, so the callback is responsible for
+        hopping to the GUI thread.
+
+        Returns:
+            None
+        """
+        if not callable(self.clipboard_cleared_callback):
+            return
+        try:
+            self.clipboard_cleared_callback()
+        except Exception:
+            logger.exception("clipboard_cleared_callback raised")
+
+    def reset_clipboard_state(self, generation: int | None) -> None:
+        """
+        Drop the tracked clipboard content unless a newer expansion took over.
+
+        Args:
+            generation (int | None): Clipboard generation token being retired.
+
+        Returns:
+            None
+        """
+        with self.clipboard_lock:
+            if generation is None or generation == self.clipboard_generation:
+                self.last_managed_clipboard = None
+                self.clipboard_timer = None
+
+    def retry_clipboard_clear(
+        self,
+        expected_text: str | None,
+        generation: int | None,
+        attempt: int,
+    ) -> None:
+        """
+        Re-arm clipboard cleanup after a failed attempt.
+
+        Args:
+            expected_text (str | None): Expected clipboard content.
+            generation (int | None): Clipboard generation token.
+            attempt (int): Zero-based attempt that just failed.
+
+        Returns:
+            None
+        """
+        if generation is None or attempt + 1 >= CLIPBOARD_CLEAR_RETRY_ATTEMPTS:
+            logger.error(
+                "Giving up on clipboard cleanup after %s attempts; "
+                "snippet content may remain on the clipboard",
+                attempt + 1,
+            )
+            return
+
+        with self.clipboard_lock:
+            if generation != self.clipboard_generation:
+                return
+            self.arm_clipboard_timer(
+                delay_seconds=CLIPBOARD_CLEAR_RETRY_SECONDS,
+                expected_text=expected_text,
+                generation=generation,
+                attempt=attempt + 1,
+            )
+        logger.warning(
+            "Clipboard cleanup attempt %s failed; retrying in %s seconds",
+            attempt + 1,
+            CLIPBOARD_CLEAR_RETRY_SECONDS,
+        )
 
     @lru_cache(maxsize=256)
     def load_snippet_by_trigger(self, trigger: str) -> dict:
@@ -971,8 +1473,11 @@ class SnippetExpander:
 
         Audit 3.5: Spawns a background thread to copy the snippet to the
         clipboard and simulate the paste shortcut, so the keyboard listener
-        thread is not held while pyperclip.copy() completes. The background
-        thread re-enables event processing (self.disabled) when done.
+        thread is not held while the copy completes. The background thread
+        re-enables event processing (self.disabled) when done.
+
+        The copy goes through copy_to_clipboard(), which on Windows keeps the
+        snippet out of clipboard history (Win+V) and Cloud Clipboard.
 
         Args:
             snippet (str): The snippet text to insert.
@@ -985,7 +1490,7 @@ class SnippetExpander:
 
         def copy_and_paste() -> None:
             try:
-                pyperclip.copy(snippet)
+                self.copy_to_clipboard(snippet)
                 self.schedule_clipboard_clear(snippet)
                 # Brief pause to ensure the clipboard is populated before pasting
                 time.sleep(0.05)
@@ -1263,11 +1768,13 @@ class SnippetExpander:
         """
         logger.info("Stopping SnippetExpander listener")
         self.cancel_clipboard_timer()
-        self.clear_managed_clipboard(
-            expected_text=self.last_managed_clipboard,
-            generation=self.clipboard_generation,
-            force=True,
-        )
+        if self.last_managed_clipboard:
+            # Clear on the way out, but only when the clipboard still holds the
+            # snippet we put there; the user's own clipboard is left intact.
+            self.clear_managed_clipboard(
+                expected_text=self.last_managed_clipboard,
+                generation=self.clipboard_generation,
+            )
         self.clear_buffer()
         self.listener.stop()
 

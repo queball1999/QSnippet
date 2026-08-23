@@ -11,5 +11,9 @@ cryptography
 # Windows-only
 pywin32; sys_platform == "win32"
 
+# macOS only (optional: marks pasteboard items as concealed so clipboard
+# managers skip them; the app falls back to pyperclip when it is absent)
+pyobjc-framework-Cocoa; sys_platform == "darwin"
+
 # Linux only
 evdev; sys_platform == "linux" and platform_system != "Darwin"
