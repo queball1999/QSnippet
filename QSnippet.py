@@ -1053,7 +1053,14 @@ class main():
         """
         try:
             vault_cfg = self.config.get("vault", {})
-            crypto_keys = ("configured", "salt", "hmac", "rec_wrapped_key", "rec_salt")
+            # These must match the keys VaultManager.setup actually writes.
+            # They previously named "hmac" and "rec_wrapped_key", which do not
+            # exist, so a fresh database dropped the salt but left the verifier
+            # and recovery material behind as orphaned crypto.
+            crypto_keys = (
+                "configured", "salt", "verifier",
+                "rec_salt", "rec_verifier", "rec_key_blob",
+            )
             if any(vault_cfg.get(k) for k in crypto_keys):
                 for k in crypto_keys:
                     vault_cfg.pop(k, None)
