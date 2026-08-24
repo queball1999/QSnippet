@@ -10,10 +10,10 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set Up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: 'pip'
@@ -26,7 +26,7 @@ jobs:
           flake8 . --exit-zero --format=default | tee flake8-report.txt
 
       - name: Upload Flake8 Lint Report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: flake8-report
           path: flake8-report.txt
