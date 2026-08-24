@@ -7,8 +7,17 @@ on:
   workflow_call:
 
 jobs:
+  # The updater is built first: its SHA-256 has to be stamped into QSnippet
+  # build_info.py so QSnippet can verify the binary before launching it.
+  build-updater:
+    uses: ./.github/workflows/build_updater.yaml
+    with:
+      os: ubuntu-latest
+      artifact-name: updater-linux
+
   build-linux:
     runs-on: ubuntu-latest
+    needs: build-updater
 
     steps:
       - name: Checkout repository
@@ -46,8 +55,41 @@ jobs:
           VERSION=$(python3 -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Download branded updater
+        uses: actions/download-artifact@v8
+        with:
+          name: updater-linux
+          path: output/linux
+
+      - name: Verify the updater hash
+        run: |
+          set -e
+          chmod +x output/linux/updater
+          expected="${{ needs.build-updater.outputs.sha256 }}"
+          actual=$(sha256sum output/linux/updater | cut -d" " -f1)
+          echo "Expected: $expected"
+          echo "Actual:   $actual"
+          # Re-hash the artifact; don't trust the value passed between jobs.
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::Updater hash mismatch between build and package steps"
+            exit 1
+          fi
+          echo "UPDATER_SHA256=$actual" >> "$GITHUB_ENV"
+
       - name: Build Linux binary (PyInstaller)
         run: xvfb-run -a bash ./tools/build.sh
+        env:
+          # Stamped into config/build_info.py as UPDATER_SHA256.
+          UPDATER_SHA256: ${{ env.UPDATER_SHA256 }}
+
+      - name: Confirm the updater hash was stamped
+        run: |
+          if ! grep -Eq 'UPDATER_SHA256 = "[0-9a-f]{64}"' config/build_info.py; then
+            echo "::error::build_info.py is missing a valid UPDATER_SHA256 stamp"
+            cat config/build_info.py
+            exit 1
+          fi
+          echo "build_info.py carries the updater hash"
 
       - name: Package .deb
         run: bash ./tools/package-deb.sh
@@ -70,7 +112,8 @@ jobs:
             /opt/QSnippet/assets/icons/icon_128x128.png \
             /opt/QSnippet/assets/images \
             /usr/bin/qsnippet \
-            /usr/share/applications/qsnippet.desktop
+            /usr/share/applications/qsnippet.desktop \
+            /opt/QSnippet/updater
           do
             if [ ! -e "$path" ]; then
               echo "MISSING: $path"

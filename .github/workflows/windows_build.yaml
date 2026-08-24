@@ -7,8 +7,17 @@ on:
   workflow_call:
 
 jobs:
+  # The updater is built first: its SHA-256 has to be stamped into QSnippet
+  # build_info.py so QSnippet can verify the binary before launching it.
+  build-updater:
+    uses: ./.github/workflows/build_updater.yaml
+    with:
+      os: windows-latest
+      artifact-name: updater-windows
+
   build-windows:
     runs-on: windows-latest
+    needs: build-updater
 
     steps:
       - name: Checkout repository
@@ -28,9 +37,43 @@ jobs:
         run: python tools/versioning.py
         # Sets env.APP_VERSION for later steps
 
+      - name: Download branded updater
+        uses: actions/download-artifact@v8
+        with:
+          name: updater-windows
+          path: output/windows
+
+      - name: Verify the updater hash
+        shell: pwsh
+        run: |
+          # Re-hash the artifact; don't trust the value passed between jobs.
+          $expected = "${{ needs.build-updater.outputs.sha256 }}"
+          $actual = (Get-FileHash "output/windows/updater.exe" -Algorithm SHA256).Hash.ToLower()
+          Write-Host "Expected: $expected"
+          Write-Host "Actual:   $actual"
+          if ($actual -ne $expected.ToLower()) {
+            Write-Error "Updater hash mismatch between build and package steps"
+            exit 1
+          }
+          "UPDATER_SHA256=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build Windows binaries (PyInstaller)
         run: tools/build.ps1
         shell: powershell
+        env:
+          # Stamped into config/build_info.py as UPDATER_SHA256.
+          UPDATER_SHA256: ${{ env.UPDATER_SHA256 }}
+
+      - name: Confirm the updater hash was stamped
+        shell: pwsh
+        run: |
+          $content = Get-Content config/build_info.py -Raw
+          if ($content -notmatch 'UPDATER_SHA256 = "[0-9a-f]{64}"') {
+            Write-Error "build_info.py is missing a valid UPDATER_SHA256 stamp"
+            Write-Host $content
+            exit 1
+          }
+          Write-Host "build_info.py carries the updater hash"
 
       - name: Update Inno Setup version
         run: |

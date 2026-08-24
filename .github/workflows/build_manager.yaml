@@ -1,18 +1,84 @@
 name: Build Manager
 
 # Tag convention:
-#   v*.*.*-release  →  full pipeline (pytest → linux + windows → unified release)
+#   v*.*.*-release  →  full pipeline, stable release (must be cut from main)
+#   v*.*.*-dev      →  full pipeline, Dev-channel prerelease (any branch)
 #   v*.*.*-linux    →  linux standalone build only
 #   v*.*.*-windows  →  windows standalone build only
+#
+# Dev releases are marked prerelease:true and stay invisible by default; a
+# user must opt into the Dev channel in Settings to ever see them.
 
 on:
   push:
     tags:
       - "v*.*.*-release"
+      - "v*.*.*-dev"
   workflow_dispatch:
 
 jobs:
+  # Classifies the tag's channel, and for a release tag, enforces it was
+  # cut from main; a dev build may come from any branch.
+  guard:
+    runs-on: ubuntu-latest
+
+    outputs:
+      channel: ${{ steps.classify.outputs.channel }}
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      release_name: ${{ steps.classify.outputs.release_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history: reachability check needs the real commit graph.
+          fetch-depth: 0
+
+      - name: Classify tag and set channel
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${{ github.ref_name }}"
+
+          if [[ "$tag" == *-release ]]; then
+            channel="release"
+            prerelease="false"
+            release_name="QSnippet $tag"
+          elif [[ "$tag" == *-dev ]]; then
+            channel="dev"
+            prerelease="true"
+            release_name="QSnippet $tag (Dev build)"
+          else
+            echo "::error::Unrecognised tag suffix: $tag"
+            exit 1
+          fi
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+
+          echo "Tag $tag classified as the $channel channel"
+
+      - name: Require release tags to come from main
+        if: steps.classify.outputs.channel == 'release'
+        run: |
+          set -euo pipefail
+
+          git fetch origin main --quiet
+
+          if git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "OK: $(git rev-parse --short ${{ github.sha }}) is reachable from main"
+          else
+            echo "::error::v*.*.*-release tags must be cut from a commit on main. " \
+                 "$(git rev-parse --short ${{ github.sha }}) is not reachable from origin/main. " \
+                 "Use a v*.*.*-dev tag to publish a build from another branch."
+            exit 1
+          fi
+
   test:
+    needs: guard
     runs-on: ubuntu-latest
 
     steps:
@@ -44,7 +110,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows]
+    needs: [guard, build-linux, build-windows]
 
     steps:
       - name: Checkout repository
@@ -84,7 +150,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: QSnippet ${{ github.ref_name }}
+          name: ${{ needs.guard.outputs.release_name }}
+          prerelease: ${{ needs.guard.outputs.prerelease }}
           generate_release_notes: true
           files: |
             dist/**/*.exe
