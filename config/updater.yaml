@@ -1,0 +1,105 @@
+# QSnippet updater configuration.
+#
+# Dual purpose: CI passes it to QUpdateTool's build_branded.py at build time
+# (compiled into updater.exe), and QSnippet passes it with --config at run
+# time, so a source checkout behaves like a released build.
+#
+# IMPORTANT: in a released build, `source:` and `security:` are LOCKED into
+# updater.exe at build time; editing this file afterward has no effect. That
+# stops an edited YAML from repointing a shipped binary at another host or
+# key. See QUpdateTool2.0/docs/SECURITY.md.
+
+app:
+  name: QSnippet
+  publisher: Quynn Bell
+  support_url: https://qsnippet.com
+  process_names:
+    - QSnippet.exe
+    - QSnippet
+
+source:
+  provider: github
+  repo: queball1999/QSnippet
+  channel: stable
+  # The pipeline pushes -windows and -linux standalone build tags alongside
+  # the real -release tags; only the latter are complete, signed releases.
+  tag_pattern: "-release$"
+  timeout: 30
+  retries: 3
+  verify_tls: true
+
+assets:
+  # Automatic platform detection. One file serves every platform:
+  #   Windows        -> QSnippet-*-windows-installer.exe
+  #   Debian/Ubuntu  -> QSnippet_*_amd64.deb
+  #   Fedora/RHEL    -> the .rpm once the pipeline publishes one
+  #   AppImage       -> the .AppImage when running from one
+  #   macOS          -> the .dmg once the pipeline publishes one
+  preference: []
+  # The portable zip is not an upgrade path for an installed copy.
+  exclude_pattern: "portable"
+
+security:
+  require_signature: true
+  require_checksum: true
+  checksum_file: SHA256SUMS.txt
+  signature_suffixes: [".sig", ".asc"]
+
+  # A branded build has the key compiled in by CI (--key gpg-public.asc) and
+  # ignores this path. It is used only when running unbranded from source.
+  public_key_file: "gpg-public.asc"
+
+  # The QSnippet release signing key: the primary key and its signing subkey.
+  # Either may sign a given release, so both are listed.
+  allowed_fingerprints:
+    - 0E33B487E4193A20AB494B29F70C9E44B78E7B7C
+    - ECE5FCEFD34AE17664F1C6F897CDE457CD97410F
+
+  allow_gpg_fallback: true
+
+install:
+  # QSnippet asks the user before the updater is ever launched, so the
+  # installer does not need to ask a second time.
+  mode: silent
+  elevate: auto
+  installer_args:
+    # QSnippet ships an Inno Setup installer.
+    exe: ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"]
+    exe_interactive: []
+  keep_download: false
+
+process:
+  stop_parent: true
+  stop_timeout: 30
+  force_after_timeout: true
+  relaunch: true
+  wait_before_relaunch: 2
+
+notes:
+  # QSnippet publishes user-facing release notes as notices/*.yaml, which is
+  # exactly what the notices source reads.
+  source: auto
+  notices_dir: notices
+
+ui:
+  # Must stay false: background update checks run --quiet with nothing
+  # watching for a window; --gui is passed explicitly only to install.
+  gui: false
+  window_title: QSnippet Updater
+  accent_color: "#4C8BF5"
+  auto_close_seconds: 3
+
+logging:
+  level: INFO
+  # Empty on purpose: QSnippet passes --log-file pointing at its own log
+  # directory, so updater.log lands beside QSnippet.log.
+  file: ""
+
+# --- build-time only, ignored when this file is read as runtime config ---
+#
+# Locks elevate so it can't be forced to "always", training users to click
+# through UAC prompts. channel/tag_pattern stay unlocked on purpose: the
+# Settings channel toggle (utils/update_utils.py) only picks between the
+# same repo, host, and pinned key, never who is trusted to sign a release.
+lock:
+  - install.elevate

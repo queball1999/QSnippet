@@ -46,10 +46,16 @@ if (Test-Path $BUILD_DIR) {
 $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $GIT_COMMIT = git rev-parse --short HEAD 2>$null
 
+# Set by CI after the updater is built; QSnippet verifies updater.exe
+# against this hash before launching it. See utils/update_utils.py.
+$UPDATER_SHA256 = $env:UPDATER_SHA256
+if (-not $UPDATER_SHA256) { $UPDATER_SHA256 = "" }
+
 @"
 BUILD_VERSION = "$VERSION"
 BUILD_DATE = "$BUILD_DATE"
 BUILD_COMMIT = "$GIT_COMMIT"
+UPDATER_SHA256 = "$UPDATER_SHA256"
 "@ | Out-File config/build_info.py -Encoding utf8
 
 Write-Host "Generated build_info.py ($BUILD_DATE, commit $GIT_COMMIT)" -ForegroundColor Cyan

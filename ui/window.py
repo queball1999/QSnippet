@@ -15,7 +15,8 @@ if sys.platform != "win32":
 # Import PySide6 Modules
 from PySide6.QtWidgets import (
     QSystemTrayIcon, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
-    QMessageBox, QLabel, QPushButton
+    QMessageBox, QLabel, QPushButton, QGridLayout, QSpacerItem, QSizePolicy,
+    QProgressDialog, QDialog, QProgressBar
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt, QTimer, Signal, QEvent
@@ -32,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 # How long the transient "Clipboard cleared" status bar notice stays up.
 CLIPBOARD_CLEARED_MESSAGE_MS = 5000
+
+# Delay before the update-check progress dialog appears, so a fast check
+# never flashes a window and a slow one doesn't look like a dead menu item.
+UPDATE_PROGRESS_DELAY_MS = 400
+
+# Shared width for the update flow's dialogs, so they read as one family.
+UPDATE_DIALOG_WIDTH = 460
+
+# Wider: the "update available" box has a third button (Show Details) that
+# would otherwise clip at the shared width.
+UPDATE_DIALOG_WIDTH_DETAILED = 520
 
 
 
@@ -273,6 +285,7 @@ class QSnippet(QMainWindow):
         self.menubar.show_settings.connect(self.show_settings_window)
         self.menubar.showPlaceholderManager.connect(self.show_placeholder_manager)
         self.menubar.showTutorialRequested.connect(self.show_tutorial)
+        self.menubar.checkForUpdatesRequested.connect(self.handle_check_for_updates)
         self.setMenuBar(self.menubar)
 
         # Populate any already-saved custom placeholders into the menu
@@ -1536,6 +1549,273 @@ class QSnippet(QMainWindow):
     def handle_view_release_history(self) -> None:
         """Help menu action: open the read-only Release History viewer."""
         self.parent.show_release_history()
+
+    # ----- UPDATES -----
+
+    def widen_message_box(self, box: QMessageBox,
+                          width: int = UPDATE_DIALOG_WIDTH) -> None:
+        """
+        Give a QMessageBox a sensible minimum width.
+
+        QMessageBox ignores setMinimumWidth and clips button labels on a
+        narrow box; the fix is a zero-height spacer spanning the internal
+        grid layout to set a width floor. Width only; release notes use
+        UpdateAvailableDialog instead of a QMessageBox detail pane.
+
+        Args:
+            box (QMessageBox): The message box to size.
+            width (int): Minimum width at the reference resolution.
+
+        Returns:
+            None
+        """
+        try:
+            scaled_width = self.parent.scale_width(width, self.parent.screen_geometry)
+        except Exception:
+            # Scaling is a nicety; never let it stop the dialog appearing.
+            scaled_width = width
+
+        layout = box.layout()
+
+        if isinstance(layout, QGridLayout):
+            # Subtract margins so `width` means the finished dialog width,
+            # matching QProgressDialog given the same number.
+            margins = layout.contentsMargins()
+            content_width = max(1, scaled_width - margins.left() - margins.right())
+
+            # Fixed, not Expanding: this only sets a width floor and must
+            # not open a band of dead space once details are shown.
+            spacer = QSpacerItem(
+                content_width, 0, QSizePolicy.Minimum, QSizePolicy.Fixed
+            )
+            layout.addItem(spacer, layout.rowCount(), 0, 1, layout.columnCount())
+        else:
+            # Qt doesn't document the layout type; fall back rather than assume.
+            box.setMinimumWidth(scaled_width)
+
+
+
+    def handle_check_for_updates(self) -> None:
+        """
+        Help menu action: check for a newer release.
+
+        Unlike the silent preflight check on startup, this one always tells
+        the user the outcome, including "you are up to date", because they
+        explicitly asked and a silent no-op reads as a broken menu item.
+        """
+        from utils.update_utils import UpdateChecker
+
+        if getattr(self, "update_checker", None) and self.update_checker.isRunning():
+            logger.debug("An update check is already running")
+            self.statusBar().showMessage("Already checking for updates...", 5000)
+            return
+
+        # The startup checker is a separate instance the guard above can't
+        # see; check it too so a second, redundant check can't fire while
+        # the first is in flight.
+        startup_checker = getattr(self.parent, "startup_update_checker", None)
+        if startup_checker is not None and startup_checker.isRunning():
+            logger.debug("The startup update check is already running")
+            self.statusBar().showMessage("Already checking for updates...", 5000)
+            return
+
+        self.update_check_cancelled = False
+        self.statusBar().showMessage("Checking for updates...", 10000)
+
+        self.update_checker = UpdateChecker(self.parent, parent=self)
+        self.update_checker.finished_check.connect(self.on_update_check_finished)
+        self.update_checker.start()
+
+        self.start_update_progress()
+
+    def start_update_progress(self) -> None:
+        """
+        Arm the "Checking for updates" dialog, after a short delay.
+
+        The delay avoids flashing a dialog for a fast check while still
+        giving a slow one a progress window.
+
+        Returns:
+            None
+        """
+        self.update_progress = None
+
+        self.update_progress_timer = QTimer(self)
+        self.update_progress_timer.setSingleShot(True)
+        self.update_progress_timer.timeout.connect(self.show_update_progress)
+        self.update_progress_timer.start(UPDATE_PROGRESS_DELAY_MS)
+
+    def show_update_progress(self) -> None:
+        """
+        Show the indeterminate progress dialog for a running update check.
+
+        Returns:
+            None
+        """
+        checker = getattr(self, "update_checker", None)
+
+        # May have finished during the delay; nothing left to report.
+        if checker is None or not checker.isRunning():
+            return
+
+        dialog = QProgressDialog("Checking for updates...", "Cancel", 0, 0, self)
+        dialog.setWindowTitle("Check for Updates")
+        dialog.setWindowModality(Qt.WindowModal)
+
+        # Qt shows a QProgressDialog on its own schedule once setValue is
+        # called; this hands control back so show() below decides.
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.canceled.connect(self.cancel_update_check)
+
+        # Inherit the already-resolved window icon rather than rebuilding it.
+        dialog.setWindowIcon(self.windowIcon())
+
+        # Match the result dialogs this leads into.
+        try:
+            target_width = self.parent.scale_width(
+                UPDATE_DIALOG_WIDTH, self.parent.screen_geometry
+            )
+        except Exception:
+            target_width = UPDATE_DIALOG_WIDTH
+
+        dialog.setMinimumWidth(target_width)
+
+        dialog.setValue(0)
+        dialog.show()
+
+        # setMinimumWidth() alone doesn't force a real layout pass before the
+        # window manager commits to its initial (smaller) sizeHint on Windows.
+        dialog.resize(target_width, dialog.sizeHint().height())
+
+        # Belt and suspenders: widen the bar directly too, since it sits in
+        # QProgressDialog's own private layout. Margin is Qt's own default.
+        bar = dialog.findChild(QProgressBar)
+        if bar is not None:
+            margin = 11
+            bar.setMinimumWidth(max(0, target_width - 2 * margin))
+
+        self.update_progress = dialog
+
+    def close_update_progress(self) -> None:
+        """
+        Tear down the progress dialog and its pending timer.
+
+        Safe to call when neither exists, which is the normal case for a check
+        that finished before the dialog was ever shown.
+
+        Returns:
+            None
+        """
+        timer = getattr(self, "update_progress_timer", None)
+        if timer is not None:
+            timer.stop()
+
+        dialog = getattr(self, "update_progress", None)
+        if dialog is not None:
+            # Disconnect first: close() emits canceled(), which would
+            # otherwise mark a completed check as cancelled by the user.
+            try:
+                dialog.canceled.disconnect(self.cancel_update_check)
+            except (RuntimeError, TypeError):
+                pass
+
+            dialog.close()
+            dialog.deleteLater()
+            self.update_progress = None
+
+    def cancel_update_check(self) -> None:
+        """
+        Abandon a running update check at the user's request.
+
+        The updater process is left to finish on its own rather than killed
+        mid-flight; the result is just discarded.
+
+        Returns:
+            None
+        """
+        logger.info("User cancelled the update check")
+
+        self.update_check_cancelled = True
+        self.close_update_progress()
+        self.statusBar().showMessage("Update check cancelled", 5000)
+
+    def on_update_check_finished(self, info) -> None:
+        """Report the result of a user-requested update check."""
+        self.close_update_progress()
+        self.statusBar().clearMessage()
+
+        if getattr(self, "update_check_cancelled", False):
+            logger.debug("Discarding update check result; the user cancelled")
+            return
+
+        if not info.ok:
+            logger.warning("Update check reported an error: %s", info.error)
+
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Could not check for updates")
+            box.setTextFormat(Qt.RichText)
+            box.setText(
+                f"{info.error}"
+                "<br><br>You can download the latest version from "
+                "<a href='https://qsnippet.com'>qsnippet.com</a>."
+            )
+            # Without this the link renders as styled text that does nothing.
+            box.setTextInteractionFlags(
+                Qt.TextBrowserInteraction | Qt.TextSelectableByMouse
+            )
+            box.setStandardButtons(QMessageBox.Ok)
+            self.widen_message_box(box, UPDATE_DIALOG_WIDTH)
+            box.exec()
+            return
+
+        if not info.available:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Information)
+            box.setWindowTitle("No updates available")
+            box.setText(f"QSnippet {info.current_version} is the latest version.")
+            box.setStandardButtons(QMessageBox.Ok)
+            self.widen_message_box(box, UPDATE_DIALOG_WIDTH)
+            box.exec()
+            return
+
+        self.prompt_for_update(info)
+
+    def prompt_for_update(self, info) -> None:
+        """
+        Offer an available update, showing what changed.
+
+        Updates are never forced: declining leaves the running version
+        untouched. Both the startup and Help-menu check flows funnel here,
+        each with independent "checking..." feedback, so both are closed
+        unconditionally up front to leave nothing on screen behind this.
+        """
+        self.close_update_progress()
+        self.statusBar().clearMessage()
+
+        from utils.update_utils import launch_update
+
+        from .widgets import UpdateAvailableDialog
+
+        dialog = UpdateAvailableDialog(info, parent=self)
+
+        if dialog.exec() != QDialog.Accepted:
+            logger.info("User declined the update to %s", info.latest_version)
+            return
+
+        # Re-close before handing off to the updater's own window.
+        self.close_update_progress()
+
+        started, message = launch_update(self.parent, use_gui=True)
+
+        if not started:
+            QMessageBox.critical(self, "Could not start the update", message)
+            return
+
+        logger.info("Updater launched for version %s", info.latest_version)
+        self.statusBar().showMessage(message, 30000)
 
     def show_backup_links_dialog(self, title: str, intro: str, entries: list) -> None:
         """Show *entries* (each with timestamp/db_backup_path/export_path) as a

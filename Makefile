@@ -1,7 +1,18 @@
-.PHONY: run build build-deb clean help create-venv recreate-venv activate-venv
+.PHONY: run build build-deb updater test benchmark lint release clean help create-venv recreate-venv activate-venv
 
 MAIN := QSnippet.py
 VENV_DIR := .venv
+
+# Lets `make release v0.0.8-release` work: the tag is a second goal, which
+# make would otherwise try to build. Absorb it into TAG and give it a no-op
+# rule, but only when release is what was actually asked for, so a typo in
+# any other target still errors instead of silently succeeding.
+ifeq (release,$(firstword $(MAKECMDGOALS)))
+TAG ?= $(word 2,$(MAKECMDGOALS))
+ifneq ($(TAG),)
+$(eval $(TAG):;@:)
+endif
+endif
 
 ifeq ($(OS),Windows_NT)
 PYTHON := "c:\Python314\python.exe"
@@ -15,15 +26,23 @@ help:
 ifeq ($(OS),Windows_NT)
 	@echo Available targets:
 	@echo   make run            - Run the application
-	@echo   make build          - Build the application
+	@echo   make build          - Build the updater, binary and installer
+	@echo   make updater        - Build the branded updater into output\windows
+	@echo   make test           - Run the unit tests
+	@echo   make lint           - Run flake8 the way CI does
+	@echo   make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release
 	@echo   make clean          - Clean build artifacts
-	@echo   make create-venv    - Create .venv (if missing) and install dependencies
+	@echo   make create-venv    - Create .venv if missing and install dependencies
 	@echo   make recreate-venv  - Delete and rebuild .venv from scratch
 	@echo   make activate-venv  - Print the command to activate .venv
 else
 	@echo "Available targets:"
 	@echo "  make run            - Run the application"
-	@echo "  make build          - Build the application (PyInstaller binary + portable archive)"
+	@echo "  make build          - Build the application (updater + PyInstaller binary + portable archive)"
+	@echo "  make updater        - Build the branded updater into output/linux"
+	@echo "  make test           - Run the unit tests"
+	@echo "  make lint           - Run flake8 the way CI does"
+	@echo "  make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release"
 	@echo "  make build-deb      - Package a .deb from the build output (run after 'make build')"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make create-venv    - Create .venv (if missing) and install dependencies"
@@ -40,11 +59,44 @@ test:
 benchmark:
 	$(PYTHON) -m pytest --benchmark
 
+# The same two passes CI runs in pr_checks.yaml: blocking on real errors,
+# advisory on style.
+lint:
+	$(PYTHON) -m flake8 . --select=E9,F63,F7,F82 --show-source
+	$(PYTHON) -m flake8 . --exit-zero
+
+# Cut a release tag, after checking locally everything the pipeline checks
+# after the fact. See tools/release.py.
+#
+#   make release v0.0.8-release
+#   make release TAG=v0.0.8-dev
+#   make release v0.0.8-release DRY_RUN=1
+release:
+ifeq ($(TAG),)
+	@echo "Usage: make release v0.0.8-release   (suffix: release, dev, windows, linux)"
+	@exit 1
+else
+	@$(PYTHON) tools/release.py $(TAG) $(if $(DRY_RUN),--dry-run,)
+endif
+
+# The installer and the .deb both expect a branded updater binary beside the
+# app; CI gets it from the build_updater workflow, so a local build has to
+# make its own. See tools/build_updater.ps1 and tools/build_updater.sh.
+updater:
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\build_updater.ps1"
+else
+	bash tools/build_updater.sh
+endif
+
+# On Windows local_build.ps1 builds the updater and stamps its hash itself;
+# on Linux build.sh only reads UPDATER_SHA256, so build the updater first.
 build:
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\local_build.ps1"
 else
-	bash tools/build.sh
+	bash tools/build_updater.sh
+	UPDATER_SHA256=$$(sha256sum output/linux/updater | cut -d' ' -f1) bash tools/build.sh
 endif
 
 build-deb:

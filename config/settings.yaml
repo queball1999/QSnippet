@@ -257,6 +257,49 @@ notices:
     hidden: true
     description: List of notices that have been dismissed by the user.
 
+updates:
+  description: Application update checking.
+  check_on_startup:
+    type: bool
+    value: true
+    default: true
+    description: >
+      Check for a new version shortly after QSnippet starts. The check runs in
+      the background and only speaks up when an update is available. Updates
+      are never installed without asking.
+
+  check_interval_hours:
+    type: integer
+    element: slider
+    value: 24
+    default: 24
+    min: 1
+    max: 168
+    description: >
+      Minimum hours between automatic update checks. Checking from
+      Help > Check for Updates always runs immediately regardless of this.
+
+  last_check:
+    type: string
+    value: ""
+    default: ""
+    hidden: true
+    description: Timestamp of the last check for application updates.
+
+  channel:
+    type: string
+    element: dropdown
+    value: "main"
+    default: "main"
+    options:
+      - "main"
+      - "dev"
+    description: >
+      Which releases to check for. "Main" is the stable channel and is what
+      almost everyone should use. "Dev" includes pre-release builds that may
+      be unstable or contain unfinished features - only switch to it if you
+      want to help test upcoming changes.
+
 backups:
   database_backups:
     type: list

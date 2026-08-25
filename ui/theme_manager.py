@@ -173,6 +173,8 @@ OBJECT_NAME_FONTS: dict[str, tuple[str, bool]] = {
     "VaultStatusPill":           ("small",  False),
     # Import / export wizard
     "ImportExportTitle":         ("large",  True),
+    # Update dialog
+    "UpdateDialogTitle":         ("large",  True),
     "CountLabel":                ("small",  False),
     # Backups
     "BackupPageBtn":             ("small",  False),

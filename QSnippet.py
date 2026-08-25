@@ -18,6 +18,10 @@ except ImportError:
 # Setup logging
 logger = logging.getLogger(__name__)
 
+# Delay before the quiet startup update check's network call, so it does not
+# race notices/tutorial/theme settling in the same startup batch.
+STARTUP_UPDATE_CHECK_DELAY_MS = 5000
+
 """
 Name: QSnippet
 
@@ -955,6 +959,169 @@ class main():
             self.qsnippet.maybe_show_tutorial()
         except Exception:
             logger.exception("Failed while starting the first-run tutorial")
+
+        try:
+            self.check_for_updates_preflight()
+        except Exception:
+            logger.exception("Failed while checking for updates on startup")
+
+    def check_for_updates_preflight(self):
+        """
+        Decide whether a startup update check should run, and schedule it.
+
+        Eligibility (opted out, checked too recently) is checked immediately;
+        the network call itself is deferred by STARTUP_UPDATE_CHECK_DELAY_MS.
+
+        Returns:
+            None
+        """
+        updates = self.settings.setdefault("updates", {})
+
+        enabled = updates.get("check_on_startup", {}).get("value", True)
+        if not enabled:
+            logger.debug("Startup update check disabled by user")
+            return
+
+        interval_hours = updates.get("check_interval_hours", {}).get("value", 24)
+        if not self.update_check_is_due(updates, interval_hours):
+            logger.debug("Startup update check skipped; checked recently")
+            return
+
+        logger.debug(
+            "Startup update check eligible; starting it in %d ms",
+            STARTUP_UPDATE_CHECK_DELAY_MS,
+        )
+        self.QTimer.singleShot(
+            STARTUP_UPDATE_CHECK_DELAY_MS, self.start_startup_update_check
+        )
+
+    def start_startup_update_check(self):
+        """
+        Actually start the background update check and show status feedback.
+
+        Split out so the network call runs after STARTUP_UPDATE_CHECK_DELAY_MS,
+        not in the same startup batch as notices and the tutorial.
+
+        Returns:
+            None
+        """
+        from utils.update_utils import UpdateChecker
+
+        logger.debug("Running startup update check")
+
+        # self is the plain "main" bootstrap object, not a QObject, so it
+        # can't be the Qt parent; self.qsnippet (the QMainWindow) is used
+        # instead and always exists by this point.
+        self.startup_update_checker = UpdateChecker(self, parent=self.qsnippet)
+        self.startup_update_checker.finished_check.connect(
+            self.handle_startup_update_result
+        )
+        self.startup_update_checker.start()
+
+        try:
+            self.qsnippet.statusBar().showMessage("Checking for updates...", 15000)
+        except Exception:
+            logger.debug("Could not show the startup update-check status message")
+
+    def update_check_is_due(self, updates, interval_hours):
+        """
+        Decide whether enough time has passed since the last update check.
+
+        Args:
+            updates (dict): The "updates" settings section.
+            interval_hours (int): Minimum hours between checks.
+
+        Returns:
+            bool: True when a check should run now.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        if interval_hours <= 0:
+            return True
+
+        last = updates.get("last_check", {}).get("value", "")
+        if not last:
+            return True
+
+        try:
+            previous = datetime.fromisoformat(str(last))
+        except ValueError:
+            return True
+
+        if previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+
+        return datetime.now(timezone.utc) - previous >= timedelta(hours=interval_hours)
+
+    def handle_startup_update_result(self, info):
+        """
+        Handle the result of the quiet startup update check.
+
+        A failed check is logged and otherwise ignored: the user did not ask
+        for this, so an error dialog on launch because the network was down
+        would be pure noise.
+
+        Args:
+            info (UpdateInfo): The parsed result of the check.
+
+        Returns:
+            None
+        """
+        self.record_update_check_time()
+
+        try:
+            status_bar = self.qsnippet.statusBar()
+        except Exception:
+            status_bar = None
+
+        if not info.ok:
+            logger.info("Startup update check did not complete: %s", info.error)
+            if status_bar:
+                status_bar.clearMessage()
+            return
+
+        if not info.available:
+            logger.debug("Startup update check: already up to date")
+            if status_bar:
+                status_bar.showMessage("QSnippet is up to date", 4000)
+            return
+
+        logger.info("Update available: %s", info.latest_version)
+
+        if status_bar:
+            status_bar.showMessage(f"QSnippet {info.latest_version} is available", 8000)
+
+        try:
+            self.qsnippet.prompt_for_update(info)
+        except Exception:
+            logger.exception("Failed to show the update notice")
+
+    def record_update_check_time(self):
+        """
+        Persist the time of the most recent update check.
+
+        Returns:
+            None
+        """
+        from datetime import datetime, timezone
+
+        updates = self.settings.setdefault("updates", {})
+
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        if "last_check" in updates:
+            updates["last_check"]["value"] = stamp
+        else:
+            updates["last_check"] = {
+                "type": "string",
+                "value": stamp,
+                "description": "Timestamp of the last check for application updates.",
+            }
+
+        try:
+            FileUtils.write_yaml(self.settings_file, self.settings)
+        except Exception:
+            logger.exception("Could not record the update check time")
 
     def check_notices(self):
         """

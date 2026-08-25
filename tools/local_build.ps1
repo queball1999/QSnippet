@@ -1,4 +1,7 @@
-param()
+param(
+    [switch]$RebuildUpdater,
+    [string]$QUpdateToolPath = $env:QUPDATETOOL_DIR
+)
 
 <# 
 This script is designed to test our build workflow locally.
@@ -6,9 +9,11 @@ This script is designed to test our build workflow locally.
 It performs the following steps:
 1. Installs Python dependencies from requirements.txt
 2. Loads version info from config.yaml
-3. Builds Windows binaries using PyInstaller (calls build.ps1)
-4. Builds Windows installer using Inno Setup (calls ISCC.exe)
-5. Optionally signs artifacts with GPG if available
+3. Builds the branded updater (calls build_updater.ps1); the installer
+   requires it, so a missing updater aborts the Inno Setup compile
+4. Builds Windows binaries using PyInstaller (calls build.ps1)
+5. Builds Windows installer using Inno Setup (calls ISCC.exe)
+6. Optionally signs artifacts with GPG if available
 #>
 
 $ErrorActionPreference = "Stop"
@@ -21,22 +26,62 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "QSnippet Local Build Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
+# Hashed through .NET rather than Get-FileHash: that cmdlet is autoloaded
+# from Microsoft.PowerShell.Utility, and invoking powershell.exe from make
+# under Git Bash can hand it a mangled PSModulePath, at which point the
+# cmdlet simply does not resolve. This has no such dependency.
+function Get-Sha256($path) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead((Resolve-Path $path).Path)
+        try {
+            return ([System.BitConverter]::ToString($sha.ComputeHash($stream))
+                    ).Replace("-", "").ToLower()
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+# Forwarded to tools\build_updater.ps1; -RebuildUpdater forces a fresh
+# updater build instead of reusing whatever sits in output\windows.
+$updaterArgs = @{}
+if ($RebuildUpdater) { $updaterArgs["Force"] = $true }
+if ($QUpdateToolPath) { $updaterArgs["QUpdateToolPath"] = $QUpdateToolPath }
+
 # Step 1: Install dependencies
-Write-Host "`n[1/4] Installing Python dependencies..." -ForegroundColor Cyan
+Write-Host "`n[1/5] Installing Python dependencies..." -ForegroundColor Cyan
 <# pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to install dependencies"
 } #>
 
 # Step 2: Load version info
-Write-Host "`n[2/4] Loading version info..." -ForegroundColor Cyan
+Write-Host "`n[2/5] Loading version info..." -ForegroundColor Cyan
 $VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])"
 Write-Host "Version: $VERSION" -ForegroundColor Green
 
 $distDir = "output\windows"
 
-# Step 3: Build Windows binaries (PyInstaller)
-Write-Host "`n[3/4] Building Windows binaries with PyInstaller..." -ForegroundColor Cyan
+# Step 3: Build the branded updater
+# QSnippet.iss requires output\windows\updater.exe, and CI supplies it from
+# the build_updater workflow. Locally we have to build it ourselves or the
+# Inno Setup compile aborts on a missing source file.
+Write-Host "`n[3/5] Building branded updater..." -ForegroundColor Cyan
+& .\tools\build_updater.ps1 @updaterArgs
+if (-not (Test-Path "$distDir\updater.exe")) {
+    Write-Error "Updater build did not produce $distDir\updater.exe"
+}
+
+# Stamp the same hash CI stamps, so a locally installed build verifies the
+# updater before launching it exactly as a released build does.
+$env:UPDATER_SHA256 = Get-Sha256 "$distDir\updater.exe"
+Write-Host "Updater SHA-256: $($env:UPDATER_SHA256)" -ForegroundColor Green
+
+# Step 4: Build Windows binaries (PyInstaller)
+Write-Host "`n[4/5] Building Windows binaries with PyInstaller..." -ForegroundColor Cyan
 & .\tools\build.ps1
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PyInstaller build failed"
@@ -45,8 +90,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Waiting for operating system to release lock..." -ForegroundColor DarkGray
 Start-Sleep -Seconds 2
 
-# Step 4: Build Windows installer (Inno Setup)
-Write-Host "`n[4/4] Building Inno Setup installer..." -ForegroundColor Cyan
+# Step 5: Build Windows installer (Inno Setup)
+Write-Host "`n[5/5] Building Inno Setup installer..." -ForegroundColor Cyan
 
 # Find Inno Setup compiler
 $innoSetupPaths = @(
@@ -138,7 +183,7 @@ if ($gpgPath) {
         Write-Host "Generating SHA256SUMS..." -ForegroundColor Cyan
         $sha256Output = @()
         Get-ChildItem "$distDir\*.exe" | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            $hash = Get-Sha256 $_.FullName
             $sha256Output += "$hash  $($_.Name)"
         }
         $sha256Output | Out-File "$distDir\SHA256SUMS.txt" -Encoding ASCII

@@ -1,0 +1,99 @@
+name: PR Checks
+
+# Gate on every pull request into a long-lived branch: lint and the unit
+# tests run here, before a merge, not after. Nothing is built and nothing is
+# published; releases stay tag-driven in build_manager.yaml.
+#
+# Make "lint" and "test (ubuntu-latest)" / "test (windows-latest)" required
+# status checks in the branch protection rule for main so a red PR cannot be
+# merged. See docs in the repo wiki: Release Pipeline.
+
+on:
+  pull_request:
+    branches: [main, dev, staging]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A new push to the PR cancels the previous run; only the tip matters.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+          cache-dependency-path: '**/requirements.txt'
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint (blocking)
+        # Syntax errors and undefined names only. These are real breakage,
+        # never style opinion, so they fail the PR.
+        run: flake8 . --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Lint (advisory report)
+        run: flake8 . --exit-zero --format=default | tee flake8-report.txt
+
+      - name: Upload flake8 report
+        uses: actions/upload-artifact@v7
+        with:
+          name: flake8-report
+          path: flake8-report.txt
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+          cache-dependency-path: '**/requirements.txt'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # Qt needs these to import even for the headless suite.
+      - name: Install system dependencies for PySide6
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-util1 \
+            libxcb-xkb1 \
+            libxcb-shape0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            xvfb
+
+      # GUI and benchmark tests are deselected by default (tests/conftest.py).
+      - name: Run pytest
+        run: pytest
+
+      - name: Run GUI tests
+        if: runner.os == 'Linux'
+        # Advisory for now: the GUI suite has never run in CI, so it reports
+        # rather than blocks. Drop continue-on-error once it is green.
+        continue-on-error: true
+        run: xvfb-run -a pytest --gui

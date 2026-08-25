@@ -21,6 +21,7 @@ class MenuBar(QMenuBar):
     show_settings = Signal()
     showPlaceholderManager = Signal()
     showTutorialRequested = Signal()
+    checkForUpdatesRequested = Signal()
 
     def __init__(self, main=None, parent=None):
         """
@@ -269,6 +270,16 @@ class MenuBar(QMenuBar):
             )
         )
         help_menu.addAction(report_bug_act)
+
+        help_menu.addSeparator()
+
+        # Check for Updates
+        update_icon = QIcon(FileUtils.icon_path("update.svg"))
+        check_updates_act = QAction(update_icon, "Check for Updates", self)
+        check_updates_act.setShortcut("F11")
+        check_updates_act.setStatusTip("Check whether a newer version of QSnippet is available")
+        check_updates_act.triggered.connect(self.checkForUpdatesRequested.emit)
+        help_menu.addAction(check_updates_act)
 
         # About App
         about_icon = QIcon(FileUtils.icon_path("information-outline.svg"))

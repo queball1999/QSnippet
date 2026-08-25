@@ -77,6 +77,29 @@ jobs:
             exit 1
           fi
 
+  # Repeats the blocking half of pr_checks.yaml. A PR cannot merge red, but a
+  # tag can be cut from any commit (dev tags especially), so the release path
+  # re-checks rather than trusting that a PR ever ran.
+  lint:
+    needs: guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint (blocking)
+        run: flake8 . --select=E9,F63,F7,F82 --show-source --statistics
+
   test:
     needs: guard
     runs-on: ubuntu-latest
@@ -98,13 +121,15 @@ jobs:
       - name: Run pytest
         run: pytest
 
+  # Nothing is compiled until lint and the tests are green: a broken commit
+  # should never reach an artifact, let alone a signed release.
   build-linux:
-    needs: test
+    needs: [lint, test]
     uses: ./.github/workflows/linux_build.yaml
     secrets: inherit
 
   build-windows:
-    needs: test
+    needs: [lint, test]
     uses: ./.github/workflows/windows_build.yaml
     secrets: inherit
 

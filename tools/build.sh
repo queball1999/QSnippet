@@ -34,10 +34,15 @@ echo "Detected OS: $OS"
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
+# Set by CI after the updater is built; QSnippet verifies the updater
+# against this hash before launching it. See utils/update_utils.py.
+UPDATER_SHA256="${UPDATER_SHA256:-}"
+
 cat > config/build_info.py <<EOF
 BUILD_VERSION = "$VERSION"
 BUILD_DATE = "$BUILD_DATE"
 BUILD_COMMIT = "$GIT_COMMIT"
+UPDATER_SHA256 = "$UPDATER_SHA256"
 EOF
 
 echo "Generated build_info.py ($BUILD_DATE, commit $GIT_COMMIT)"

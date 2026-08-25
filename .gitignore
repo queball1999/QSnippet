@@ -173,3 +173,12 @@ linux-notes.md
 # Exclude ruff
 .ruff_cache/
 assets/images/Thumbs.db
+
+# Bundled updater binary, built by CI; hash is stamped into build_info.py.
+/updater
+/updater.exe
+/updater.exe.sha256
+/updater.sha256
+output/*/updater
+output/*/updater.exe
+output/*/updater*.sha256

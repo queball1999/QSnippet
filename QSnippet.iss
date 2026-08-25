@@ -43,6 +43,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#SourcePath}\output\windows\{#MyAppExeName}"; DestDir: "{app}"; Permissions: users-modify; Flags: ignoreversion
+; Not users-modify: QSnippet hash-verifies this before launch; user-writable
+; would hand an attacker a trusted, elevated execution path.
+Source: "{#SourcePath}\output\windows\updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}\config\updater.yaml"; DestDir: "{app}\config"; Flags: ignoreversion
 Source: "{#SourcePath}\assets\icons\*"; DestDir: "{app}\assets\icons"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\assets\images\*"; DestDir: "{app}\assets\images"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourcePath}\notices\*"; DestDir: "{app}\notices"; Permissions: users-modify; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist

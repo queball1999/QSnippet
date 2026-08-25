@@ -126,6 +126,17 @@ mkdir -p \
 cp "$LINUX_BUILD" "$INSTALL_DIR/QSnippet"
 chmod 755 "$INSTALL_DIR/QSnippet"
 
+# Mode 755, not 775: QSnippet hash-verifies this binary before launching
+# it, and a group-writable updater would hand an attacker a trusted path.
+UPDATER_BUILD="output/linux/updater"
+if [ -f "$UPDATER_BUILD" ]; then
+  cp "$UPDATER_BUILD" "$INSTALL_DIR/updater"
+  chmod 755 "$INSTALL_DIR/updater"
+  echo "Packaged updater binary"
+else
+  warn "no updater binary at $UPDATER_BUILD; in-app updates will be unavailable"
+fi
+
 # Copy a directory tree, tolerating an empty or absent source.
 # Uses src/. so dotfiles are included and an empty directory is not an error.
 copy_tree() {
@@ -202,7 +213,7 @@ if [ "$ICON_INSTALLED" -eq 0 ]; then
 fi
 
 # config/ - config.yaml holds the version and asset names, settings.yaml seeds defaults
-for f in config.yaml settings.yaml; do
+for f in config.yaml settings.yaml updater.yaml; do
   if [ -f "config/$f" ]; then
     cp "config/$f" "$INSTALL_DIR/config/$f"
   else

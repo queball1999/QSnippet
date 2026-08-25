@@ -1,0 +1,153 @@
+name: Build Branded Updater
+
+# Builds the QSnippet-branded updater binary from QUpdateTool.
+#
+# Runs BEFORE the QSnippet build: its SHA-256 gets stamped into build_info.py
+# so QSnippet can verify it before launch. See QUpdateTool2.0/docs/SECURITY.md.
+#
+# QUpdateTool is PINNED to a tag, not a branch, so an upstream change can't
+# silently alter what ships. Bump QUPDATETOOL_REF deliberately.
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: Runner to build on
+        required: true
+        type: string
+      artifact-name:
+        description: Name of the uploaded artifact
+        required: true
+        type: string
+      gui:
+        description: >
+          Bundle PySide6 for a progress window. Must stay on: QSnippet
+          launches with --gui, and a headless build falls back to console
+          output nobody sees. Costs ~40 MB in the updater binary.
+        required: false
+        default: true
+        type: boolean
+    outputs:
+      sha256:
+        description: SHA-256 of the built updater binary
+        value: ${{ jobs.build.outputs.sha256 }}
+
+env:
+  QUPDATETOOL_REPO: queball1999/QUpdateTool
+  QUPDATETOOL_REF: v0.0.1
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+
+    outputs:
+      sha256: ${{ steps.hash.outputs.sha256 }}
+
+    steps:
+      - name: Checkout QSnippet
+        uses: actions/checkout@v7
+        with:
+          path: qsnippet
+
+      - name: Checkout QUpdateTool (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.QUPDATETOOL_REPO }}
+          ref: ${{ env.QUPDATETOOL_REF }}
+          path: qupdatetool
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+          cache-dependency-path: 'qupdatetool/requirements.txt'
+
+      - name: Install updater dependencies
+        working-directory: qupdatetool
+        shell: bash
+        run: |
+          if [ "${{ inputs.gui }}" = "true" ]; then
+            pip install -r requirements-gui.txt
+          else
+            pip install -r requirements.txt
+          fi
+
+      - name: Run updater test suite
+        working-directory: qupdatetool
+        run: python -m pytest -q
+        # The updater ships inside every QSnippet release; a failure here
+        # should stop the release, not be discovered by a user mid-update.
+
+      - name: Select platform icon
+        id: icon
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "path=../qsnippet/assets/icons/QSnippet.ico" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=../qsnippet/assets/icons/QSnippet.icns" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build branded updater
+        working-directory: qupdatetool
+        shell: bash
+        run: |
+          GUI_FLAG=""
+          if [ "${{ inputs.gui }}" = "true" ]; then
+            GUI_FLAG="--gui"
+          fi
+
+          python tools/build_branded.py \
+            --brand ../qsnippet/config/updater.yaml \
+            --icon  "${{ steps.icon.outputs.path }}" \
+            --key   ../qsnippet/gpg-public.asc \
+            --name  updater \
+            --commit "${{ github.sha }}" \
+            $GUI_FLAG \
+            --clean
+
+      - name: Verify the updater actually runs
+        working-directory: qupdatetool
+        shell: bash
+        run: |
+          # Exit 10 (update available) or 11 (up to date) proves the brand,
+          # key, and release backend all resolved.
+          set +e
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./dist/updater.exe --check-only --current-version 0.0.0 --log-file none
+          else
+            ./dist/updater --check-only --current-version 0.0.0 --log-file none
+          fi
+          code=$?
+          set -e
+          echo "updater --check-only exited with $code"
+          if [ "$code" != "10" ] && [ "$code" != "11" ]; then
+            echo "::error::The branded updater did not run correctly (exit $code)"
+            exit 1
+          fi
+
+      - name: Compute updater hash
+        id: hash
+        shell: bash
+        working-directory: qupdatetool
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            binary=dist/updater.exe
+          else
+            binary=dist/updater
+          fi
+          digest=$(sha256sum "$binary" | cut -d" " -f1)
+          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+          echo "Updater SHA-256: $digest"
+
+      - name: Upload updater
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            qupdatetool/dist/updater
+            qupdatetool/dist/updater.exe
+            qupdatetool/dist/updater.exe.sha256
+            qupdatetool/dist/updater.sha256
+          if-no-files-found: error

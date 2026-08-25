@@ -7,3 +7,4 @@ from .password_field import PasswordField
 from .vault_setup_dialog import VaultSetupDialog
 from .vault_unlock_dialog import VaultUnlockDialog
 from .tutorial_overlay import TutorialController, TutorialOverlay, TutorialStep, TypingDemo
+from .update_dialog import UpdateAvailableDialog
