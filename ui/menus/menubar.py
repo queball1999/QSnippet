@@ -241,7 +241,6 @@ class MenuBar(QMenuBar):
             act.triggered.connect(lambda checked=False, lvl=level: self.set_log_level(lvl))
             log_level_menu.addAction(act)
 
-
         # History Submenu
         history_icon = QIcon(FileUtils.icon_path("history.svg"))
         history_menu = help_menu.addMenu(history_icon, "History")
@@ -250,6 +249,7 @@ class MenuBar(QMenuBar):
         backup_icon = QIcon(FileUtils.icon_path("folder-open-outline.svg"))
         backup_history_act = QAction(backup_icon, "Backup History", self)
         backup_history_act.setStatusTip("View automatic database backups made before updates")
+        backup_history_act.setShortcut("F8")
         backup_history_act.triggered.connect(self.viewBackupHistoryRequested.emit)
         history_menu.addAction(backup_history_act)
 
@@ -257,6 +257,7 @@ class MenuBar(QMenuBar):
         release_history_icon = QIcon(FileUtils.icon_path("calendar-clock-outline.svg"))
         release_history_act = QAction(release_history_icon, "Release History", self)
         release_history_act.setStatusTip("Browse past release notes")
+        release_history_act.setShortcut("F9")
         release_history_act.triggered.connect(self.viewReleaseHistoryRequested.emit)
         history_menu.addAction(release_history_act)
 
@@ -264,6 +265,7 @@ class MenuBar(QMenuBar):
         bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))
         report_bug_act = QAction(bug_icon, "Report a Bug", self)
         report_bug_act.setStatusTip("Open the GitHub bug report form")
+        report_bug_act.setShortcut("F10")
         report_bug_act.triggered.connect(
             lambda: QDesktopServices.openUrl(
                 QUrl("https://github.com/queball1999/QSnippet/issues/new?template=bug_report.md")

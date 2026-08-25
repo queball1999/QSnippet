@@ -166,19 +166,25 @@ class QSnippet(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Linux only notice with close button and GitHub issue link
+        primary_notice_text = "Linux compatibility is currently limited. "
+        if self.parent.is_dev_build:
+            primary_notice_text = "You are running a development build; some features may be unstable. "
+
         notice_text = (
-            "Linux compatibility is currently limited. "
+            primary_notice_text + 
             "<a href=\"https://github.com/queball1999/QSnippet/issues/new?title=Linux+Issue&body=Please+describe+the+issue\">"
-            "Report a bug</a> or <a href=\"https://github.com/queball1999/QSnippet/issues\">view existing issues</a>."
+            "Report a bug</a> (F10) or <a href=\"https://github.com/queball1999/QSnippet/issues\">view existing issues</a>."
         )
 
         # Create a container widget for the notice
         notice_container = QWidget()
         notice_container.setObjectName("PlatformNotice")
         notice_container.setAttribute(Qt.WA_StyledBackground, True)
+        notice_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        notice_container.setMaximumHeight(30)
         notice_layout = QHBoxLayout(notice_container)
         notice_layout.setContentsMargins(10, 5, 5, 5)
-
+        
         # Create the notice label with HTML
         self.linux_notice_label = QLabel(notice_text)
         self.linux_notice_label.setAlignment(Qt.AlignCenter)
@@ -201,8 +207,8 @@ class QSnippet(QMainWindow):
 
         self.linux_notice = notice_container
         self.linux_notice.hide()
-        if sys.platform.startswith("linux"):
-            self.linux_notice.show()
+        if sys.platform.startswith("linux") or self.parent.is_dev_build:
+            QTimer.singleShot(10, self.linux_notice.show)  # Show after the event loop starts
 
         # Show editor at startup
         self.editor = SnippetEditor(config_path=self.parent.snippet_db_file, main=self.parent, parent=self)

@@ -114,6 +114,9 @@ class main():
         # Flag to skip loading reg key
         self.skip_reg = False
 
+        # Is this a dev build?
+        self.is_dev_build = "dev" in BUILD_VERSION
+
         # Define Directories
         default_paths = FileUtils.get_default_paths()
         self.working_dir = default_paths["working_dir"]

@@ -265,8 +265,7 @@ updates:
     default: true
     description: >
       Check for a new version shortly after QSnippet starts. The check runs in
-      the background and only speaks up when an update is available. Updates
-      are never installed without asking.
+      the background and updates are never installed without asking.
 
   check_interval_hours:
     type: integer
@@ -297,8 +296,7 @@ updates:
     description: >
       Which releases to check for. "Main" is the stable channel and is what
       almost everyone should use. "Dev" includes pre-release builds that may
-      be unstable or contain unfinished features - only switch to it if you
-      want to help test upcoming changes.
+      be unstable or contain unfinished features.
 
 backups:
   database_backups:
