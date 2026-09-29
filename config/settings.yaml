@@ -244,6 +244,17 @@ general:
         If no content has been entered the form closes silently; otherwise you are
         prompted to save or discard. Set to "off" to disable.
 
+  tray_behavior:
+    description: Configure how the system tray behaves when the main window is closed.
+    notify_on_close:
+      type: bool
+      value: true
+      default: true
+      description: >
+        Show a system notification when the window is closed to the tray, so you
+        know QSnippet is still running in the background. Turn off to close
+        silently.
+
 notices:
   disable_notices:
     type: bool
@@ -323,3 +334,18 @@ saving:
     default: ""
     hidden: true
     description: Custom directory path for the snippets database. Supports cloud-synced folders (NextCloud, OneDrive, Dropbox) and network shares (SMB/NFS). Leave blank to use the default app data location.
+
+  version_history_enabled:
+    type: bool
+    value: true
+    default: true
+    description: Keep a history of previous versions each time a snippet is edited or renamed, so it can be restored later. Turning this off does not delete history already saved - you'll be asked whether to keep it or purge it.
+
+  version_history_limit:
+    type: integer
+    element: spinbox
+    value: 10
+    default: 10
+    min: 0
+    max: 500
+    description: Maximum number of prior versions kept per snippet. Set to 0 to keep unlimited history.

@@ -219,7 +219,7 @@ Write-Host "`n========================================" -ForegroundColor Green
 Write-Host "Build Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "Installer: output\windows\QSnippet-$VERSION-windows-installer.exe" -ForegroundColor Cyan
-Write-Host "Portable:  output\windows\QSnippet-$VERSION-windows-portable.exe" -ForegroundColor Cyan
+Write-Host "Portable:  output\windows\QSnippet-$VERSION-windows-portable.zip" -ForegroundColor Cyan
 
 $openFolder = Read-Host "Open output folder in File Explorer? (y/n)"
 if ($openFolder -match '^[Yy]') {

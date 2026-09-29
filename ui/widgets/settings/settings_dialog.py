@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from PySide6.QtWidgets import (
@@ -10,6 +11,8 @@ from PySide6.QtGui import QShortcut
 
 from .settings_category_page import SettingsCategoryPage
 from .settings_toast import SettingsToast
+
+logger = logging.getLogger(__name__)
 
 
 class TextEditFocusFilter(QObject):
@@ -434,25 +437,60 @@ class SettingsDialog(QDialog):
         Returns:
             bool: True when the change should be applied.
         """
-        if path != ["general", "clipboard_behavior", "clipboard_timeout"]:
-            return True
+        if path == ["general", "clipboard_behavior", "clipboard_timeout"]:
+            if str(new_value).strip().lower() != "off":
+                return True
 
-        if str(new_value).strip().lower() != "off":
-            return True
+            if str(old_value).strip().lower() == "off":
+                return True
 
-        if str(old_value).strip().lower() == "off":
-            return True
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Disable Clipboard Cleanup")
+            msg.setIcon(QMessageBox.Warning)
+            msg.setText(
+                "Turning clipboard cleanup off can leave expanded snippet content in your clipboard until you replace it."
+            )
+            msg.setInformativeText("Do you want to keep clipboard cleanup disabled?")
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.setDefaultButton(QMessageBox.No)
+            return msg.exec() == QMessageBox.Yes
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Disable Clipboard Cleanup")
-        msg.setIcon(QMessageBox.Warning)
-        msg.setText(
-            "Turning clipboard cleanup off can leave expanded snippet content in your clipboard until you replace it."
-        )
-        msg.setInformativeText("Do you want to keep clipboard cleanup disabled?")
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.No)
-        return msg.exec() == QMessageBox.Yes
+        if path == ["saving", "version_history_enabled"]:
+            if bool(new_value) or not bool(old_value):
+                # Turning it on, or it was already off: nothing to confirm.
+                return True
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Disable Snippet Version History")
+            msg.setIcon(QMessageBox.Question)
+            msg.setText(
+                "Turning off version history stops saving new versions when you edit or rename snippets."
+            )
+            msg.setInformativeText(
+                "What would you like to do with the versions already saved?\n\n"
+                "• Keep: leave existing history in place; only new capture stops.\n\n"
+                "• Purge: permanently delete all saved snippet history now.\n\n"
+                "• Cancel: don't change this setting"
+            )
+            keep_btn = msg.addButton("Keep", QMessageBox.ActionRole)
+            purge_btn = msg.addButton("Purge", QMessageBox.DestructiveRole)
+            msg.addButton(QMessageBox.Cancel)
+            msg.setDefaultButton(QMessageBox.Cancel)
+            msg.exec()
+
+            if msg.clickedButton() == purge_btn:
+                try:
+                    self.parent().parent.snippet_db.purge_snippet_history()
+                except Exception:
+                    logger.exception("Failed to purge snippet history")
+                    self.toast.show_toast("Failed to purge snippet history.")
+                    return False
+                return True
+            elif msg.clickedButton() == keep_btn:
+                return True
+            return False  # Cancel - revert the toggle
+
+        return True
 
     def on_setting_changed(self, path: list[str], value):
         """ Handle when a setting value changes. """

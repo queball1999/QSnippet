@@ -286,6 +286,7 @@ class QSnippet(QMainWindow):
         self.menubar.collectLogsRequested.connect(self.handle_collect_logs)
         self.menubar.viewBackupHistoryRequested.connect(self.handle_view_backup_history)
         self.menubar.viewReleaseHistoryRequested.connect(self.handle_view_release_history)
+        self.menubar.viewSnippetHistoryRequested.connect(self.handle_view_snippet_history)
         self.menubar.logLevelChanged.connect(self.handle_log_level)
         self.menubar.showAppInfo.connect(self.handle_show_info)
         self.menubar.show_settings.connect(self.show_settings_window)
@@ -341,6 +342,7 @@ class QSnippet(QMainWindow):
             menu.exit_signal.connect(self.exit)
             menu.startup_signal.connect(self.handle_startup_signal)
             menu.showui_signal.connect(self.handle_show_ui_signal)
+            menu.notify_signal.connect(self.handle_notify_signal)
             menu.vault_unlock_signal.connect(lambda: self.show_vault_unlock(on_success=self.update_vault_ui))
             menu.vault_lock_signal.connect(self.tray_lock_vault)
 
@@ -709,6 +711,25 @@ class QSnippet(QMainWindow):
         logger.info("Updating show UI at startup: %s", checked)
 
         self.parent.settings["general"]["startup_behavior"]["show_ui_at_start"]["value"] = checked
+        FileUtils.write_yaml(
+            self.parent.settings_file,
+            self.parent.settings,
+        )
+
+    def handle_notify_signal(self, checked: bool) -> None:
+        """
+        Persist the "notify on close" tray preference from the tray menu.
+
+        Args:
+            checked (bool): Whether to show a notification when the window
+                is closed to the tray.
+
+        Returns:
+            None
+        """
+        logger.info("Updating notify on close: %s", checked)
+
+        self.parent.settings["general"]["tray_behavior"]["notify_on_close"]["value"] = checked
         FileUtils.write_yaml(
             self.parent.settings_file,
             self.parent.settings,
@@ -1555,6 +1576,21 @@ class QSnippet(QMainWindow):
     def handle_view_release_history(self) -> None:
         """Help menu action: open the read-only Release History viewer."""
         self.parent.show_release_history()
+
+    def handle_view_snippet_history(self) -> None:
+        """Help menu action: browse and restore saved versions across every snippet."""
+        from ui.widgets.version_history_dialog import VersionHistoryDialog
+
+        history_enabled, history_limit = self.editor.version_history_settings()
+        dialog = VersionHistoryDialog(
+            None, self.parent.snippet_db,
+            history_enabled=history_enabled, history_limit=history_limit,
+            message_box=self.parent.message_box,
+            unsaved_snippet_id=self.editor.unsaved_form_snippet_id(),
+            parent=self,
+        )
+        dialog.restored.connect(self.editor.on_version_restored)
+        dialog.exec()
 
     # ----- UPDATES -----
 
@@ -2434,9 +2470,104 @@ class QSnippet(QMainWindow):
         logger.debug("Close event intercepted; hiding window")
         self.editor.stop_inactivity_timer()
         self.hide()
+        self.notify_tray_running()
+
+    def notify_tray_running(self) -> None:
+        """
+        Show a notification that QSnippet is still running in the tray.
+
+        Only fires when the "Notify on close" setting is enabled and the tray
+        icon is actually visible. Uses a purpose-built toast widget
+        (TrayCloseToast) rather than QSystemTrayIcon.showMessage because the
+        latter cannot carry buttons; the toast offers "Close" and "Disable
+        notifications" actions. It is a frameless always-on-top window placed
+        next to the tray icon, so it behaves the same on every OS.
+
+        Returns:
+            None
+        """
+        try:
+            enabled = (
+                self.parent.settings
+                .get("general", {})
+                .get("tray_behavior", {})
+                .get("notify_on_close", {})
+                .get("value", True)
+            )
+        except Exception:
+            enabled = True
+        if not enabled:
+            return
+
+        tray = getattr(self, "tray", None)
+        if tray is None or not tray.isVisible():
+            logger.debug("Tray not visible; skipping close notification")
+            return
+
+        from ui.widgets.tray_close_toast import TrayCloseToast
+
+        # Only one toast at a time: closing the window again replaces it.
+        self.dismiss_tray_close_toast()
+
+        # Parentless so the toast is independent of the (hidden) main window's
+        # lifecycle; a reference is kept so it is not garbage-collected while
+        # on screen.
+        toast = TrayCloseToast(tray.icon())
+        self.tray_close_toast = toast
+        toast.disable_requested.connect(self.disable_tray_close_notification)
+        toast.destroyed.connect(lambda *_, t=toast: self.clear_tray_close_toast(t))
+        toast.show_near_tray(tray.geometry())
+        logger.info("Tray close notification shown")
+
+    def dismiss_tray_close_toast(self) -> None:
+        """Close the tray close toast if one is on screen."""
+        toast = getattr(self, "tray_close_toast", None)
+        if toast is None:
+            return
+        try:
+            toast.close()
+        except RuntimeError:
+            # The C++ widget is already gone; just drop the reference.
+            self.tray_close_toast = None
+
+    def clear_tray_close_toast(self, toast) -> None:
+        """
+        Drop the reference to a toast once it has been destroyed.
+
+        Args:
+            toast (TrayCloseToast): The toast that was destroyed. The reference
+                is only cleared if it still points at this toast, so a replaced
+                toast being destroyed late cannot clear its successor.
+
+        Returns:
+            None
+        """
+        if getattr(self, "tray_close_toast", None) is toast:
+            self.tray_close_toast = None
+
+    def disable_tray_close_notification(self) -> None:
+        """
+        Persist the "notify on close" setting to off.
+
+        Called from the toast's "Disable notifications" button. Writes the
+        change to the settings file and keeps the tray menu checkbox in sync.
+
+        Returns:
+            None
+        """
+        logger.info("Disabling notify on close from toast")
+        self.parent.settings["general"]["tray_behavior"]["notify_on_close"]["value"] = False
+        FileUtils.write_yaml(
+            self.parent.settings_file,
+            self.parent.settings,
+        )
+        if hasattr(self, "tray_menu"):
+            self.tray_menu.refresh()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        # The window is back, so "still running in the tray" no longer applies.
+        self.dismiss_tray_close_toast()
         if hasattr(self, "editor") and self.editor.stack.currentWidget() is self.editor.form:
             self.editor.start_inactivity_timer()
 

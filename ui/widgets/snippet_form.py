@@ -23,6 +23,7 @@ class SnippetForm(QWidget):
     deleteClicked = Signal()
     entryChanged = Signal(dict)
     cancelPressed = Signal()
+    versionHistoryClicked = Signal()
 
     def __init__(self, mode="new", main=None, parent=None):
         """
@@ -257,6 +258,13 @@ Snippets come in handy for text you enter often or for standard messages you sen
         self.popout_btn.clicked.connect(self.open_popout)
         self.popout_dialog = None
 
+        self.history_btn = QPushButton()
+        self.history_btn.setObjectName("HistoryBtn")
+        self.history_btn.setToolTip("View version history")
+        self.history_btn.setFixedSize(26, 26)
+        self.history_btn.setEnabled(False)
+        self.history_btn.clicked.connect(lambda *_: self.versionHistoryClicked.emit())
+
         self.snippet_input = QTextEdit(self)
         self.snippet_input.setObjectName("SnippetInput")
         self.snippet_input.setToolTip(self.snippet_tooltip)
@@ -350,6 +358,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         snippet_header.addStretch()
         snippet_header.addWidget(self.snippet_counter, alignment=Qt.AlignVCenter)
         snippet_header.addWidget(self.reveal_snippet_btn, alignment=Qt.AlignVCenter)
+        snippet_header.addWidget(self.history_btn, alignment=Qt.AlignVCenter)
         snippet_header.addWidget(self.popout_btn, alignment=Qt.AlignVCenter)
         layout.addLayout(snippet_header, 5, 0, 1, 3)
         layout.addWidget(self.snippet_input, 6, 0, 1, 3)
@@ -382,6 +391,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         self.folder_input.setCurrentText("Default")
         self.entry_id = None
+        self.history_btn.setEnabled(False)
         self.entry_is_encrypted = False
         self.original_entry = None
         self.decrypted_snippet_cache = ""
@@ -415,6 +425,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
             None
         """
         self.entry_id = entry.get("id")
+        self.history_btn.setEnabled(self.entry_id is not None)
         self.entry_is_encrypted = bool(entry.get("is_encrypted", False))
         self.new_input.setText(entry.get('label', ''))
         self.trigger_input.setText(entry.get('trigger', ''))
@@ -1136,6 +1147,12 @@ Snippets come in handy for text you enter often or for standard messages you sen
                 icon = tm.recolor_icon(icon, tm.icon_color())
             self.popout_btn.setIcon(icon)
             self.popout_btn.setIconSize(QSize(14, 14))
+
+            history_icon = QIcon(FileUtils.icon_path("history.svg"))
+            if tm:
+                history_icon = tm.recolor_icon(history_icon, tm.icon_color())
+            self.history_btn.setIcon(history_icon)
+            self.history_btn.setIconSize(QSize(14, 14))
 
             # Re-render the reveal icons in the new theme's icon colour
             self.icon_eye_on, self.icon_eye_off = eye_icons()

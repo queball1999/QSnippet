@@ -7,9 +7,10 @@ class SnippetContextMenu(QMenu):
     SnippetContextMenu is used when right-clicking on a snippet in the main UI.
     It provides options to edit, rename, or delete the snippet.
     """
-    editRequested   = Signal(dict)
-    renameRequested = Signal(dict)
-    deleteRequested = Signal(dict)
+    editRequested           = Signal(dict)
+    renameRequested         = Signal(dict)
+    versionHistoryRequested = Signal(dict)
+    deleteRequested         = Signal(dict)
 
     def __init__(self, entry: dict, parent=None):
         """
@@ -42,6 +43,10 @@ class SnippetContextMenu(QMenu):
         self.addAction(
             "Rename Item",
             lambda: self.renameRequested.emit(self.entry)
+        )
+        self.addAction(
+            "Version History...",
+            lambda: self.versionHistoryRequested.emit(self.entry)
         )
         self.addSeparator()
         self.addAction(

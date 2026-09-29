@@ -13,6 +13,7 @@ class TrayMenu(QMenu):
     # Quick Settings Signals
     startup_signal = Signal(bool)   # Signal to toggle startup option
     showui_signal = Signal(bool)    # Signal to toggle show UI at start option
+    notify_signal = Signal(bool)    # Signal to toggle "notify on close" option
 
     # Vault Signals
     vault_lock_signal = Signal()
@@ -33,6 +34,9 @@ class TrayMenu(QMenu):
         self.main = main
         self.parent = parent
         self.add_actions()
+        # Re-read settings each time the menu opens, so checkboxes changed from
+        # the Settings dialog (or the close toast) are never stale.
+        self.aboutToShow.connect(self.refresh)
 
     def add_actions(self):
         """
@@ -62,6 +66,15 @@ class TrayMenu(QMenu):
         )
         self.showui_action.toggled.connect(lambda checked: self.showui_signal.emit(checked))
 
+        # Notify on Close (Checkbox style)
+        self.notify_action = self.addAction("Notify on close")
+        self.notify_action.setData("Notify on close")
+        self.notify_action.setCheckable(True)
+        self.notify_action.setChecked(
+            self.main.settings["general"]["tray_behavior"]["notify_on_close"].get("value", True)
+        )
+        self.notify_action.toggled.connect(lambda checked: self.notify_signal.emit(checked))
+
         self.addSeparator()
 
         self.vault_unlock_action = self.addAction("Unlock Vault")
@@ -88,6 +101,7 @@ class TrayMenu(QMenu):
         """Sync tray menu checkboxes with current settings."""
         self.launch_action.blockSignals(True)
         self.showui_action.blockSignals(True)
+        self.notify_action.blockSignals(True)
 
         self.launch_action.setChecked(
             self.main.settings["general"]["startup_behavior"]["start_at_boot"].get("value", False)
@@ -95,9 +109,13 @@ class TrayMenu(QMenu):
         self.showui_action.setChecked(
             self.main.settings["general"]["startup_behavior"]["show_ui_at_start"].get("value", False)
         )
+        self.notify_action.setChecked(
+            self.main.settings["general"]["tray_behavior"]["notify_on_close"].get("value", True)
+        )
 
         self.launch_action.blockSignals(False)
         self.showui_action.blockSignals(False)
+        self.notify_action.blockSignals(False)
 
     def update_vault_state(self, is_setup: bool, is_unlocked: bool) -> None:
         """Show the relevant vault action based on current vault state."""

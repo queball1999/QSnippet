@@ -7,6 +7,7 @@ from utils.snippet_db import (
     SnippetDB,
     validate_snippet_entry,
     DatabaseValidationError,
+    DatabaseOperationError,
     SCHEMA_MIGRATION_VERSION,
     rewrite_legacy_placeholder_braces,
 )
@@ -910,3 +911,276 @@ class TestPlaceholderBraceMigration:
         assert db.pending_migration_export_path is None
         assert db.pending_migration_archive_path is None
         assert not db.backup_dir().exists()
+
+
+class TestSnippetHistory:
+    """snippet_history: schema migration, capture, trim, purge, and restore."""
+
+    _BASE = {
+        "enabled": True, "label": "Original", "trigger": "/hist",
+        "snippet": "v1", "paste_style": "clipboard",
+        "return_press": False, "folder": "General", "tags": "",
+    }
+
+    def test_migration_creates_table_on_legacy_db(self, tmp_path, monkeypatch):
+        """Simulate upgrading a pre-existing DB: snippet_history should be
+        created, schema version bumped, and the pre-migration backup fired."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "FakeHome")
+        db_path = tmp_path / "legacy.db"
+
+        db = SnippetDB(db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/pre-existing"})
+        # Simulate a DB that predates the snippet_history migration.
+        db.conn.execute("DROP TABLE snippet_history")
+        db.conn.execute("PRAGMA user_version = 1")
+        assert db.pending_migration_archive_path is None
+
+        db2 = SnippetDB(db_path)
+
+        cols = [row[1] for row in db2.conn.execute("PRAGMA table_info(snippet_history)").fetchall()]
+        assert cols  # table exists again
+        assert db2.get_schema_version() == SCHEMA_MIGRATION_VERSION
+        assert db2.pending_migration_archive_path is not None
+        assert db2.pending_migration_archive_path.exists()
+
+    def test_fresh_db_creates_empty_history_table(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        cols = [row[1] for row in db.conn.execute("PRAGMA table_info(snippet_history)").fetchall()]
+        assert cols
+        db.insert_snippet({**self._BASE, "trigger": "/fresh"})
+        entry = db.get_snippet_by_trigger("/fresh")
+        assert db.get_snippet_history(entry["id"]) == []
+
+    def test_insert_snippet_captures_pre_edit_state_on_id_update(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/id-hist"})
+        entry = db.get_snippet_by_trigger("/id-hist")
+
+        updated = {**entry, "snippet": "v2", "label": "Updated"}
+        db.insert_snippet(updated)
+
+        history = db.get_snippet_history(entry["id"])
+        assert len(history) == 1
+        assert history[0]["snippet"] == "v1"
+        assert history[0]["label"] == "Original"
+
+    def test_insert_snippet_captures_pre_edit_state_on_trigger_fallback_update(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/trig-hist"})
+        entry = db.get_snippet_by_trigger("/trig-hist")
+
+        # No "id" in the update dict - forces the trigger-match branch.
+        db.insert_snippet({**self._BASE, "trigger": "/trig-hist", "snippet": "v2"})
+
+        history = db.get_snippet_history(entry["id"])
+        assert len(history) == 1
+        assert history[0]["snippet"] == "v1"
+
+    def test_new_insert_creates_no_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/brand-new"})
+        entry = db.get_snippet_by_trigger("/brand-new")
+        assert db.get_snippet_history(entry["id"]) == []
+
+    def test_rename_snippet_captures_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/rename-hist"})
+        entry = db.get_snippet_by_trigger("/rename-hist")
+
+        db.rename_snippet(entry["id"], "New Label")
+
+        history = db.get_snippet_history(entry["id"])
+        assert len(history) == 1
+        assert history[0]["label"] == "Original"
+
+    def test_history_trims_to_limit(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/trim"})
+        entry = db.get_snippet_by_trigger("/trim")
+
+        for i in range(5):
+            db.insert_snippet({**entry, "snippet": f"v{i + 2}"}, history_limit=3)
+
+        history = db.get_snippet_history(entry["id"])
+        assert len(history) == 3
+        # Captures are: v1 (before ->v2), v2 (before ->v3), v3 (before ->v4),
+        # v4 (before ->v5), v5 (before ->v6). Trimming to 3 keeps the most
+        # recent captures: v3, v4, v5.
+        assert {h["snippet"] for h in history} == {"v3", "v4", "v5"}
+
+    def test_history_limit_zero_is_unlimited(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/unlimited"})
+        entry = db.get_snippet_by_trigger("/unlimited")
+
+        for i in range(5):
+            db.insert_snippet({**entry, "snippet": f"v{i + 2}"}, history_limit=0)
+
+        assert len(db.get_snippet_history(entry["id"])) == 5
+
+    def test_history_disabled_creates_no_rows(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/disabled"})
+        entry = db.get_snippet_by_trigger("/disabled")
+
+        db.insert_snippet({**entry, "snippet": "v2"}, history_enabled=False)
+
+        assert db.get_snippet_history(entry["id"]) == []
+        assert db.get_snippet_by_trigger("/disabled")["snippet"] == "v2"
+
+    def test_purge_snippet_history_clears_all_snippets(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/purge-a"})
+        db.insert_snippet({**self._BASE, "trigger": "/purge-b"})
+        entry_a = db.get_snippet_by_trigger("/purge-a")
+        entry_b = db.get_snippet_by_trigger("/purge-b")
+        db.insert_snippet({**entry_a, "snippet": "v2"})
+        db.insert_snippet({**entry_b, "snippet": "v2"})
+        assert db.get_snippet_history(entry_a["id"])
+        assert db.get_snippet_history(entry_b["id"])
+
+        db.purge_snippet_history()
+
+        assert db.get_snippet_history(entry_a["id"]) == []
+        assert db.get_snippet_history(entry_b["id"]) == []
+
+    def test_restore_snippet_version_restores_fields_and_captures_pre_restore_state(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/restore"})
+        entry = db.get_snippet_by_trigger("/restore")
+        db.insert_snippet({**entry, "snippet": "v2"})
+        entry_v2 = db.get_snippet_by_trigger("/restore")
+        history = db.get_snippet_history(entry["id"])
+        assert len(history) == 1  # the v1 snapshot
+
+        db.restore_snippet_version(history[0]["id"])
+
+        restored = db.get_snippet_by_trigger("/restore")
+        assert restored["snippet"] == "v1"
+
+        # Restoring is itself an edit: the pre-restore (v2) state is now saved.
+        history_after = db.get_snippet_history(entry["id"])
+        assert len(history_after) == 2
+        assert {h["snippet"] for h in history_after} == {"v1", "v2"}
+
+    def test_restore_refuses_when_encryption_state_changed(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/enc-mismatch"})
+        entry = db.get_snippet_by_trigger("/enc-mismatch")
+        db.insert_snippet({**entry, "snippet": "v2"})
+        history = db.get_snippet_history(entry["id"])[0]
+
+        # The live snippet has since become encrypted; the history row has not.
+        db.conn.execute("UPDATE snippets SET is_encrypted = 1 WHERE id = ?", (entry["id"],))
+
+        with pytest.raises(DatabaseOperationError):
+            db.restore_snippet_version(history["id"])
+
+        # Live row is untouched by the refused restore.
+        assert db.get_snippet_by_trigger("/enc-mismatch")["snippet"] == "v2"
+
+    def test_unchanged_save_creates_no_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/same"})
+        entry = db.get_snippet_by_trigger("/same")
+
+        for _ in range(3):
+            db.insert_snippet(dict(entry))
+
+        assert db.get_snippet_history(entry["id"]) == []
+
+    def test_unchanged_save_does_not_trim_existing_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/keep"})
+        entry = db.get_snippet_by_trigger("/keep")
+        db.insert_snippet({**entry, "snippet": "v2"}, history_limit=1)
+        current = db.get_snippet_by_trigger("/keep")
+
+        db.insert_snippet(dict(current), history_limit=1)
+
+        history = db.get_snippet_history(entry["id"])
+        assert [h["snippet"] for h in history] == ["v1"]
+
+    def test_rename_to_same_label_creates_no_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/same-label"})
+        entry = db.get_snippet_by_trigger("/same-label")
+
+        db.rename_snippet(entry["id"], "Original")
+
+        assert db.get_snippet_history(entry["id"]) == []
+
+    def test_restore_refuses_when_trigger_now_taken(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/old-trigger"})
+        entry = db.get_snippet_by_trigger("/old-trigger")
+        db.insert_snippet({**entry, "trigger": "/new-trigger"})
+        history = db.get_snippet_history(entry["id"])[0]
+
+        # Another snippet claims the trigger the history row used.
+        db.insert_snippet({**self._BASE, "label": "Squatter", "trigger": "/old-trigger"})
+
+        with pytest.raises(DatabaseOperationError, match="Squatter"):
+            db.restore_snippet_version(history["id"])
+
+        assert db.get_snippet(entry["id"])["trigger"] == "/new-trigger"
+
+    def test_restore_refuses_when_vault_changed(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/vault-swap"})
+        entry = db.get_snippet_by_trigger("/vault-swap")
+        db.conn.execute(
+            "UPDATE snippets SET is_encrypted = 1, vault_uuid = 'vault-a' WHERE id = ?",
+            (entry["id"],),
+        )
+        db.insert_snippet({**entry, "snippet": "cipher-v2"})
+        history = db.get_snippet_history(entry["id"])[0]
+
+        # The vault was reset: same encryption state, different vault.
+        db.conn.execute("UPDATE snippets SET vault_uuid = 'vault-b' WHERE id = ?", (entry["id"],))
+
+        with pytest.raises(DatabaseOperationError, match="different vault"):
+            db.restore_snippet_version(history["id"])
+
+    def test_count_snippet_and_folder_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/count-a", "folder": "Work"})
+        db.insert_snippet({**self._BASE, "trigger": "/count-b", "folder": "Work/Sub"})
+        db.insert_snippet({**self._BASE, "trigger": "/count-c", "folder": "Other"})
+        a = db.get_snippet_by_trigger("/count-a")
+        b = db.get_snippet_by_trigger("/count-b")
+        c = db.get_snippet_by_trigger("/count-c")
+        db.insert_snippet({**a, "snippet": "v2"})
+        db.insert_snippet({**a, "snippet": "v3"})
+        db.insert_snippet({**b, "snippet": "v2"})
+        db.insert_snippet({**c, "snippet": "v2"})
+
+        assert db.count_snippet_history(a["id"]) == 2
+        assert db.count_folder_history("Work") == 3
+        assert db.count_folder_history("Other") == 1
+
+    def test_delete_snippet_cascades_history(self, temp_snippet_db_path):
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/cascade"})
+        entry = db.get_snippet_by_trigger("/cascade")
+        db.insert_snippet({**entry, "snippet": "v2"})
+        assert db.get_snippet_history(entry["id"])
+
+        db.delete_snippet(entry["id"])
+
+        assert db.get_snippet_history(entry["id"]) == []
+
+    def test_import_from_yaml_does_not_create_history(self, temp_snippet_db_path, tmp_path):
+        from utils.file_utils import FileUtils
+
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_snippet({**self._BASE, "trigger": "/yaml-import"})
+        entry = db.get_snippet_by_trigger("/yaml-import")
+
+        yaml_path = tmp_path / "import.yaml"
+        FileUtils.export_snippets_yaml(yaml_path, [{**entry, "snippet": "from yaml"}])
+
+        db.import_from_yaml(yaml_path)
+
+        assert db.get_snippet_by_trigger("/yaml-import")["snippet"] == "from yaml"
+        assert db.get_snippet_history(entry["id"]) == []

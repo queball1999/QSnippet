@@ -1290,6 +1290,11 @@ if __name__ == '__main__':
     from PySide6.QtGui import QIcon
 
     app = QApplication(sys.argv)
+    # Tray app: closing the last visible window (e.g. the "still running"
+    # toast) must NOT quit the process. The main window hides to the tray on
+    # close, so the app keeps living in the background until the user picks
+    # "Exit" from the tray menu.
+    app.setQuitOnLastWindowClosed(False)
     try:
         ex = main()
         sys.exit(ex.app.exec())

@@ -16,6 +16,7 @@ class MenuBar(QMenuBar):
     collectLogsRequested = Signal()
     viewBackupHistoryRequested = Signal()
     viewReleaseHistoryRequested = Signal()
+    viewSnippetHistoryRequested = Signal()
     logLevelChanged = Signal(str)
     showAppInfo = Signal()
     show_settings = Signal()
@@ -260,6 +261,13 @@ class MenuBar(QMenuBar):
         release_history_act.setShortcut("F9")
         release_history_act.triggered.connect(self.viewReleaseHistoryRequested.emit)
         history_menu.addAction(release_history_act)
+
+        # Snippet History
+        snippet_history_icon = QIcon(FileUtils.icon_path("history.svg"))
+        snippet_history_act = QAction(snippet_history_icon, "Snippet History", self)
+        snippet_history_act.setStatusTip("Browse and restore saved snippet versions")
+        snippet_history_act.triggered.connect(self.viewSnippetHistoryRequested.emit)
+        history_menu.addAction(snippet_history_act)
 
         # Report a Bug
         bug_icon = QIcon(FileUtils.icon_path("bug-outline.svg"))

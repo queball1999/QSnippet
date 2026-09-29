@@ -34,6 +34,9 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+#  QSnippet.spec is hand-maintained and is the single source of truth for
+#  what both tools/build.ps1 and tools/build.sh bundle. It must be committed.
+!QSnippet.spec
 
 # Installer logs
 pip-log.txt
@@ -182,3 +185,6 @@ assets/images/Thumbs.db
 output/*/updater
 output/*/updater.exe
 output/*/updater*.sha256
+
+# Brag
+brag*/

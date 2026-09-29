@@ -25,6 +25,7 @@ class SnippetTable(QTreeView):
     editSnippet = Signal(dict)           # entry data
     renameFolder = Signal(QStandardItem)  # folder item
     renameSnippet = Signal(dict)           # entry data
+    versionHistorySnippet = Signal(dict)   # entry data
     deleteFolder = Signal(QStandardItem)  # folder item
     deleteSnippet = Signal(dict)           # entry data
     entrySelected = Signal(object)         # when a snippet is clicked (dict or None)
@@ -536,6 +537,7 @@ class SnippetTable(QTreeView):
             menu = SnippetContextMenu(data, self)
             menu.editRequested.connect(self.editSnippet.emit)
             menu.renameRequested.connect(self.renameSnippet.emit)
+            menu.versionHistoryRequested.connect(self.versionHistorySnippet.emit)
             menu.deleteRequested.connect(self.deleteSnippet.emit)
 
         menu.exec(event.globalPos())

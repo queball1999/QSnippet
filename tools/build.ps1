@@ -10,28 +10,21 @@ Set-Location (Join-Path $ScriptDir "..")
 # updating dir 12/22/25 to reflect new config path
 $VERSION = python -c "import yaml; print(yaml.safe_load(open('config/config.yaml'))['version'])"
 
-$APP_NAME     = "QSnippet"
-$ENTRY        = "QSnippet.py"
-$IconsDir     = Resolve-Path "./assets/icons"
-$ImagesDir    = Resolve-Path "./assets/images"
-$ICON_WINDOWS = (Join-Path $IconsDir "QSnippet.ico")
+$APP_NAME = "QSnippet"
 
 # Define custom paths
 $BUILD_DIR = "build"
 $DIST_DIR  = "output/windows"
 
+# Everything the bundle contains (icon, name, bundled assets) lives in
+# QSnippet.spec so Windows and Linux stay in lockstep. Only the output
+# locations are passed on the command line.
 $PYINSTALLER_ARGS = @(
     "--noconfirm",
-    "--onefile",
-    "--windowed",
-    "--icon=$ICON_WINDOWS",
+    "--clean",
     "--distpath", $DIST_DIR,
     "--workpath", "$BUILD_DIR/work",
-    "--specpath", "$BUILD_DIR/spec",
-    "--name", $APP_NAME,
-    "--add-data", "$IconsDir;assets/icons",
-    "--add-data", "$ImagesDir;assets/images",
-    $ENTRY
+    "QSnippet.spec"
 )
 
 Write-Host "Building $APP_NAME v$VERSION..." -ForegroundColor Cyan
@@ -98,11 +91,26 @@ if (Test-Path $buildInfoPath) {
     Remove-Item $buildInfoPath -Force -ErrorAction SilentlyContinue
 }
 
-# Copy assets folder (icons, images required for bundled app)
-Copy-Item "assets" (Join-Path $portableDir "assets") -Recurse -Force
+# Copy the loose asset tree the app prefers over its bundled copy.
+# Icons and images only: videos/ is demo media and icons/old is dead art.
+$assetsDest = Join-Path $portableDir "assets"
+New-Item -ItemType Directory -Path $assetsDest | Out-Null
+Copy-Item "assets/icons"  (Join-Path $assetsDest "icons")  -Recurse -Force
+Copy-Item "assets/images" (Join-Path $assetsDest "images") -Recurse -Force
+Remove-Item (Join-Path $assetsDest "icons/old") -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem $assetsDest -Recurse -Force -Include 'Thumbs.db','.DS_Store' |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Copy notices folder
 Copy-Item "notices" (Join-Path $portableDir "notices") -Recurse -Force
+
+# Copy the branded updater so in-app updates work from the portable build too.
+$updaterSrc = Join-Path $DIST_DIR "updater.exe"
+if (Test-Path $updaterSrc) {
+    Copy-Item $updaterSrc (Join-Path $portableDir "updater.exe") -Force
+} else {
+    Write-Warning "updater.exe not found in $DIST_DIR; portable build will have no in-app updater"
+}
 
 # Copy license
 Copy-Item "LICENSE" (Join-Path $portableDir "LICENSE") -Force

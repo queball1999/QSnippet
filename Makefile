@@ -1,4 +1,4 @@
-.PHONY: run build build-deb updater test benchmark lint release clean help create-venv recreate-venv activate-venv
+.PHONY: run build portable build-deb updater test benchmark lint release clean distclean help create-venv recreate-venv activate-venv
 
 MAIN := QSnippet.py
 VENV_DIR := .venv
@@ -14,24 +14,29 @@ $(eval $(TAG):;@:)
 endif
 endif
 
+# Prefer the project venv when it exists; otherwise fall back to a system
+# interpreter (the `py` launcher on Windows, `python3` elsewhere). No absolute
+# paths, so this works on any machine and in CI.
 ifeq ($(OS),Windows_NT)
-PYTHON := "c:\Python314\python.exe"
 VENV_PYTHON := $(VENV_DIR)\Scripts\python.exe
+PYTHON := $(if $(wildcard $(VENV_DIR)\Scripts\python.exe),$(VENV_PYTHON),py -3)
 else
-PYTHON := python3
 VENV_PYTHON := $(VENV_DIR)/bin/python3
+PYTHON := $(if $(wildcard $(VENV_DIR)/bin/python3),$(VENV_PYTHON),python3)
 endif
 
 help:
 ifeq ($(OS),Windows_NT)
 	@echo Available targets:
 	@echo   make run            - Run the application
-	@echo   make build          - Build the updater, binary and installer
+	@echo   make build          - Build the updater, binary, portable zip and installer
+	@echo   make portable       - Build just the binary and portable zip (no installer)
 	@echo   make updater        - Build the branded updater into output\windows
 	@echo   make test           - Run the unit tests
 	@echo   make lint           - Run flake8 the way CI does
 	@echo   make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release
-	@echo   make clean          - Clean build artifacts
+	@echo   make clean          - Remove build staging (build\, package\, build_info.py, __pycache__)
+	@echo   make distclean      - clean plus output\ and dist\ (removes built artifacts)
 	@echo   make create-venv    - Create .venv if missing and install dependencies
 	@echo   make recreate-venv  - Delete and rebuild .venv from scratch
 	@echo   make activate-venv  - Print the command to activate .venv
@@ -39,12 +44,14 @@ else
 	@echo "Available targets:"
 	@echo "  make run            - Run the application"
 	@echo "  make build          - Build the application (updater + PyInstaller binary + portable archive)"
+	@echo "  make portable       - Build just the binary and portable zip (no updater/.deb)"
 	@echo "  make updater        - Build the branded updater into output/linux"
 	@echo "  make test           - Run the unit tests"
 	@echo "  make lint           - Run flake8 the way CI does"
 	@echo "  make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release"
 	@echo "  make build-deb      - Package a .deb from the build output (run after 'make build')"
-	@echo "  make clean          - Clean build artifacts"
+	@echo "  make clean          - Remove build staging (build/, package/, build_info.py, __pycache__)"
+	@echo "  make distclean      - clean plus output/ and dist/ (removes built artifacts)"
 	@echo "  make create-venv    - Create .venv (if missing) and install dependencies"
 	@echo "  make recreate-venv  - Delete and rebuild .venv from scratch"
 	@echo "  make activate-venv  - Print the command to activate .venv"
@@ -99,6 +106,16 @@ else
 	UPDATER_SHA256=$$(sha256sum output/linux/updater | cut -d' ' -f1) bash tools/build.sh
 endif
 
+# Just the PyInstaller binary + portable zip, no updater and no installer.
+# Both build scripts run `pyinstaller QSnippet.spec`, so the bundle contents
+# match a full release build.
+portable:
+ifeq ($(OS),Windows_NT)
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\build.ps1"
+else
+	bash tools/build.sh
+endif
+
 build-deb:
 ifeq ($(OS),Windows_NT)
 	@echo build-deb is only available on Linux
@@ -106,17 +123,30 @@ else
 	bash tools/package-deb.sh
 endif
 
+# Remove build staging only. Keeps output/ and dist/ (built artifacts);
+# use `make distclean` to remove those too.
 clean:
 ifeq ($(OS),Windows_NT)
 	@powershell -NoProfile -Command "& { \
-		if (Test-Path build) { Remove-Item build -Recurse -Force; Write-Host 'Removed build/' }; \
+		foreach ($$d in 'build','package') { if (Test-Path $$d) { Remove-Item $$d -Recurse -Force; Write-Host ('Removed ' + $$d + '/') } }; \
+		if (Test-Path 'config\build_info.py') { Remove-Item 'config\build_info.py' -Force; Write-Host 'Removed config/build_info.py' }; \
 		Get-ChildItem -Path . -Include '__pycache__' -Recurse -Force | Remove-Item -Recurse -Force; \
-		Write-Host 'Cleaned build artifacts' \
+		Write-Host 'Cleaned build staging' \
 	}"
 else
-	@rm -rf build
+	@rm -rf build package config/build_info.py
 	@find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
-	@echo "Cleaned build artifacts"
+	@echo "Cleaned build staging"
+endif
+
+distclean: clean
+ifeq ($(OS),Windows_NT)
+	@powershell -NoProfile -Command "& { \
+		foreach ($$d in 'output','dist') { if (Test-Path $$d) { Remove-Item $$d -Recurse -Force; Write-Host ('Removed ' + $$d + '/') } } \
+	}"
+else
+	@rm -rf output dist
+	@echo "Removed output/ and dist/"
 endif
 
 create-venv:

@@ -4,6 +4,11 @@ deb-package/*   text eol=lf
 *.desktop       text eol=lf
 *.metainfo.xml  text eol=lf
 
+# Makefile recipes and the PyInstaller spec must stay LF on every platform:
+# a trailing CR breaks make recipe lines, and the spec runs cross-OS.
+Makefile        text eol=lf
+*.spec          text eol=lf
+
 # Windows-native files keep CRLF
 *.bat           text eol=crlf
 *.cmd           text eol=crlf

@@ -557,7 +557,7 @@ class FileUtils:
             for entry in snippets:
                 # Strip internal database IDs to prevent ID-based conflicts
                 clean_entry = {k: v for k, v in entry.items() if k != "id"}
-                is_new = db.insert_snippet(clean_entry)
+                is_new = db.insert_snippet(clean_entry, history_enabled=False)
                 if is_new is True:
                     new_count += 1
                 elif is_new is False:

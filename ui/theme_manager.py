@@ -180,6 +180,11 @@ OBJECT_NAME_FONTS: dict[str, tuple[str, bool]] = {
     "BackupPageBtn":             ("small",  False),
     "BackupPageBtnCurrent":      ("small",  True),
     "BackupPageSize":            ("small",  False),
+    # Tray close toast
+    "TrayCloseToastTitle":       ("medium", True),
+    "TrayCloseToastMessage":     ("small",  False),
+    "TrayCloseToastDisable":     ("small",  False),
+    "TrayCloseToastClose":       ("small",  True),
     # Placeholder dialog
     "PanelTitle":                ("large",  True),
     "FieldLabel":                ("large",  False),
@@ -1186,19 +1191,32 @@ QLabel#PopoutLabel {{
     color: {c['text_muted']};
 }}
 
+/* Tray close toast (parentless top-level, so it picks these up from the app sheet) */
+QFrame#TrayCloseToastCard {{
+    background-color: {c['panel']};
+    border: 1px solid {c['border']};
+    border-radius: {r8}px;
+}}
+QLabel#TrayCloseToastTitle {{
+    color: {c['text']};
+}}
+QLabel#TrayCloseToastMessage {{
+    color: {c['text_muted']};
+}}
+
 /* Snippet popout button */
-QPushButton#PopoutBtn {{
+QPushButton#PopoutBtn, QPushButton#HistoryBtn, QPushButton#TrayCloseToastX {{
     background: transparent;
     border: none;
     min-width: 0;
     min-height: 0;
     padding: 4px;
 }}
-QPushButton#PopoutBtn:hover {{
+QPushButton#PopoutBtn:hover, QPushButton#HistoryBtn:hover, QPushButton#TrayCloseToastX:hover {{
     background-color: {c['hover']};
     border-radius: {r4}px;
 }}
-QPushButton#PopoutBtn:pressed {{
+QPushButton#PopoutBtn:pressed, QPushButton#HistoryBtn:pressed, QPushButton#TrayCloseToastX:pressed {{
     background-color: {c['selected']};
     border-radius: {r4}px;
 }}
@@ -1243,17 +1261,17 @@ QLabel#VaultWarningText {{
 }}
 /* Primary action. Geometry is inherited from the base QPushButton rule so it
    matches every other button in the app; only the accent fill is added. */
-QPushButton#VaultConfirmBtn {{
+QPushButton#VaultConfirmBtn, QPushButton#TrayCloseToastClose {{
     background-color: {c['accent']};
     color: {c['on_accent']};
     border: 1px solid {c['accent']};
     font-weight: 600;
 }}
-QPushButton#VaultConfirmBtn:hover {{
+QPushButton#VaultConfirmBtn:hover, QPushButton#TrayCloseToastClose:hover {{
     background-color: {c['accent']};
     border-color: {c['text']};
 }}
-QPushButton#VaultConfirmBtn:pressed {{
+QPushButton#VaultConfirmBtn:pressed, QPushButton#TrayCloseToastClose:pressed {{
     background-color: {c['accent']};
     border-color: {c['on_accent']};
 }}
@@ -1409,7 +1427,7 @@ QPushButton#PlatformNoticeClose:hover {{
 }}
 
 /* Backup history table */
-QTableWidget#BackupHistoryTable {{
+QTableWidget#BackupHistoryTable, QTableWidget#VersionHistoryTable {{
     background-color: transparent;
     color: {c['text']};
     border: 1px solid {c['border']};
@@ -1417,11 +1435,11 @@ QTableWidget#BackupHistoryTable {{
     gridline-color: {c['border']};
     outline: none;
 }}
-QTableWidget#BackupHistoryTable::item {{
+QTableWidget#BackupHistoryTable::item, QTableWidget#VersionHistoryTable::item {{
     padding: {p6}px {p8}px;
     border-bottom: 1px solid {c['border']};
 }}
-QTableWidget#BackupHistoryTable QHeaderView::section {{
+QTableWidget#BackupHistoryTable QHeaderView::section, QTableWidget#VersionHistoryTable QHeaderView::section {{
     background-color: {c['card']};
     color: {c['text_muted']};
     border: none;

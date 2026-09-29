@@ -8,7 +8,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Sequence
 
 from .file_utils import FileUtils
 
@@ -17,7 +17,14 @@ logger = logging.getLogger(__name__)
 # Bump whenever a new startup migration is added below. Gates the one-time
 # pre-migration backup so it only fires when a migration will actually run,
 # not on every normal launch.
-SCHEMA_MIGRATION_VERSION = 1
+SCHEMA_MIGRATION_VERSION = 2
+
+# Editable snippet fields, in the column order capture_snippet_history selects.
+HISTORY_TRACKED_FIELDS = (
+    "enabled", "label", "trigger", "snippet", "paste_style",
+    "return_press", "folder", "tags",
+)
+HISTORY_BOOL_FIELDS = {"enabled", "return_press"}
 
 # Names substituted by SnippetExpander.process_snippet_text() as {{name}}.
 # Mirrors the "replacements" dict in utils/keyboard_utils.py; kept as an
@@ -193,6 +200,7 @@ class SnippetDB:
             self.backup_done_this_session = True
 
         self.migrate_vault_schema()
+        self.migrate_snippet_history_schema()
         self.create_indexes()
         self.setup_fts()
         self.create_vault_folders_table()
@@ -691,16 +699,30 @@ class SnippetDB:
             raise DatabaseOperationError(f"Failed to seed database: {e}") from e
 
     # CRUD Operations
-    def insert_snippet(self, entry: Dict[str, Any]) -> bool:
+    def insert_snippet(
+        self,
+        entry: Dict[str, Any],
+        history_enabled: bool = True,
+        history_limit: int = 10,
+    ) -> bool:
         """
         Insert a new snippet or update an existing one.
 
         If an entry with the same id exists, it is updated. Otherwise,
         a new snippet is inserted. Conflicts on trigger result in an update.
 
+        When an existing snippet is updated, its pre-edit state is first
+        captured into snippet_history (unless history_enabled is False),
+        then trimmed to history_limit (0 means unlimited).
+
         Args:
             entry (Dict[str, Any]): Snippet data to insert or update.
-        
+            history_enabled (bool): Whether to capture the pre-edit state
+                on update. Callers that should not generate history rows
+                (e.g. bulk YAML import) should pass False.
+            history_limit (int): Max history rows to retain per snippet
+                after this update. 0 means unlimited.
+
         Returns:
             bool | None: True if a new snippet was created, False if updated,
                 or None if an error occurred.
@@ -729,6 +751,7 @@ class SnippetDB:
 
                 if exists:  # update existing
                     logger.info("Found existing snippet. Updating entry.")
+                    captured = history_enabled and self.capture_snippet_history(cur, entry_id, entry)
                     cur.execute("""
                         UPDATE snippets
                         SET
@@ -743,6 +766,8 @@ class SnippetDB:
                         WHERE id = :id
                     """, entry)
                     rows_changed = cur.rowcount
+                    if captured:
+                        self.trim_snippet_history(cur, entry_id, history_limit)
                     logger.info(f"ID-based update complete. Rows changed: {rows_changed}")
                     return False  # was an update
 
@@ -765,6 +790,7 @@ class SnippetDB:
                         update_entry = dict(entry)
                         update_entry["id"] = trigger_row[0]
                         entry["id"] = trigger_row[0]  # populate id for callers relying on this side effect
+                        captured = history_enabled and self.capture_snippet_history(cur, trigger_row[0], update_entry)
                         cur.execute("""
                             UPDATE snippets
                             SET
@@ -779,6 +805,8 @@ class SnippetDB:
                             WHERE id = :id
                         """, update_entry)
                         rows_changed = cur.rowcount
+                        if captured:
+                            self.trim_snippet_history(cur, trigger_row[0], history_limit)
                         logger.info(f"Trigger-based update complete for trigger '{trigger}'. Rows changed: {rows_changed}")
                         return False  # was an update
                     else:
@@ -796,6 +824,340 @@ class SnippetDB:
             trigger = entry.get('trigger', 'unknown')
             logger.exception(f"Database error while inserting snippet with trigger: {trigger}")
             raise DatabaseOperationError(f"Failed to insert snippet with trigger '{trigger}': {e}") from e
+
+    # Version History
+
+    def capture_snippet_history(
+        self,
+        cur: sqlite3.Cursor,
+        snippet_id: int,
+        new_values: Dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Copy the current snippets row for snippet_id into snippet_history.
+
+        Must be called with the same cursor/transaction the caller is about
+        to run its UPDATE on, and called before that UPDATE executes, so the
+        row captured reflects the pre-edit state. A no-op if snippet_id
+        doesn't currently exist.
+
+        When new_values is given, the capture is skipped if none of those
+        fields actually differ from the current row, so saving a snippet
+        without changes does not push real versions out of history.
+
+        Args:
+            cur (sqlite3.Cursor): Open write cursor of the caller's transaction.
+            snippet_id (int): The snippet whose current state should be preserved.
+            new_values (Dict[str, Any] | None): The values about to be written.
+                Only keys in HISTORY_TRACKED_FIELDS are compared.
+
+        Returns:
+            bool: True if a history row was written, otherwise False.
+        """
+        cur.execute(
+            "SELECT enabled, label, trigger, snippet, paste_style, return_press, "
+            "folder, tags, is_encrypted, vault_uuid FROM snippets WHERE id = ?",
+            (snippet_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return False
+        if new_values is not None and not self.snippet_values_differ(row, new_values):
+            logger.debug("Snippet %s unchanged; skipping history capture", snippet_id)
+            return False
+        cur.execute(
+            "INSERT INTO snippet_history "
+            "(snippet_id, enabled, label, trigger, snippet, paste_style, "
+            "return_press, folder, tags, is_encrypted, vault_uuid) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (snippet_id, *row),
+        )
+        return True
+
+    def snippet_values_differ(self, row: Sequence[Any], new_values: Dict[str, Any]) -> bool:
+        """
+        Compare a snippets row against the values about to be written.
+
+        Args:
+            row (Sequence[Any]): Row selected in HISTORY_TRACKED_FIELDS order.
+            new_values (Dict[str, Any]): The values about to be written.
+
+        Returns:
+            bool: True if any tracked field present in new_values differs.
+        """
+        for index, field in enumerate(HISTORY_TRACKED_FIELDS):
+            if field not in new_values:
+                continue
+            old, new = row[index], new_values[field]
+            if field in HISTORY_BOOL_FIELDS:
+                if bool(old) != bool(new):
+                    return True
+            elif (old or "") != (new or ""):
+                return True
+        return False
+
+    def trim_snippet_history(self, cur: sqlite3.Cursor, snippet_id: int, limit: int) -> None:
+        """
+        Delete the oldest snippet_history rows for snippet_id beyond limit.
+
+        Args:
+            cur (sqlite3.Cursor): Open write cursor of the caller's transaction.
+            snippet_id (int): The snippet whose history should be trimmed.
+            limit (int): Maximum history rows to retain. 0 or less means
+                unlimited (no trimming is performed).
+
+        Returns:
+            None
+        """
+        if limit is None or limit <= 0:
+            return
+        cur.execute(
+            "DELETE FROM snippet_history WHERE snippet_id = ? AND id NOT IN ("
+            "  SELECT id FROM snippet_history WHERE snippet_id = ? "
+            "  ORDER BY edited_at DESC, id DESC LIMIT ?"
+            ")",
+            (snippet_id, snippet_id, limit),
+        )
+
+    def normalize_snippet_history_row(self, row: sqlite3.Row | None) -> Dict[str, Any]:
+        """
+        Normalize a snippet_history row from SQLite into application types.
+
+        Args:
+            row (sqlite3.Row | None): The row to normalize.
+
+        Returns:
+            Dict[str, Any]: A normalized snippet history dictionary.
+        """
+        if row is None:
+            return {}
+
+        item = dict(row)
+        if "enabled" in item:
+            item["enabled"] = bool(item["enabled"])
+        if "return_press" in item:
+            item["return_press"] = bool(item["return_press"])
+        if "is_encrypted" in item:
+            item["is_encrypted"] = bool(item["is_encrypted"])
+        return item
+
+    def get_snippet_history(self, snippet_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieve saved version history for one snippet, newest first.
+
+        Args:
+            snippet_id (int): The identifier of the snippet.
+
+        Returns:
+            List[Dict[str, Any]]: A list of history entries (empty list if none exist).
+
+        Raises:
+            DatabaseOperationError: If retrieval fails.
+        """
+        logger.info("Fetching snippet history from the database.")
+        logger.debug("Snippet ID: %s", snippet_id)
+
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM snippet_history WHERE snippet_id = ? "
+                    "ORDER BY edited_at DESC, id DESC",
+                    (snippet_id,),
+                )
+                return [self.normalize_snippet_history_row(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
+            logger.exception("Failed to fetch snippet history")
+            raise DatabaseOperationError(f"Failed to fetch snippet history for id '{snippet_id}': {e}") from e
+
+    def get_all_snippet_history(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve saved version history across every snippet, newest first.
+
+        Returns:
+            List[Dict[str, Any]]: A list of history entries (empty list if none exist).
+
+        Raises:
+            DatabaseOperationError: If retrieval fails.
+        """
+        logger.info("Fetching all snippet history from the database.")
+
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippet_history ORDER BY edited_at DESC, id DESC")
+                return [self.normalize_snippet_history_row(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
+            logger.exception("Failed to fetch all snippet history")
+            raise DatabaseOperationError(f"Failed to fetch all snippet history: {e}") from e
+
+    def purge_snippet_history(self) -> None:
+        """
+        Permanently delete every saved snippet version, across all snippets.
+
+        Used when the user disables version history and chooses to purge
+        rather than keep what was already saved.
+
+        Returns:
+            None
+
+        Raises:
+            DatabaseOperationError: If the purge fails.
+        """
+        logger.info("Purging all snippet history from the database.")
+
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("DELETE FROM snippet_history")
+                logger.info("Snippet history purged")
+        except sqlite3.Error as e:
+            logger.exception("Failed to purge snippet history")
+            raise DatabaseOperationError(f"Failed to purge snippet history: {e}") from e
+
+    def count_snippet_history(self, snippet_id: int) -> int:
+        """
+        Count the saved versions for one snippet.
+
+        Used to warn the user before a delete, since deleting a snippet
+        also deletes its saved versions.
+
+        Args:
+            snippet_id (int): The identifier of the snippet.
+
+        Returns:
+            int: Number of saved versions (0 if the lookup fails).
+        """
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) FROM snippet_history WHERE snippet_id = ?",
+                    (snippet_id,),
+                )
+                return int(cur.fetchone()[0])
+        except sqlite3.Error:
+            logger.exception("Failed to count snippet history")
+            return 0
+
+    def count_folder_history(self, folder: str) -> int:
+        """
+        Count the saved versions for every snippet in a folder and its sub-folders.
+
+        Args:
+            folder (str): The folder path (may be nested, e.g. "a/b").
+
+        Returns:
+            int: Number of saved versions (0 if the lookup fails).
+        """
+        try:
+            escaped_folder = self.escape_like_value(folder)
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) FROM snippet_history WHERE snippet_id IN ("
+                    "  SELECT id FROM snippets WHERE folder = ? OR folder LIKE ? ESCAPE '\\'"
+                    ")",
+                    (folder, f"{escaped_folder}/%"),
+                )
+                return int(cur.fetchone()[0])
+        except sqlite3.Error:
+            logger.exception("Failed to count folder history")
+            return 0
+
+    def restore_snippet_version(
+        self,
+        history_id: int,
+        history_enabled: bool = True,
+        history_limit: int = 10,
+    ) -> bool:
+        """
+        Restore a snippet to a prior saved version.
+
+        Builds an entry dict from the chosen snippet_history row and writes
+        it back onto the live snippets row via insert_snippet(), so the
+        pre-restore state is itself pushed to history first - restoring is
+        an edit, and this is captured for free by insert_snippet()'s own
+        update hook.
+
+        Args:
+            history_id (int): The identifier of the snippet_history row to restore.
+            history_enabled (bool): Whether restoring itself should be captured
+                as a new history entry.
+            history_limit (int): Max history rows to retain per snippet after
+                this restore. 0 means unlimited.
+
+        Returns:
+            bool | None: True if a new snippet was created, False if updated,
+                or None if an error occurred (mirrors insert_snippet()).
+
+        Raises:
+            DatabaseOperationError: If the history entry or live snippet no
+                longer exists, if the vault encryption state has changed
+                since this version was saved, or if the restore fails.
+        """
+        logger.info("Restoring snippet version.")
+        logger.debug("History ID: %s", history_id)
+
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM snippet_history WHERE id = ?", (history_id,))
+                row = cur.fetchone()
+
+            if row is None:
+                raise DatabaseOperationError(f"No snippet history entry with id '{history_id}'")
+
+            historic = self.normalize_snippet_history_row(row)
+            current = self.get_snippet(historic["snippet_id"])
+            if not current:
+                raise DatabaseOperationError(
+                    f"Snippet '{historic['snippet_id']}' no longer exists; cannot restore."
+                )
+            if bool(current.get("is_encrypted")) != historic["is_encrypted"]:
+                # insert_snippet() never touches is_encrypted/vault_uuid, so
+                # writing a plaintext historic snapshot onto a now-encrypted
+                # row (or vice versa) would silently corrupt or leak content.
+                raise DatabaseOperationError(
+                    "Cannot restore this version: the snippet's vault encryption "
+                    "state has changed since it was saved."
+                )
+            if historic["is_encrypted"] and current.get("vault_uuid") != historic.get("vault_uuid"):
+                # Ciphertext from a previous vault cannot be decrypted with the
+                # current vault's key, so restoring it would lose the content.
+                raise DatabaseOperationError(
+                    "Cannot restore this version: it was encrypted with a "
+                    "different vault than the one this snippet uses now."
+                )
+
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT label FROM snippets WHERE trigger = ? AND id != ?",
+                    (historic["trigger"], historic["snippet_id"]),
+                )
+                conflict = cur.fetchone()
+            if conflict is not None:
+                raise DatabaseOperationError(
+                    f'Cannot restore this version: its trigger "{historic["trigger"]}" '
+                    f'is now used by the snippet "{conflict[0]}". Change that '
+                    "snippet's trigger first, then try again."
+                )
+
+            entry = {
+                "id": historic["snippet_id"],
+                "enabled": historic["enabled"],
+                "label": historic["label"],
+                "trigger": historic["trigger"],
+                "snippet": historic["snippet"],
+                "paste_style": historic["paste_style"],
+                "return_press": historic["return_press"],
+                "folder": historic["folder"],
+                "tags": historic["tags"],
+            }
+            return self.insert_snippet(entry, history_enabled=history_enabled, history_limit=history_limit)
+        except sqlite3.Error as e:
+            logger.exception("Failed to restore snippet version")
+            raise DatabaseOperationError(f"Failed to restore snippet version '{history_id}': {e}") from e
 
     def delete_snippet(self, snippet_id: id) -> None:
         """
@@ -1099,17 +1461,27 @@ class SnippetDB:
             logger.exception("Failed to retrieve folders from database")
             raise DatabaseOperationError(f"Failed to fetch folders: {e}") from e
 
-    def rename_snippet(self, snippet_id: int, new_label: str) -> None:
+    def rename_snippet(
+        self,
+        snippet_id: int,
+        new_label: str,
+        history_enabled: bool = True,
+        history_limit: int = 10,
+    ) -> None:
         """
         Rename a snippet by updating its label.
 
         Args:
             snippet_id (int): The identifier of the snippet.
             new_label (str): The new label for the snippet.
-        
+            history_enabled (bool): Whether to capture the pre-rename state
+                into snippet_history.
+            history_limit (int): Max history rows to retain per snippet
+                after this rename. 0 means unlimited.
+
         Returns:
             None
-        
+
         Raises:
             DatabaseOperationError: If renaming fails.
         """
@@ -1118,7 +1490,13 @@ class SnippetDB:
 
         try:
             with self.managed_connection(write=True) as conn:
-                conn.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
+                cur = conn.cursor()
+                captured = history_enabled and self.capture_snippet_history(
+                    cur, snippet_id, {"label": new_label}
+                )
+                cur.execute("UPDATE snippets SET label = ? WHERE id = ?", (new_label, snippet_id))
+                if captured:
+                    self.trim_snippet_history(cur, snippet_id, history_limit)
                 logger.info("Successfully renamed snippet.")
 
         except sqlite3.Error as e:
@@ -1309,7 +1687,7 @@ class SnippetDB:
             logger.debug("Imported snippets count: %d", len(snippets))
 
             for entry in snippets:
-                self.insert_snippet(entry)
+                self.insert_snippet(entry, history_enabled=False)
 
             logger.info("Successfully imported snippets from YAML.")
         except Exception as e:
@@ -1503,6 +1881,42 @@ class SnippetDB:
                     logger.info("Migrated: added is_encrypted column to snippets")
         except sqlite3.Error as exc:
             logger.warning("Vault schema migration failed: %s", exc)
+
+    def migrate_snippet_history_schema(self) -> None:
+        """Create the snippet_history table and its index (migration).
+
+        Stores a full pre-edit snapshot of a snippets row each time it is
+        edited or renamed, so older versions can be browsed and restored.
+        New table only, no ALTER on the existing snippets table, so there
+        is no per-row data risk - idempotent via CREATE TABLE/INDEX IF NOT
+        EXISTS, safe to call on every startup.
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS snippet_history (
+                        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                        snippet_id   INTEGER NOT NULL REFERENCES snippets(id) ON DELETE CASCADE,
+                        edited_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        enabled      BOOLEAN,
+                        label        TEXT NOT NULL,
+                        trigger      TEXT NOT NULL,
+                        snippet      TEXT NOT NULL,
+                        paste_style  TEXT,
+                        return_press BOOLEAN,
+                        folder       TEXT,
+                        tags         TEXT,
+                        is_encrypted BOOLEAN DEFAULT 0,
+                        vault_uuid   TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_snippet_history_snippet_edited
+                    ON snippet_history(snippet_id, edited_at DESC, id DESC)
+                """)
+                logger.info("Migrated: created snippet_history table")
+        except sqlite3.Error as exc:
+            logger.warning("Snippet history schema migration failed: %s", exc)
 
     def migrate_aad_binding_schema(self) -> None:
         """Add vault_uuid column to snippets and custom_placeholders (migration).

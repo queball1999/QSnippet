@@ -185,6 +185,7 @@ class SnippetEditor(QWidget):
         self.table.addSnippet.connect(self.on_add_snippet)
         self.table.editSnippet.connect(self.on_edit_snippet)
         self.table.renameSnippet.connect(self.on_rename_snippet)
+        self.table.versionHistorySnippet.connect(self.on_view_version_history)
         self.table.deleteSnippet.connect(self.on_delete_snippet)
 
         # Right: stack of home + form
@@ -196,6 +197,7 @@ class SnippetEditor(QWidget):
         self.form.saveClicked.connect(self.on_save)
         self.form.deleteClicked.connect(self.on_delete)
         self.form.cancelPressed.connect(self.show_home_widget)
+        self.form.versionHistoryClicked.connect(self.on_form_version_history_clicked)
 
         # Reset inactivity timer on any field edit
         self.form.new_input.textChanged.connect(self.reset_inactivity_timer)
@@ -449,7 +451,10 @@ class SnippetEditor(QWidget):
 
             # Insert the snippet into the DB
             # returns True if new, False if updated
-            is_new = self.main.snippet_db.insert_snippet(entry)
+            history_enabled, history_limit = self.version_history_settings()
+            is_new = self.main.snippet_db.insert_snippet(
+                entry, history_enabled=history_enabled, history_limit=history_limit
+            )
 
             if is_new:
                 self.main.message_box.info(
@@ -653,8 +658,16 @@ class SnippetEditor(QWidget):
             if isinstance(folder_data, dict) and "path" in folder_data
             else folder_item.text()
         )
+        message = f'Delete folder "{name}" and all its snippets (including sub-folders)?'
+        history_count = self.main.snippet_db.count_folder_history(name)
+        if history_count:
+            plural = "version" if history_count == 1 else "versions"
+            message += (
+                f"\n\nTheir {history_count} saved {plural} in version history "
+                "will also be permanently deleted."
+            )
         confirm = self.main.message_box.question(
-            f'Delete folder "{name}" and all its snippets (including sub-folders)?',
+            message,
             title="Delete Folder",
             buttons=QMessageBox.Yes | QMessageBox.No,
             default_button=QMessageBox.No
@@ -997,10 +1010,108 @@ class SnippetEditor(QWidget):
             return
         
         # Need to rename based on ID
-        self.main.snippet_db.rename_snippet(entry['id'], new_label.strip())
+        history_enabled, history_limit = self.version_history_settings()
+        self.main.snippet_db.rename_snippet(
+            entry['id'], new_label.strip(),
+            history_enabled=history_enabled, history_limit=history_limit,
+        )
         self.load_snippets()
         self.main.message_box.info(f'Renamed snippet "{old_label}" to "{new_label.strip()}"', title='Snippet Renamed')
-    
+
+    def version_history_settings(self) -> tuple:
+        """
+        Resolve the current saving.version_history_enabled/limit settings.
+
+        Returns:
+            tuple: (history_enabled: bool, history_limit: int)
+        """
+        saving = self.main.settings.get("saving", {})
+        enabled = saving.get("version_history_enabled", {}).get("value", True)
+        limit = saving.get("version_history_limit", {}).get("value", 10)
+        return bool(enabled), int(limit)
+
+    def on_view_version_history(self, entry=None, *_):
+        """
+        Open the version history dialog for the given snippet.
+
+        Args:
+            entry (dict): The snippet entry to show history for.
+
+        Returns:
+            None
+        """
+        if not entry or not entry.get("id"):
+            return
+
+        from ui.widgets.version_history_dialog import VersionHistoryDialog
+
+        history_enabled, history_limit = self.version_history_settings()
+        dialog = VersionHistoryDialog(
+            entry, self.main.snippet_db,
+            history_enabled=history_enabled, history_limit=history_limit,
+            message_box=self.main.message_box,
+            unsaved_snippet_id=self.unsaved_form_snippet_id(),
+            parent=self,
+        )
+        dialog.restored.connect(self.on_version_restored)
+        dialog.exec()
+
+    def unsaved_form_snippet_id(self):
+        """
+        Return the id of the snippet open in the form if it has unsaved edits.
+
+        Lets the version history dialog warn that restoring will discard
+        those edits.
+
+        Returns:
+            int | None: The snippet id, or None if the form is not open on an
+                existing snippet or has no unsaved changes.
+        """
+        if self.stack.currentWidget() is not self.form or not self.form.entry_id:
+            return None
+        if not self.form.has_unsaved_changes():
+            return None
+        return self.form.entry_id
+
+    def on_form_version_history_clicked(self, *_):
+        """
+        Open the version history dialog for the snippet currently open in the form.
+
+        Returns:
+            None
+        """
+        if not self.form.entry_id:
+            return
+        entry = self.main.snippet_db.get_snippet(self.form.entry_id)
+        self.on_view_version_history(entry)
+
+    def on_version_restored(self, entry: dict):
+        """
+        Handle a snippet being restored to an earlier version.
+
+        Args:
+            entry (dict): The now-current, restored snippet entry.
+
+        Returns:
+            None
+        """
+        self.load_snippets()
+        # Full expander refresh: a restore can change the trigger itself, so an
+        # incremental update would leave the old trigger live.
+        self.trigger_reload.emit()
+        self.form.invalidate_caches()  # Folder/tags may have changed
+        self.table.select_entry(entry)
+
+        # Reload the form if it is showing this snippet, so it reflects the
+        # restored content (and any unsaved edits, already confirmed, are dropped).
+        if self.stack.currentWidget() is self.form and self.form.entry_id == entry.get("id"):
+            self.on_entry_selected(entry)
+
+        self.main.message_box.info(
+            f'Restored "{entry.get("label", "")}" to an earlier version.',
+            title="Snippet Restored",
+        )
+
     def on_delete_snippet(self, entry):
         """
         Handle deletion of a snippet.
@@ -1014,8 +1125,16 @@ class SnippetEditor(QWidget):
         Returns:
             None
         """
+        message = f'Delete snippet "{entry.get("label","")}"?'
+        history_count = self.main.snippet_db.count_snippet_history(entry['id'])
+        if history_count:
+            plural = "version" if history_count == 1 else "versions"
+            message += (
+                f"\n\nIts {history_count} saved {plural} in version history "
+                "will also be permanently deleted."
+            )
         confirm = self.main.message_box.question(
-            f'Delete snippet "{entry.get("label","")}"?',
+            message,
             title="Delete Snippet",
             buttons=QMessageBox.Yes | QMessageBox.No,
             default_button=QMessageBox.No
