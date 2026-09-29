@@ -222,7 +222,52 @@ def verify_updater(path: Path) -> tuple:
     return True, "Updater integrity verified"
 
 
-def build_command(main, extra_args: list) -> list | None:
+def running_appimage() -> Path | None:
+    """
+    Return the .AppImage file this frozen build was launched from, if any.
+
+    The AppImage runtime sets APPIMAGE to the image's path; everything else
+    (sys.executable included) points inside a temporary read-only mount.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+
+    path = os.environ.get("APPIMAGE", "")
+    if path and Path(path).is_file():
+        return Path(path)
+
+    return None
+
+
+def stage_outside_appimage(updater: Path, config_file: Path | None) -> tuple:
+    """
+    Copy the updater (and its config) out of the AppImage mount.
+
+    The mount disappears the moment QSnippet exits, which is exactly what the
+    updater does to it before swapping the image, so an updater still running
+    from inside the mount would lose its own binary mid-install. The copy is
+    what gets hash-verified, so nothing can swap it between check and launch.
+    """
+    import shutil
+    import tempfile
+
+    staging = Path(tempfile.mkdtemp(prefix="qsnippet-updater-"))
+
+    staged_updater = staging / updater.name
+    shutil.copy2(updater, staged_updater)
+    staged_updater.chmod(0o700)
+
+    staged_config = None
+    if config_file:
+        staged_config = staging / "config" / config_file.name
+        staged_config.parent.mkdir()
+        shutil.copy2(config_file, staged_config)
+
+    logger.debug("Staged the updater outside the AppImage at %s", staging)
+    return staged_updater, staged_config
+
+
+def build_command(main, extra_args: list, install: bool = False) -> list | None:
     """
     Build the command line used to invoke the updater.
 
@@ -231,8 +276,19 @@ def build_command(main, extra_args: list) -> list | None:
     ID, the executable path, and the log directory, so updater.log lands
     beside QSnippet.log rather than in a separate location the user has to
     hunt for.
+
+    `install` marks a run that will stop QSnippet; from an AppImage that
+    run needs the updater copied out of the mount first.
     """
     updater = find_updater(main)
+    config_file = updater_config_path(main)
+
+    if updater is not None and install and running_appimage():
+        try:
+            updater, config_file = stage_outside_appimage(updater, config_file)
+        except OSError as exc:
+            logger.error("Could not stage the updater outside the AppImage: %s", exc)
+            return None
 
     if updater is not None:
         trusted, reason = verify_updater(updater)
@@ -252,7 +308,6 @@ def build_command(main, extra_args: list) -> list | None:
         logger.debug("Running the updater from source at %s", checkout)
         command = [sys.executable, str(checkout / "updater_main.py")]
 
-    config_file = updater_config_path(main)
     if config_file:
         command += ["--config", str(config_file)]
 
@@ -350,6 +405,12 @@ def current_version(main) -> str:
 
 def application_executable(main) -> Path | None:
     """Return the path of the running QSnippet binary, if it is a frozen build."""
+    # From an AppImage, relaunch the image itself: sys.executable sits in a
+    # mount that is gone by the time the updater restarts QSnippet.
+    appimage = running_appimage()
+    if appimage:
+        return appimage
+
     if getattr(sys, "frozen", False):
         return Path(sys.executable)
 
@@ -517,7 +578,7 @@ def launch_update(main, use_gui: bool = True) -> tuple:
     if use_gui:
         extra.append("--gui")
 
-    command = build_command(main, extra)
+    command = build_command(main, extra, install=True)
 
     if command is None:
         if is_portable_install(main):

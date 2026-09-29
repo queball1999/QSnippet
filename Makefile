@@ -1,4 +1,4 @@
-.PHONY: run build portable build-deb updater test benchmark lint release clean distclean help create-venv recreate-venv activate-venv
+.PHONY: run build portable build-deb build-appimage updater test benchmark lint release clean distclean help create-venv recreate-venv activate-venv
 
 MAIN := QSnippet.py
 VENV_DIR := .venv
@@ -50,6 +50,7 @@ else
 	@echo "  make lint           - Run flake8 the way CI does"
 	@echo "  make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release"
 	@echo "  make build-deb      - Package a .deb from the build output (run after 'make build')"
+	@echo "  make build-appimage - Package an AppImage from the build output (run after 'make build')"
 	@echo "  make clean          - Remove build staging (build/, package/, build_info.py, __pycache__)"
 	@echo "  make distclean      - clean plus output/ and dist/ (removes built artifacts)"
 	@echo "  make create-venv    - Create .venv (if missing) and install dependencies"
@@ -121,6 +122,13 @@ ifeq ($(OS),Windows_NT)
 	@echo build-deb is only available on Linux
 else
 	bash tools/package-deb.sh
+endif
+
+build-appimage:
+ifeq ($(OS),Windows_NT)
+	@echo build-appimage is only available on Linux
+else
+	bash tools/package-appimage.sh
 endif
 
 # Remove build staging only. Keeps output/ and dist/ (built artifacts);

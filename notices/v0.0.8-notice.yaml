@@ -1,0 +1,27 @@
+id: "v0.0.8"
+title: "QSnippet 0.0.8"
+message: |
+  ### Updates
+  - QSnippet can now check for updates and install them for you, with every download verified against a signed checksum before it runs.
+  - Choose between the Stable and Dev update channels in Settings. Dev builds are opt-in previews.
+  - Linux users can now download QSnippet as an AppImage that runs on most distributions, alongside the existing `.deb`.
+
+  ### Snippet History
+  - Every edit to a snippet is now saved, so you can review earlier versions and restore one.
+  - Open it from **Help -> History**.
+
+  ### Getting Started
+  - New first-run guided tour of the main window. Replay it any time from the Help menu.
+  - New menu bar keyboard shortcuts, such as **F8** for Backup History.
+
+  ### Vault & Privacy
+  - Expanded snippets are now kept out of clipboard history and clipboard managers on Windows, macOS, and Linux.
+  - Press **Ctrl+Space** in a password field to show or hide its contents.
+  - The vault now detects orphaned encrypted data and can help you recover it.
+  - Changing the database location now warns you when vault content would be affected.
+
+  ### Fixes & Reliability
+  - Closing the main window to the tray now shows a small notification, which you can turn off from the notification itself.
+  - Fixed menu bar fonts not scaling correctly and resizing on hover.
+  - Resetting the vault now clears the correct settings.
+  - Pre-update backups now include your `config.yaml`.

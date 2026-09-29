@@ -141,8 +141,51 @@ jobs:
           [ "$FAILED" -eq 0 ] || exit 1
           echo "Installed package layout verified."
 
+      - name: Package AppImage
+        run: bash ./tools/package-appimage.sh
+
+      - name: Verify AppImage contents
+        run: |
+          set -e
+          APPIMAGE="$PWD/output/linux/QSnippet-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          [ -x "$APPIMAGE" ] || { echo "::error::AppImage missing or not executable: $APPIMAGE"; exit 1; }
+          # Extracting runs the AppImage's own runtime, so this also proves
+          # the image is well-formed, not just that the file exists.
+          WORK=$(mktemp -d)
+          ( cd "$WORK" && "$APPIMAGE" --appimage-extract >/dev/null )
+          ROOT="$WORK/squashfs-root"
+          FAILED=0
+          for path in \
+            AppRun \
+            qsnippet.desktop \
+            qsnippet.png \
+            usr/lib/qsnippet/QSnippet \
+            usr/lib/qsnippet/updater \
+            usr/lib/qsnippet/config/config.yaml \
+            usr/lib/qsnippet/config/updater.yaml \
+            usr/lib/qsnippet/assets/icons/icon_128x128.png \
+            usr/lib/qsnippet/assets/images \
+            usr/lib/qsnippet/notices
+          do
+            if [ ! -e "$ROOT/$path" ]; then
+              echo "MISSING: $path"
+              FAILED=1
+            fi
+          done
+          # The updater must be byte-identical to the one whose hash was stamped.
+          actual=$(sha256sum "$ROOT/usr/lib/qsnippet/updater" | cut -d" " -f1)
+          if [ "$actual" != "$UPDATER_SHA256" ]; then
+            echo "::error::Updater inside the AppImage does not match the stamped hash"
+            FAILED=1
+          fi
+          [ "$FAILED" -eq 0 ] || exit 1
+          echo "AppImage layout verified."
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v7
         with:
           name: linux-build
-          path: output/linux/QSnippet_*_amd64.deb
+          path: |
+            output/linux/QSnippet_*_amd64.deb
+            output/linux/QSnippet-*.AppImage
+          if-no-files-found: error

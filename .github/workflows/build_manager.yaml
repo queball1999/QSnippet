@@ -141,10 +141,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Download all build artifacts
+      # Only the *-build artifacts are release assets. The updater-* artifacts
+      # from the same run are inputs to the installers, not downloads; an
+      # updater.exe on the release page would look like an installer to both
+      # users and the updater's own asset picker.
+      - name: Download release build artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: "*-build"
 
       - name: Import GPG key
         run: |
@@ -156,7 +161,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" \) -print0 | xargs -0 sha256sum > SHA256SUMS.txt
+          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" -o -name "*.AppImage" \) -print0 | xargs -0 sha256sum > SHA256SUMS.txt
 
       - name: Sign artifacts
         run: |
@@ -165,7 +170,7 @@ jobs:
               --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
               --detach-sign SHA256SUMS.txt
 
-          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" \) -print0 | while IFS= read -r -d '' file; do
+          find . -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.deb" -o -name "*.AppImage" \) -print0 | while IFS= read -r -d '' file; do
             gpg --batch --yes --pinentry-mode loopback \
                 --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
                 --detach-sign "$file"
@@ -182,6 +187,7 @@ jobs:
             dist/**/*.exe
             dist/**/*.zip
             dist/**/*.deb
+            dist/**/*.AppImage
             dist/**/*.sig
             dist/SHA256SUMS.txt
         env:
