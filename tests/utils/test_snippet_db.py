@@ -849,6 +849,21 @@ class TestPlaceholderBraceMigration:
         migrated = db.get_snippet_by_trigger("/legacy")
         assert migrated["snippet"] == "Hi {{date}}, {{myph}}, and {unrelated}"
 
+    def test_import_from_yaml_rewrites_legacy_braces(self, temp_snippet_db_path, tmp_path):
+        """Old exports imported after startup still get {{name}} placeholders."""
+        from utils.file_utils import FileUtils
+        db = SnippetDB(temp_snippet_db_path)
+        db.insert_custom_placeholder({"name": "myph", "value": "x", "description": "", "is_encrypted": False})
+        yaml_path = tmp_path / "old_export.yaml"
+        FileUtils.export_snippets_yaml(yaml_path, [
+            {**self._BASE, "trigger": "/old", "snippet": "Hi {date}, {myph}, and {unrelated}"}
+        ])
+
+        db.import_from_yaml(yaml_path)
+
+        imported = db.get_snippet_by_trigger("/old")
+        assert imported["snippet"] == "Hi {{date}}, {{myph}}, and {unrelated}"
+
     def test_migrate_placeholder_braces_skips_encrypted_snippets(self, temp_snippet_db_path):
         db = SnippetDB(temp_snippet_db_path)
         entry = {**self._BASE, "trigger": "/enc", "snippet": "ciphertext-with-{date}-in-it"}

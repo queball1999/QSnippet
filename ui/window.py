@@ -2176,25 +2176,46 @@ class QSnippet(QMainWindow):
         from PySide6.QtWidgets import QDialog
         from utils.focus_utils import active_window, restore_focus
 
+        # One prompt at a time. exec() below runs a nested event loop, so a
+        # second queued trigger would otherwise open a prompt on top of this
+        # one, capture *this* prompt as its target window, and paste the
+        # snippet into our own field instead of the user's application.
+        if expander.prompt_open:
+            logger.warning("Placeholder prompt already open; ignoring trigger %s", trigger)
+            return
+
         # Remember where the user was typing. The expander synthesises
         # keystrokes into whatever window is focused, so this has to be
         # restored before expanding or the paste lands in the wrong app.
         target_window = active_window()
+        logger.info("Showing placeholder prompt for %s (%d field(s), target window %s)",
+                    trigger, len(names), target_window)
 
         mode = expander.get_dynamic_placeholder_dialog_mode()
         dlg = DynamicPlaceholderDialog(names, mode=mode, parent=self)
         # Stay on top even when the main window is hidden (minimized to tray)
         dlg.setWindowFlags(dlg.windowFlags() | _Qt.WindowStaysOnTopHint)
-        # The dialog grabs the foreground itself from its showEvent, once Qt
-        # has created the native window that SetForegroundWindow needs.
-        accepted = dlg.exec() == QDialog.Accepted
+
+        # Stop trigger matching while the prompt is up, so typing into it
+        # (or retyping the trigger elsewhere) cannot fire another expansion.
+        expander.clear_buffer()
+        expander.prompt_open = True
+        try:
+            # The dialog grabs the foreground itself from its showEvent, once Qt
+            # has created the native window that SetForegroundWindow needs.
+            accepted = dlg.exec() == QDialog.Accepted
+        finally:
+            expander.prompt_open = False
 
         # Hand focus back to the originating application either way, so a
         # cancel does not leave the user staring at our window.
         dlg.hide()
-        restore_focus(target_window)
+        if target_window and not restore_focus(target_window):
+            logger.warning("Could not return focus to window %s before pasting %s",
+                           target_window, trigger)
 
         if not accepted:
+            logger.info("Placeholder prompt cancelled for %s", trigger)
             expander.clear_buffer()
             return
 

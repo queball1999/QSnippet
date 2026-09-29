@@ -807,7 +807,7 @@ Snippets come in handy for text you enter often or for standard messages you sen
         """
         Populate the intellisense popup list with placeholders and snippet triggers.
 
-        Fills the popup with available placeholder options (e.g., {date}, {time})
+        Fills the popup with available placeholder options (e.g., {{date}}, {{time}})
         and all existing snippet triggers for auto-completion.
 
         Returns:

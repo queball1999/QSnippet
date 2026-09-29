@@ -722,11 +722,20 @@ class ImportExportWizard(QDialog):
 
         new_count = updated_count = error_count = vault_locked_count = 0
 
+        from utils.snippet_db import rewrite_legacy_placeholder_braces
+        custom_names = {ph["name"] for ph in self.snippet_db.get_all_custom_placeholders()}
+
         for entry in snippets:
             clean_entry = {
                 k: v for k, v in entry.items()
                 if k not in ("id", "is_encrypted") and not k.startswith("_")
             }
+            # Exports from older versions use {name}. Upgrade before insert:
+            # vault-folder snippets are encrypted on the way in, and the
+            # startup migration cannot rewrite ciphertext.
+            clean_entry["snippet"] = rewrite_legacy_placeholder_braces(
+                clean_entry.get("snippet", ""), custom_names
+            )
 
             try:
                 result = self.snippet_db.insert_snippet_vault_aware(

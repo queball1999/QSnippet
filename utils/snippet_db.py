@@ -1686,7 +1686,11 @@ class SnippetDB:
             snippets = FileUtils.import_snippets_yaml(yaml_path)
             logger.debug("Imported snippets count: %d", len(snippets))
 
+            # Exports from older versions use {name}; the startup migration has
+            # already run, so upgrade them to {{name}} on the way in.
+            custom_names = {ph["name"] for ph in self.get_all_custom_placeholders()}
             for entry in snippets:
+                entry["snippet"] = rewrite_legacy_placeholder_braces(entry.get("snippet", ""), custom_names)
                 self.insert_snippet(entry, history_enabled=False)
 
             logger.info("Successfully imported snippets from YAML.")

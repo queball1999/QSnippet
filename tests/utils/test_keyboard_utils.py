@@ -353,6 +353,19 @@ def test_handle_char_uses_suffix_trigger_matching(expander):
     assert captured["paste_style"] == "Clipboard"
     assert captured["return_press"] is False
 
+def test_keys_ignored_while_placeholder_prompt_open(expander):
+    """Typing while a [[placeholder]] prompt is up must not match triggers."""
+    expanded = []
+    expander.expand = lambda *args, **kwargs: expanded.append(args)
+    expander.keyboard_debounce_ms = 0
+    expander.prompt_open = True
+
+    for char in "/sig":
+        expander.on_key_press(types.SimpleNamespace(char=char))
+
+    assert expanded == []
+    assert expander.buffer == ""
+
 def test_sensitive_keys_clear_buffer(expander):
     """Sensitive system keys should clear buffered typed content."""
     expander.buffer = "/sig"

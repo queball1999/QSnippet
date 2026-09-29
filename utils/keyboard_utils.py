@@ -399,6 +399,11 @@ class SnippetExpander:
         self.trigger_detected_callback = None  # Callable[[prefix_char, timeout_seconds], None]
         self.clipboard_cleared_callback = None  # Callable[[], None]
         self.dynamic_placeholder_callback = None  # Callable[[trigger, entry, style, return_press], None]
+        # True while a [[placeholder]] prompt is on screen. Keystrokes typed
+        # into that prompt (or retyped elsewhere while it is up) must not match
+        # triggers, or a second prompt opens on top of the first and pastes
+        # into it.
+        self.prompt_open = False
         self.vault_folder_set: set = set()  # paths of vault-protected folders
 
         self.refresh_snippets()
@@ -1191,7 +1196,7 @@ class SnippetExpander:
             None
         """
         try:
-            if self.disabled:
+            if self.disabled or self.prompt_open:
                 return
 
             # Rate limiting: skip processing if events are coming too fast

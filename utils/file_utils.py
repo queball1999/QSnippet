@@ -554,9 +554,16 @@ class FileUtils:
             updated_count = 0
             error_count = 0
 
+            from utils.snippet_db import rewrite_legacy_placeholder_braces
+            custom_names = {ph["name"] for ph in db.get_all_custom_placeholders()}
+
             for entry in snippets:
                 # Strip internal database IDs to prevent ID-based conflicts
                 clean_entry = {k: v for k, v in entry.items() if k != "id"}
+                # Exports from older versions use {name}; upgrade to {{name}}
+                clean_entry["snippet"] = rewrite_legacy_placeholder_braces(
+                    clean_entry.get("snippet", ""), custom_names
+                )
                 is_new = db.insert_snippet(clean_entry, history_enabled=False)
                 if is_new is True:
                     new_count += 1

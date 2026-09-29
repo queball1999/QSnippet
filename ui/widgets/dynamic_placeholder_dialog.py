@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton
 )
-from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtCore import Qt, QPoint, QTimer, QEvent
 from PySide6.QtGui import QKeySequence, QShortcut, QGuiApplication, QCursor
 
 import logging
@@ -24,6 +24,10 @@ class DynamicPlaceholderDialog(QDialog):
         self.values: dict[str, str] = {}
         self.index = 0
         self.fields: dict[str, QLineEdit] = {}
+        # The foreground grab runs once per dialog. Repeating it on later show
+        # events pulls focus back from other apps and re-selects the field,
+        # so each typed character replaces the one before it.
+        self.focus_grabbed = False
 
         self.setWindowTitle("Fill in Snippet Details")
         self.setWindowModality(Qt.ApplicationModal)
@@ -63,16 +67,31 @@ class DynamicPlaceholderDialog(QDialog):
         be typeable the moment it appears.
         """
         super().showEvent(event)
+        logger.debug("Placeholder dialog show event (spontaneous=%s, grabbed=%s)",
+                     event.spontaneous(), self.focus_grabbed)
+        if self.focus_grabbed:
+            return
+        self.focus_grabbed = True
         QTimer.singleShot(0, self.grab_focus)
 
     def grab_focus(self) -> None:
         """Pull the window to the foreground, then focus the first field."""
+        # Queued from showEvent; if the dialog closed before this ran,
+        # focus_dialog's show() would bring a finished prompt back on screen.
+        if not self.isVisible():
+            return
         try:
             from utils.focus_utils import focus_dialog
-            focus_dialog(self)
+            reached = focus_dialog(self)
+            logger.debug("Placeholder dialog foreground grab: %s", reached)
         except Exception:
             logger.debug("Foreground grab failed", exc_info=True)
         self.focus_first_field()
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.ActivationChange:
+            logger.debug("Placeholder dialog active=%s", self.isActiveWindow())
 
     def focus_first_field(self) -> None:
         """Give keyboard focus to the field the user should fill in next."""
