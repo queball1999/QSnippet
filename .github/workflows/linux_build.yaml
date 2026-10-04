@@ -12,11 +12,11 @@ jobs:
   build-updater:
     uses: ./.github/workflows/build_updater.yaml
     with:
-      os: ubuntu-latest
+      os: ubuntu-24.04
       artifact-name: updater-linux
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build-updater
 
     steps:

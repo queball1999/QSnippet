@@ -74,6 +74,9 @@ jobs:
           else
             pip install -r requirements.txt
           fi
+          # Neither runtime file lists pytest; it lives in requirements-dev.txt,
+          # which would also pull in ruff and pytest-cov the build never uses.
+          pip install pytest
 
       - name: Run updater test suite
         working-directory: qupdatetool

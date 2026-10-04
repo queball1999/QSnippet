@@ -4,7 +4,7 @@ name: PR Checks
 # tests run here, before a merge, not after. Nothing is built and nothing is
 # published; releases stay tag-driven in build_manager.yaml.
 #
-# Make "lint" and "test (ubuntu-latest)" / "test (windows-latest)" required
+# Make "lint" and "test (ubuntu-24.04)" / "test (windows-latest)" required
 # status checks in the branch protection rule for main so a red PR cannot be
 # merged. See docs in the repo wiki: Release Pipeline.
 
@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:

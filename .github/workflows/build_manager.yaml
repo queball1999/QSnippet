@@ -20,7 +20,7 @@ jobs:
   # Classifies the tag's channel, and for a release tag, enforces it was
   # cut from main; a dev build may come from any branch.
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     outputs:
       channel: ${{ steps.classify.outputs.channel }}
@@ -82,7 +82,7 @@ jobs:
   # re-checks rather than trusting that a PR ever ran.
   lint:
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -102,7 +102,7 @@ jobs:
 
   test:
     needs: guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
@@ -151,7 +151,7 @@ jobs:
     secrets: inherit
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [guard, build-linux, build-windows]
 
     steps:
