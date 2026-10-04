@@ -52,6 +52,7 @@ class QSnippet(QMainWindow):
     vault_trigger_signal = Signal(str, object, str, bool)
     trigger_detected_signal = Signal(str, object)
     dynamic_placeholder_signal = Signal(str, object, str, bool)
+    disabled_trigger_signal = Signal(int, str, str)
     migration_backup_signal = Signal(object, object, object)
     clipboard_cleared_signal = Signal()
 
@@ -230,6 +231,10 @@ class QSnippet(QMainWindow):
         # Dynamic [[placeholder]] fields → main-thread input dialog via Signal
         self.dynamic_placeholder_signal.connect(self.handle_dynamic_placeholder_main)
         self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
+
+        # Disabled snippet trigger typed → toast with an Enable action via Signal
+        self.disabled_trigger_signal.connect(self.show_disabled_snippet_toast)
+        self.snippet_service.expander.disabled_trigger_callback = self.on_disabled_trigger_from_expander
 
         # Clipboard cleanup → status bar notification via Signal (thread-safe queued connection)
         self.clipboard_cleared_signal.connect(self.on_clipboard_cleared)
@@ -415,6 +420,7 @@ class QSnippet(QMainWindow):
         self.snippet_service.expander.vault_unlock_callback = self.on_vault_snippet_triggered
         self.snippet_service.expander.trigger_detected_callback = self.on_trigger_detected_from_expander
         self.snippet_service.expander.dynamic_placeholder_callback = self.on_dynamic_placeholder_triggered
+        self.snippet_service.expander.disabled_trigger_callback = self.on_disabled_trigger_from_expander
         self.snippet_service.expander.clipboard_cleared_callback = self.on_clipboard_cleared_from_expander
 
         if was_running:
@@ -2565,6 +2571,111 @@ class QSnippet(QMainWindow):
         """
         if getattr(self, "tray_close_toast", None) is toast:
             self.tray_close_toast = None
+
+    def on_disabled_trigger_from_expander(self, snippet_id: int, trigger: str, label: str) -> None:
+        """Called from the expander thread when a disabled snippet's trigger is typed."""
+        self.disabled_trigger_signal.emit(snippet_id, trigger, label)
+
+    def show_disabled_snippet_toast(self, snippet_id: int, trigger: str, label: str) -> None:
+        """
+        Tell the user the snippet they just triggered is disabled.
+
+        The toast offers "Enable and paste". The window the user was typing in
+        is captured now, while it still has focus, so it can be refocused
+        before the snippet is pasted.
+
+        Args:
+            snippet_id (int): The disabled snippet's database ID.
+            trigger (str): The trigger that was typed.
+            label (str): The snippet's label, shown in the message.
+
+        Returns:
+            None
+        """
+        tray = getattr(self, "tray", None)
+        if tray is None or not tray.isVisible():
+            logger.debug("Tray not visible; skipping disabled snippet notification")
+            return
+
+        from ui.widgets.tray_close_toast import DisabledSnippetToast
+        from utils.focus_utils import active_window
+
+        # Only one at a time: typing another disabled trigger replaces it.
+        self.dismiss_disabled_snippet_toast()
+
+        target_window = active_window()
+        toast = DisabledSnippetToast(tray.icon(), trigger, label)
+        self.disabled_snippet_toast = toast
+        toast.paste_requested.connect(
+            lambda keep_enabled: self.paste_disabled_snippet(snippet_id, trigger, target_window, keep_enabled)
+        )
+        toast.destroyed.connect(lambda *_, t=toast: self.clear_disabled_snippet_toast(t))
+        toast.show_near_tray(tray.geometry())
+        logger.info("Disabled snippet notification shown for %s", trigger)
+
+    def dismiss_disabled_snippet_toast(self) -> None:
+        """Close the disabled snippet toast if one is on screen."""
+        toast = getattr(self, "disabled_snippet_toast", None)
+        if toast is None:
+            return
+        try:
+            toast.close()
+        except RuntimeError:
+            # The C++ widget is already gone; just drop the reference.
+            self.disabled_snippet_toast = None
+
+    def clear_disabled_snippet_toast(self, toast) -> None:
+        """Drop the reference to a destroyed toast, unless it was already replaced."""
+        if getattr(self, "disabled_snippet_toast", None) is toast:
+            self.disabled_snippet_toast = None
+
+    def paste_disabled_snippet(self, snippet_id: int, trigger: str, target_window,
+                               keep_enabled: bool) -> None:
+        """
+        Paste a disabled snippet where the user was typing, optionally enabling it.
+
+        Called from the toast's Paste menu. When keep_enabled is set, persists
+        the change and updates the expander's in-memory index and the snippet
+        table; otherwise the snippet stays disabled and is pasted once. Either
+        way focus returns to the originating application and the snippet
+        expands through the normal trigger path, so vault and [[placeholder]]
+        handling still apply.
+
+        Args:
+            snippet_id (int): The disabled snippet's database ID.
+            trigger (str): The trigger text still sitting in the target field.
+            target_window: Handle of the window to refocus before pasting, or None.
+            keep_enabled (bool): True to enable the snippet, False to paste once.
+
+        Returns:
+            None
+        """
+        try:
+            service = self.snippet_service
+            entry = service.snippet_db.get_snippet_by_trigger(trigger)
+            if not entry:
+                logger.warning("Snippet for trigger %s vanished before it could be pasted", trigger)
+                return
+            if keep_enabled:
+                service.snippet_db.set_snippet_enabled(snippet_id, True)
+                service.refresh_snippet({**entry, "enabled": True})
+                self.editor.load_snippets()
+                logger.info("Enabled snippet %s from toast", trigger)
+            else:
+                logger.info("Pasting disabled snippet %s once", trigger)
+
+            from utils.focus_utils import restore_focus
+            if target_window and not restore_focus(target_window):
+                logger.warning("Could not return focus to window %s before pasting %s",
+                               target_window, trigger)
+
+            expander = service.expander
+            with expander.buffer_lock:
+                expander.buffer = trigger
+                expander.cursor_pos = len(trigger)
+            expander.expand_trigger(trigger, meta=entry)
+        except Exception:
+            logger.exception("Failed to paste disabled snippet %s", trigger)
 
     def disable_tray_close_notification(self) -> None:
         """

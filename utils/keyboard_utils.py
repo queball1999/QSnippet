@@ -197,7 +197,7 @@ def close_clipboard_windows() -> None:
     except Exception:
         logger.exception("Failed to close Windows clipboard handle")
 
-_DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*$")
+DURATION_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*$")
 
 
 def parse_duration_seconds(raw_value, default_seconds: float) -> float | None:
@@ -221,7 +221,7 @@ def parse_duration_seconds(raw_value, default_seconds: float) -> float | None:
     if text in ("off", "disabled", "none"):
         return None
 
-    match = _DURATION_PATTERN.match(text)
+    match = DURATION_PATTERN.match(text)
     if not match:
         logger.warning("Invalid duration %r. Falling back to %.3fs", raw_value, default_seconds)
         return default_seconds
@@ -252,7 +252,7 @@ def format_duration_seconds(seconds) -> str:
     return f"{seconds:g}s"
 
 
-_DYNAMIC_PLACEHOLDER_PATTERN = re.compile(r"\[\[([^\[\]\r\n]+?)\]\]")
+DYNAMIC_PLACEHOLDER_PATTERN = re.compile(r"\[\[([^\[\]\r\n]+?)\]\]")
 
 
 def extract_dynamic_placeholder_names(text: str) -> list[str]:
@@ -267,7 +267,7 @@ def extract_dynamic_placeholder_names(text: str) -> list[str]:
     """
     seen = set()
     names = []
-    for match in _DYNAMIC_PLACEHOLDER_PATTERN.finditer(text):
+    for match in DYNAMIC_PLACEHOLDER_PATTERN.finditer(text):
         name = match.group(1).strip()
         if name and name not in seen:
             seen.add(name)
@@ -394,11 +394,14 @@ class SnippetExpander:
         self.last_managed_clipboard = None
         self.trigger_map = {}
         self.trigger_trie = {}
+        self.disabled_trigger_map = {}  # trigger -> {id, trigger, label} for disabled snippets
+        self.disabled_trigger_trie = {}
         self.trigger_prefixes: set = set()  # first character of every enabled trigger
         self.vault_unlock_callback = None  # Callable[[trigger, entry, style, return_press], None]
         self.trigger_detected_callback = None  # Callable[[prefix_char, timeout_seconds], None]
         self.clipboard_cleared_callback = None  # Callable[[], None]
         self.dynamic_placeholder_callback = None  # Callable[[trigger, entry, style, return_press], None]
+        self.disabled_trigger_callback = None  # Callable[[snippet_id, trigger, label], None]
         # True while a [[placeholder]] prompt is on screen. Keystrokes typed
         # into that prompt (or retyped elsewhere while it is up) must not match
         # triggers, or a second prompt opens on top of the first and pastes
@@ -432,16 +435,15 @@ class SnippetExpander:
             for row in trigger_index
             if row.get("trigger")
         }
-        self.trigger_trie = {}
 
-        for trigger in self.trigger_map:
-            node = self.trigger_trie
-            for char in reversed(trigger):
-                node = node.setdefault(char, {})
-            node["__trigger__"] = trigger
+        disabled_index = self.snippets_db.get_disabled_trigger_index() or []
+        self.disabled_trigger_map = {
+            row["trigger"]: row
+            for row in disabled_index
+            if row.get("trigger") and row["trigger"] not in self.trigger_map
+        }
 
-        self.max_trigger_len = max((len(trigger) for trigger in self.trigger_map), default=1)
-        self.trigger_prefixes = {trigger[0] for trigger in self.trigger_map if trigger}
+        self.rebuild_trie_from_map()
 
         logger.debug("Trigger map size: %d", len(self.trigger_map))
         logger.debug("Maximum trigger length: %d", self.max_trigger_len)
@@ -485,15 +487,34 @@ class SnippetExpander:
         Returns:
             None
         """
+        self.trigger_trie = self.build_suffix_trie(self.trigger_map)
+        self.disabled_trigger_trie = self.build_suffix_trie(self.disabled_trigger_map)
+        # The buffer must be long enough to hold a disabled trigger too, or it
+        # would be trimmed before the disabled match could ever complete.
+        self.max_trigger_len = max(
+            (len(t) for t in (*self.trigger_map, *self.disabled_trigger_map)),
+            default=1,
+        )
+        self.trigger_prefixes = {t[0] for t in self.trigger_map if t}
+
+    @staticmethod
+    def build_suffix_trie(triggers) -> dict:
+        """
+        Build a reversed-character trie for suffix matching.
+
+        Args:
+            triggers (Iterable[str]): The trigger strings to index.
+
+        Returns:
+            dict: The trie root; terminal nodes carry a "__trigger__" key.
+        """
         trie: dict = {}
-        for trigger in self.trigger_map:
+        for trigger in triggers:
             node = trie
             for char in reversed(trigger):
                 node = node.setdefault(char, {})
             node["__trigger__"] = trigger
-        self.trigger_trie = trie
-        self.max_trigger_len = max((len(t) for t in self.trigger_map), default=1)
-        self.trigger_prefixes = {t[0] for t in self.trigger_map if t}
+        return trie
 
     def update_trigger_entry(self, snippet_meta: dict) -> None:
         """
@@ -527,6 +548,14 @@ class SnippetExpander:
             if old_trigger and old_trigger != trigger:
                 self.trigger_map.pop(old_trigger, None)
 
+            # Same rename handling for the disabled index
+            old_disabled = next(
+                (t for t, m in self.disabled_trigger_map.items() if m.get("id") == snippet_id),
+                None,
+            )
+            if old_disabled:
+                self.disabled_trigger_map.pop(old_disabled, None)
+
             enabled = snippet_meta.get("enabled", True)
             if enabled:
                 self.trigger_map[trigger] = {
@@ -536,8 +565,14 @@ class SnippetExpander:
                     "return_press": bool(snippet_meta.get("return_press", False)),
                 }
             else:
-                # Disabled snippets must not appear in the trie
+                # Disabled snippets must not appear in the enabled trie, but
+                # are tracked so typing the trigger can offer to enable them.
                 self.trigger_map.pop(trigger, None)
+                self.disabled_trigger_map[trigger] = {
+                    "id": snippet_id,
+                    "trigger": trigger,
+                    "label": snippet_meta.get("label", ""),
+                }
 
             self.rebuild_trie_from_map()
 
@@ -562,9 +597,16 @@ class SnippetExpander:
                 None,
             )
             if trigger is None:
-                logger.debug("remove_trigger_entry: snippet id=%s not in trigger map", snippet_id)
-                return
-            self.trigger_map.pop(trigger)
+                trigger = next(
+                    (t for t, m in self.disabled_trigger_map.items() if m.get("id") == snippet_id),
+                    None,
+                )
+                if trigger is None:
+                    logger.debug("remove_trigger_entry: snippet id=%s not in trigger map", snippet_id)
+                    return
+                self.disabled_trigger_map.pop(trigger)
+            else:
+                self.trigger_map.pop(trigger)
             self.rebuild_trie_from_map()
 
         self.load_snippet_by_trigger.cache_clear()
@@ -1142,17 +1184,21 @@ class SnippetExpander:
         """
         return self.snippets_db.get_snippet_by_trigger(trigger) or {}
 
-    def match_trigger_suffix(self) -> str | None:
+    def match_trigger_suffix(self, trie: dict | None = None) -> str | None:
         """
-        Match the longest enabled trigger at the end of the buffer.
-        
+        Match the longest trigger at the end of the buffer.
+
+        Args:
+            trie (dict | None): The suffix trie to search. Defaults to the
+                enabled-trigger trie.
+
         Returns:
             str | None: The matched trigger, or None if no trigger matches.
         """
         if not self.buffer:
             return None
 
-        node = self.trigger_trie
+        node = self.trigger_trie if trie is None else trie
         matched_trigger = None
 
         for char in reversed(self.buffer[-self.max_trigger_len:]):
@@ -1355,6 +1401,8 @@ class SnippetExpander:
         """
         logger.debug("Appending character to buffer: %r", char)
 
+        # Using self.buffer_lock ensures that buffer updates and trigger matching are atomic,
+        # preventing race conditions when multiple key events are processed concurrently.
         with self.buffer_lock:
             self.trigger_flag = True
             self.buffer = self.buffer[:self.cursor_pos] + char + self.buffer[self.cursor_pos:]
@@ -1372,87 +1420,119 @@ class SnippetExpander:
             # the first character or a later one.
             active_prefix_char = self.buffer[0] if self.buffer and self.buffer[0] in self.trigger_prefixes else None
             trigger = self.match_trigger_suffix()
+            disabled_trigger = None if trigger else self.match_trigger_suffix(self.disabled_trigger_trie)
 
         self.refresh_trigger_countdown(active_prefix_char)
 
-        if trigger:
-            snippet_meta = self.trigger_map.get(trigger, {})
-            snippet_entry = self.load_snippet_by_trigger(trigger)
-            style = snippet_meta.get("paste_style", "Keystroke")
-            return_press = snippet_meta.get("return_press", False)
+        # A disabled snippet's trigger was typed: offer to enable it.
+        if disabled_trigger:
+            self.notify_disabled_trigger(disabled_trigger)
+            return
 
-            if not snippet_entry:
-                logger.warning("Trigger matched but snippet data could not be loaded: %s", trigger)
+        # If a full trigger match is found, expand the snippet.
+        if trigger:
+            self.expand_trigger(trigger)
+
+    def notify_disabled_trigger(self, trigger: str) -> None:
+        """
+        Tell the UI that a disabled snippet's trigger was just typed.
+
+        Skipped when a longer enabled trigger starts with the typed text, so a
+        disabled "/a" never swallows the keystrokes of an enabled "/ab".
+
+        Args:
+            trigger (str): The disabled trigger that matched the buffer tail.
+
+        Returns:
+            None
+        """
+        if any(t != trigger and t.startswith(trigger) for t in self.trigger_map):
+            return
+
+        meta = self.disabled_trigger_map.get(trigger, {})
+        self.clear_buffer()
+        cb = self.disabled_trigger_callback
+        if cb and meta.get("id") is not None:
+            logger.info("Disabled snippet trigger typed: %s", trigger)
+            cb(meta["id"], trigger, meta.get("label", ""))
+
+    def expand_trigger(self, trigger: str, meta: dict | None = None) -> None:
+        """
+        Expand the snippet bound to a matched trigger.
+
+        Loads the snippet, defers to the vault unlock or [[placeholder]]
+        prompt callbacks when needed, and otherwise expands it directly. The
+        trigger text must already be in the buffer, with the cursor after it.
+
+        Args:
+            trigger (str): The matched trigger.
+            meta (dict | None): Paste style and return_press to use instead of
+                the trigger map entry. Needed to paste a snippet that is not
+                in the map, such as a disabled one pasted once.
+
+        Returns:
+            None
+        """
+        snippet_meta = meta or self.trigger_map.get(trigger, {})
+        snippet_entry = self.load_snippet_by_trigger(trigger)
+        style = snippet_meta.get("paste_style", "Keystroke")
+        return_press = snippet_meta.get("return_press", False)
+
+        if not snippet_entry:
+            logger.warning("Trigger matched but snippet data could not be loaded: %s", trigger)
+            self.clear_buffer()
+            return
+
+        # Vault intercept: intercept if encrypted OR if snippet lives in a vault folder
+        folder = snippet_entry.get("folder", "")
+        is_vault_content = (
+            snippet_entry.get("is_encrypted") or
+            (folder and folder in self.vault_folder_set)
+        )
+
+        # If the snippet is vault-protected, check if the vault is unlocked. If it is, decrypt the snippet if needed. 
+        # If the vault is locked, invoke the unlock callback and defer expansion until the vault is unlocked.
+        if is_vault_content:
+            from utils.vault_manager import VaultManager
+            vm = VaultManager.get_instance()
+            if vm.is_unlocked():
+                if snippet_entry.get("is_encrypted"):
+                    raw = snippet_entry.get("snippet", "")
+                    try:
+                        aad = (snippet_entry.get("vault_uuid") or "").encode()
+                        snippet_text = vm.decrypt(raw, aad=aad)
+                        vm.reset_activity_timer()
+                    except Exception:
+                        # Content may not be encrypted yet (DB inconsistency); use raw
+                        logger.warning("Decrypt failed for trigger %s; using raw content", trigger)
+                        snippet_text = raw
+                else:
+                    # Folder is vault-protected but snippet not yet encrypted
+                    snippet_text = snippet_entry.get("snippet", "")
+            else:
+                # Vault is locked - show unlock prompt on main thread
+                if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
+                    cb = self.vault_unlock_callback
+                    trig = trigger
+                    se = snippet_entry
+                    st = style
+                    rp = return_press
+                    threading.Thread(
+                        target=lambda: cb(trig, se, st, rp),
+                        daemon=True,
+                    ).start()
                 self.clear_buffer()
                 return
+        else:
+            snippet_text = snippet_entry.get("snippet", "")
 
-            # Vault intercept: intercept if encrypted OR if snippet lives in a vault folder
-            folder = snippet_entry.get("folder", "")
-            is_vault_content = (
-                snippet_entry.get("is_encrypted") or
-                (folder and folder in self.vault_folder_set)
-            )
-
-            if is_vault_content:
-                from utils.vault_manager import VaultManager
-                vm = VaultManager.get_instance()
-                if vm.is_unlocked():
-                    if snippet_entry.get("is_encrypted"):
-                        raw = snippet_entry.get("snippet", "")
-                        try:
-                            aad = (snippet_entry.get("vault_uuid") or "").encode()
-                            snippet_text = vm.decrypt(raw, aad=aad)
-                            vm.reset_activity_timer()
-                        except Exception:
-                            # Content may not be encrypted yet (DB inconsistency); use raw
-                            logger.warning("Decrypt failed for trigger %s; using raw content", trigger)
-                            snippet_text = raw
-                    else:
-                        # Folder is vault-protected but snippet not yet encrypted
-                        snippet_text = snippet_entry.get("snippet", "")
-                else:
-                    # Vault is locked - show unlock prompt on main thread
-                    if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
-                        cb = self.vault_unlock_callback
-                        trig = trigger
-                        se = snippet_entry
-                        st = style
-                        rp = return_press
-                        threading.Thread(
-                            target=lambda: cb(trig, se, st, rp),
-                            daemon=True,
-                        ).start()
-                    self.clear_buffer()
-                    return
-            else:
-                snippet_text = snippet_entry.get("snippet", "")
-
-            # Check for encrypted placeholders if vault is not already being unlocked
-            if not is_vault_content and self.has_encrypted_placeholders(snippet_text):
-                from utils.vault_manager import VaultManager
-                vm = VaultManager.get_instance()
-                if not vm.is_unlocked():
-                    if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
-                        cb = self.vault_unlock_callback
-                        trig = trigger
-                        se = snippet_entry
-                        st = style
-                        rp = return_press
-                        threading.Thread(
-                            target=lambda: cb(trig, se, st, rp),
-                            daemon=True,
-                        ).start()
-                    self.clear_buffer()
-                    return
-
-            # By this point snippet_text is guaranteed plaintext (either it
-            # was never encrypted, or the vault checks above already
-            # resolved/deferred it). Check for [[name]] fields that need a
-            # value from the user before pasting.
-            names = self.get_dynamic_placeholder_names(snippet_text)
-            if names:
-                if hasattr(self, "dynamic_placeholder_callback") and self.dynamic_placeholder_callback:
-                    cb = self.dynamic_placeholder_callback
+        # Check for encrypted placeholders if vault is not already being unlocked
+        if not is_vault_content and self.has_encrypted_placeholders(snippet_text):
+            from utils.vault_manager import VaultManager
+            vm = VaultManager.get_instance()
+            if not vm.is_unlocked():
+                if hasattr(self, "vault_unlock_callback") and self.vault_unlock_callback:
+                    cb = self.vault_unlock_callback
                     trig = trigger
                     se = snippet_entry
                     st = style
@@ -1464,13 +1544,32 @@ class SnippetExpander:
                 self.clear_buffer()
                 return
 
-            logger.info("Trigger matched: %s", trigger)
-            try:
-                self.expand(trigger, snippet_text, style, return_press)
-            except Exception:
-                logger.exception("expand() raised in handle_char")
-                self.disabled = False
+        # By this point snippet_text is guaranteed plaintext (either it
+        # was never encrypted, or the vault checks above already
+        # resolved/deferred it). Check for [[name]] fields that need a
+        # value from the user before pasting.
+        names = self.get_dynamic_placeholder_names(snippet_text)
+        if names:
+            if hasattr(self, "dynamic_placeholder_callback") and self.dynamic_placeholder_callback:
+                cb = self.dynamic_placeholder_callback
+                trig = trigger
+                se = snippet_entry
+                st = style
+                rp = return_press
+                threading.Thread(
+                    target=lambda: cb(trig, se, st, rp),
+                    daemon=True,
+                ).start()
             self.clear_buffer()
+            return
+
+        logger.info("Trigger matched: %s", trigger)
+        try:
+            self.expand(trigger, snippet_text, style, return_press)
+        except Exception:
+            logger.exception("expand() raised in handle_char")
+            self.disabled = False
+        self.clear_buffer()
 
     def expand_clipboard(self, snippet: str, return_press: bool = False) -> None:
         """

@@ -1335,7 +1335,57 @@ class SnippetDB:
         except sqlite3.Error as e:
             logger.exception("Failed to retrieve enabled trigger index")
             raise DatabaseOperationError(f"Failed to fetch enabled trigger index: {e}") from e
-    
+
+    def get_disabled_trigger_index(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve the index of disabled snippet triggers.
+
+        Lets the keyboard expander recognise a disabled trigger being typed so
+        it can offer to enable the snippet instead of silently ignoring it.
+
+        Returns:
+            List[Dict[str, Any]]: Trigger metadata (id, trigger, label) for
+                every disabled snippet that has a trigger (empty if none).
+
+        Raises:
+            DatabaseOperationError: If retrieval fails.
+        """
+        try:
+            with self.managed_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, trigger, label
+                    FROM snippets
+                    WHERE enabled = 0 AND trigger IS NOT NULL AND trigger != ''
+                    ORDER BY LENGTH(trigger) DESC, trigger ASC
+                    """
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
+            logger.exception("Failed to retrieve disabled trigger index")
+            raise DatabaseOperationError(f"Failed to fetch disabled trigger index: {e}") from e
+
+    def set_snippet_enabled(self, snippet_id: int, enabled: bool) -> None:
+        """
+        Enable or disable a single snippet.
+
+        Args:
+            snippet_id (int): The database ID of the snippet.
+            enabled (bool): True to enable the snippet, False to disable it.
+
+        Raises:
+            DatabaseOperationError: If the update fails.
+        """
+        try:
+            with self.managed_connection(write=True) as conn:
+                conn.execute(
+                    "UPDATE snippets SET enabled = ? WHERE id = ?",
+                    (1 if enabled else 0, snippet_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseOperationError(f"Failed to set enabled for id {snippet_id}: {exc}") from exc
+
     def get_random_snippet(self) -> Dict[str, Any]:
         """
         Retrieve a random enabled snippet.

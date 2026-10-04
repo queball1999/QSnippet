@@ -316,6 +316,74 @@ def test_trigger_detected_callback_not_invoked_for_non_prefix_chars(expander):
     assert calls == []
 
 
+def disable_snippet(expander, trigger="/off", snippet_id=7, label="Off"):
+    """Register a disabled snippet with the expander's in-memory index."""
+    expander.update_trigger_entry(
+        {"id": snippet_id, "trigger": trigger, "enabled": False, "label": label}
+    )
+
+
+def test_disabled_trigger_invokes_callback_and_skips_expand(expander):
+    """Typing a disabled snippet's trigger notifies the UI instead of expanding."""
+    calls = []
+    expander.disabled_trigger_callback = lambda sid, trig, label: calls.append((sid, trig, label))
+    expander.expand = MagicMock()
+    disable_snippet(expander)
+
+    for char in "/off":
+        expander.handle_char(char)
+
+    assert calls == [(7, "/off", "Off")]
+    expander.expand.assert_not_called()
+    assert expander.buffer == ""
+
+
+def test_disabled_trigger_not_in_enabled_map(expander):
+    """A disabled snippet must never enter the enabled trigger map."""
+    disable_snippet(expander)
+
+    assert "/off" not in expander.trigger_map
+    assert "/off" in expander.disabled_trigger_map
+
+
+def test_enabling_disabled_trigger_removes_it_from_disabled_map(expander):
+    """Re-enabling moves the trigger from the disabled map to the enabled map."""
+    disable_snippet(expander)
+    expander.update_trigger_entry({"id": 7, "trigger": "/off", "enabled": True})
+
+    assert "/off" in expander.trigger_map
+    assert "/off" not in expander.disabled_trigger_map
+
+
+def test_expand_trigger_uses_meta_override_for_unmapped_trigger(expander):
+    """Pasting a disabled snippet once passes its own style instead of the trigger map's."""
+    expander.expand = MagicMock()
+    expander.snippets_db.get_snippet_by_trigger.return_value = {
+        "id": 7, "trigger": "/off", "snippet": "hello", "enabled": False,
+    }
+    expander.load_snippet_by_trigger.cache_clear()
+    disable_snippet(expander)
+
+    expander.expand_trigger("/off", meta={"paste_style": "Clipboard", "return_press": True})
+
+    expander.expand.assert_called_once_with("/off", "hello", "Clipboard", True)
+    assert "/off" not in expander.trigger_map
+
+
+def test_disabled_trigger_shadowed_by_longer_enabled_trigger_is_ignored(expander):
+    """A disabled "/si" must not fire while the user may be typing the enabled "/sig"."""
+    calls = []
+    expander.disabled_trigger_callback = lambda *args: calls.append(args)
+    expander.expand = MagicMock()
+    disable_snippet(expander, trigger="/si", snippet_id=9)
+
+    for char in "/sig":
+        expander.handle_char(char)
+
+    assert calls == []
+    expander.expand.assert_called_once()
+
+
 def test_trigger_detected_callback_refires_after_buffer_clear(expander):
     """The prefix notification should keep firing after the buffer resets and a new trigger starts."""
     calls = []

@@ -310,6 +310,30 @@ def test_get_enabled_trigger_index(temp_snippet_db_path):
     assert "/disabled-index" not in triggers
 
 
+def test_disabled_trigger_index_and_set_snippet_enabled(temp_snippet_db_path):
+    """Disabled snippets are indexed, and enabling one moves it to the enabled index."""
+    db = SnippetDB(temp_snippet_db_path)
+    db.insert_snippet({
+        "enabled": False,
+        "label": "Off",
+        "trigger": "/off-index",
+        "snippet": "x",
+        "paste_style": "clipboard",
+        "return_press": False,
+        "folder": "",
+        "tags": "",
+    })
+
+    disabled = {row["trigger"]: row for row in db.get_disabled_trigger_index()}
+    assert disabled["/off-index"]["label"] == "Off"
+    assert "/off-index" not in {r["trigger"] for r in db.get_enabled_trigger_index()}
+
+    db.set_snippet_enabled(disabled["/off-index"]["id"], True)
+
+    assert "/off-index" not in {r["trigger"] for r in db.get_disabled_trigger_index()}
+    assert "/off-index" in {r["trigger"] for r in db.get_enabled_trigger_index()}
+
+
 def test_default_custom_placeholders_seeded(temp_snippet_db_path):
     """Default editable custom placeholders should exist and start blank."""
     db = SnippetDB(temp_snippet_db_path)

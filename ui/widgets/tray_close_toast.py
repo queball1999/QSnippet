@@ -22,7 +22,7 @@ import logging
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget,
 )
 
 from utils.file_utils import FileUtils
@@ -58,6 +58,9 @@ class TrayCloseToast(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
+        # The toast never takes activation, and Qt suppresses tooltips on
+        # inactive windows unless told otherwise.
+        self.setAttribute(Qt.WA_AlwaysShowToolTips, True)
 
         self.setFixedWidth(340)
 
@@ -111,10 +114,12 @@ class TrayCloseToast(QWidget):
         self.disable_btn.setObjectName("TrayCloseToastDisable")
         self.disable_btn.setCursor(Qt.PointingHandCursor)
         self.disable_btn.clicked.connect(self.on_disable)
+        self.disable_btn.setToolTip("Stop showing this notification when the window closes")
         self.close_btn = QPushButton("Close")
         self.close_btn.setObjectName("TrayCloseToastClose")
         self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.clicked.connect(self.on_close)
+        self.close_btn.setToolTip("Close this notification")
         buttons.addWidget(self.disable_btn, 1)
         buttons.addWidget(self.close_btn, 1)
         body.addLayout(buttons)
@@ -207,3 +212,54 @@ class TrayCloseToast(QWidget):
         else:
             y = geo.y() + geo.height() - size.height() - SCREEN_MARGIN
         return QPoint(x, y)
+
+
+class DisabledSnippetToast(TrayCloseToast):
+    """
+    'That snippet is disabled' notification with an Enable action.
+
+    Reuses the tray toast's layout, object names (so ThemeManager styling and
+    fonts apply unchanged) and non-activating window behaviour, which keeps
+    keyboard focus in the application the user was typing into. The secondary
+    button dismisses; the primary button opens a menu with two choices:
+    "Enable and paste" (keep the snippet enabled) or "Paste once" (paste it
+    but leave it disabled). Both emit paste_requested.
+    """
+
+    # Argument: True to leave the snippet enabled afterwards, False to paste once.
+    paste_requested = Signal(bool)
+
+    def __init__(self, icon: QIcon, trigger: str, label: str = "", parent=None):
+        super().__init__(icon, parent)
+
+        name = f"\"{label}\" ({trigger})" if label else trigger
+        self.message.setText(f"Snippet {name} is disabled, so it was not pasted.")
+
+        self.disable_btn.clicked.disconnect(self.on_disable)
+        self.disable_btn.setText("Dismiss")
+        self.disable_btn.clicked.connect(self.on_close)
+        self.disable_btn.setToolTip("Close without pasting the snippet")
+
+        self.close_btn.clicked.disconnect(self.on_close)
+        self.close_btn.setText("Paste")
+        self.close_btn.setToolTip("Choose how to paste the snippet")
+
+        menu = QMenu(self.close_btn)
+        menu.setToolTipsVisible(True)
+        menu.setAttribute(Qt.WA_AlwaysShowToolTips, True)
+        enable_action = menu.addAction("Enable and paste", lambda: self.on_paste(True))
+        enable_action.setToolTip("Turn the snippet back on, then paste it")
+        once_action = menu.addAction("Paste once", lambda: self.on_paste(False))
+        once_action.setToolTip("Paste it now and leave the snippet disabled")
+        self.close_btn.setMenu(menu)
+
+    def on_paste(self, keep_enabled: bool) -> None:
+        """
+        Emit the paste request, then dismiss the toast.
+
+        Args:
+            keep_enabled (bool): True to leave the snippet enabled afterwards.
+        """
+        self.dismiss_timer.stop()
+        self.paste_requested.emit(keep_enabled)
+        self.close()
