@@ -36,7 +36,7 @@ on:
 
 env:
   QUPDATETOOL_REPO: queball1999/QUpdateTool2.0
-  QUPDATETOOL_REF: refs/tags/v0.0.1
+  QUPDATETOOL_REF: refs/tags/v0.0.2
 
 jobs:
   build:
@@ -88,10 +88,12 @@ jobs:
         id: icon
         shell: bash
         run: |
+          # Absolute: PyInstaller resolves a relative --icon against its
+          # --specpath (qupdatetool/build), not the working directory.
           if [ "${{ runner.os }}" = "Windows" ]; then
-            echo "path=../qsnippet/assets/icons/QSnippet.ico" >> "$GITHUB_OUTPUT"
+            echo "path=${{ github.workspace }}/qsnippet/assets/icons/QSnippet.ico" >> "$GITHUB_OUTPUT"
           else
-            echo "path=../qsnippet/assets/icons/QSnippet.icns" >> "$GITHUB_OUTPUT"
+            echo "path=${{ github.workspace }}/qsnippet/assets/icons/QSnippet.icns" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build branded updater
