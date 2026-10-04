@@ -97,6 +97,9 @@ class SnippetTable(QTreeView):
         # Guard flag to suppress on_rows_removed during drag-and-drop moves
         self.is_dragging = False
 
+        # Guard flag so programmatic deselects don't emit entrySelected(None)
+        self.suppress_selection_signal = False
+
         # Vault state
         self.vault_locked = False
 
@@ -475,6 +478,9 @@ class SnippetTable(QTreeView):
         Returns:
             None
         """
+        if self.suppress_selection_signal:
+            return
+
         # grab the first index in the new selection
         indexes = selected.indexes()
         if not indexes:
@@ -591,12 +597,19 @@ class SnippetTable(QTreeView):
         Clear the current selection in the table.
 
         Deselects all items, resetting the table to no active selection.
+        Does not emit entrySelected, so callers can deselect without
+        re-triggering navigation. Clearing ensures a later click on the
+        same row registers as a selection change.
 
         Returns:
             None
         """
         logger.debug("Clearing table selection")
-        self.clearSelection()
+        self.suppress_selection_signal = True
+        try:
+            self.clearSelection()
+        finally:
+            self.suppress_selection_signal = False
 
     def select_entry(self, entry):
         """

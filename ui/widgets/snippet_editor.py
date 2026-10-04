@@ -354,7 +354,8 @@ class SnippetEditor(QWidget):
         """
         self.stop_inactivity_timer()
         self.parent.resume_service() # resume snippet service
-        # Should deselect any selected items in tree view
+        # Deselect so clicking the same row again reopens the form
+        self.table.clear_selection()
         self.stack.setCurrentWidget(self.home_widget)
         self.home_widget.focus_test_entry()
 
@@ -371,7 +372,7 @@ class SnippetEditor(QWidget):
         self.pause_service()  # Pause snippet service
 
         # Clear the table selection and form inputs, then swap in form
-        # self.table.clear_selection()
+        self.table.clear_selection()
         self.form.clear_form()
         self.form.enabled_switch.setChecked(True)   # Set switch to enabled on every new snippet
         self.stack.setCurrentWidget(self.form)
@@ -1465,6 +1466,8 @@ class SnippetEditor(QWidget):
         """
         self.stop_inactivity_timer()
         self.resume_service()
+        # Deselect so clicking the same row again reopens the form
+        self.table.clear_selection()
         self.stack.setCurrentIndex(0)   # go home
 
     def pause_service(self):
