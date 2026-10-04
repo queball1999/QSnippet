@@ -29,8 +29,9 @@ BIN="$OUT/$APP_NAME-$VERSION"
 
 # Clean only our own artifacts. Do NOT wipe "$DIST_DIR" wholesale: CI (and
 # `make build`) place the branded updater at "$OUT/updater" before this runs,
-# and package-deb.sh needs it.
-rm -rf "$BUILD_DIR" "$APP_NAME.spec" "$BIN" "$OUT/$APP_NAME-$VERSION-portable"
+# and package-deb.sh needs it. QSnippet.spec is committed source, not an
+# artifact, so it is never removed here.
+rm -rf "$BUILD_DIR" "$BIN" "$OUT/$APP_NAME-$VERSION-portable"
 
 # Generate build metadata. MUST happen before PyInstaller runs.
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
