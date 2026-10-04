@@ -115,14 +115,20 @@ jobs:
       - name: Verify the updater actually runs
         working-directory: qupdatetool
         shell: bash
+        # Hosted runners share IPs, so the unauthenticated GitHub API limit
+        # (60/hour) is often already spent and the check fails with exit 3.
+        # The job token raises the limit; it is only used for this check and
+        # is never baked into the binary.
+        env:
+          UPDATER_TOKEN: ${{ github.token }}
         run: |
           # Exit 10 (update available) or 11 (up to date) proves the brand,
           # key, and release backend all resolved.
           set +e
           if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/updater.exe --check-only --current-version 0.0.0 --log-file none
+            ./dist/updater.exe --check-only --current-version 0.0.0 --log-file none --token-env UPDATER_TOKEN
           else
-            ./dist/updater --check-only --current-version 0.0.0 --log-file none
+            ./dist/updater --check-only --current-version 0.0.0 --log-file none --token-env UPDATER_TOKEN
           fi
           code=$?
           set -e
