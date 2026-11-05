@@ -82,7 +82,9 @@ cp LICENSE README.md "$APP_ROOT/"
 # matching icon at the AppDir root.
 cp deb-package/qsnippet.desktop "$APPDIR/qsnippet.desktop"
 cp assets/icons/icon_128x128.png "$APPDIR/qsnippet.png"
-ln -sf qsnippet.png "$APPDIR/.DirIcon"
+# A copy, not the usual symlink: the spec accepts either, and a checkout on an
+# SMB/CIFS share cannot hold symlinks.
+cp assets/icons/icon_128x128.png "$APPDIR/.DirIcon"
 
 for size in 16 32 64 128; do
   src="assets/icons/icon_${size}x${size}.png"

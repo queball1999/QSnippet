@@ -1,7 +1,18 @@
-.PHONY: run build portable build-deb build-appimage updater test benchmark lint release clean distclean help create-venv recreate-venv activate-venv
+.PHONY: run build portable build-deb build-appimage updater test benchmark lint release clean distclean help create-venv recreate-venv activate-venv ensure-venv
 
 MAIN := QSnippet.py
+
+# A venv only works on the OS that created it (Scripts\python.exe and Windows
+# wheels vs bin/python3 and Linux wheels), so a checkout shared between
+# Windows and Linux needs one per OS. Off Windows it lives outside the repo:
+# venv always symlinks lib64 -> lib, which an SMB/CIFS-mounted checkout can't
+# hold.
+ifeq ($(OS),Windows_NT)
 VENV_DIR := .venv
+else
+VENV_DIR := $(or $(XDG_CACHE_HOME),$(HOME)/.cache)/qsnippet/venv-$(shell uname -s | tr '[:upper:]' '[:lower:]')
+endif
+VENV_DIR_OVERRIDE ?= $(VENV_DIR)
 
 # Lets `make release v0.0.8-release` work: the tag is a second goal, which
 # make would otherwise try to build. Absorb it into TAG and give it a no-op
@@ -18,11 +29,14 @@ endif
 # interpreter (the `py` launcher on Windows, `python3` elsewhere). No absolute
 # paths, so this works on any machine and in CI.
 ifeq ($(OS),Windows_NT)
-VENV_PYTHON := $(VENV_DIR)\Scripts\python.exe
-PYTHON := $(if $(wildcard $(VENV_DIR)\Scripts\python.exe),$(VENV_PYTHON),py -3)
+VENV_PYTHON := $(VENV_DIR_OVERRIDE)\Scripts\python.exe
+PYTHON := $(if $(wildcard $(VENV_DIR_OVERRIDE)\Scripts\python.exe),$(VENV_PYTHON),py -3)
 else
-VENV_PYTHON := $(VENV_DIR)/bin/python3
-PYTHON := $(if $(wildcard $(VENV_DIR)/bin/python3),$(VENV_PYTHON),python3)
+VENV_PYTHON := $(VENV_DIR_OVERRIDE)/bin/python3
+PYTHON := $(if $(wildcard $(VENV_DIR_OVERRIDE)/bin/python3),$(VENV_PYTHON),python3)
+# The Linux build scripts call bare python3/pyinstaller, and distro Pythons
+# refuse pip installs (PEP 668), so run them with the venv on PATH.
+VENV_ACTIVATE := . "$(VENV_DIR_OVERRIDE)/bin/activate"
 endif
 
 help:
@@ -43,19 +57,19 @@ ifeq ($(OS),Windows_NT)
 else
 	@echo "Available targets:"
 	@echo "  make run            - Run the application"
-	@echo "  make build          - Build the application (updater + PyInstaller binary + portable archive)"
+	@echo "  make build          - Build everything: updater, binary, portable zip, plus .deb and AppImage on Linux"
 	@echo "  make portable       - Build just the binary and portable zip (no updater/.deb)"
 	@echo "  make updater        - Build the branded updater into output/linux"
 	@echo "  make test           - Run the unit tests"
 	@echo "  make lint           - Run flake8 the way CI does"
 	@echo "  make release TAG    - Check and push a release tag, e.g. make release v0.0.8-release"
-	@echo "  make build-deb      - Package a .deb from the build output (run after 'make build')"
-	@echo "  make build-appimage - Package an AppImage from the build output (run after 'make build')"
+	@echo "  make build-deb      - Re-package just the .deb from existing build output"
+	@echo "  make build-appimage - Re-package just the AppImage from existing build output"
 	@echo "  make clean          - Remove build staging (build/, package/, build_info.py, __pycache__)"
 	@echo "  make distclean      - clean plus output/ and dist/ (removes built artifacts)"
-	@echo "  make create-venv    - Create .venv (if missing) and install dependencies"
-	@echo "  make recreate-venv  - Delete and rebuild .venv from scratch"
-	@echo "  make activate-venv  - Print the command to activate .venv"
+	@echo "  make create-venv    - Create $(VENV_DIR_OVERRIDE) (if missing) and install dependencies"
+	@echo "  make recreate-venv  - Delete and rebuild $(VENV_DIR_OVERRIDE) from scratch"
+	@echo "  make activate-venv  - Print the command to activate $(VENV_DIR_OVERRIDE)"
 endif
 
 run:
@@ -90,45 +104,51 @@ endif
 # The installer and the .deb both expect a branded updater binary beside the
 # app; CI gets it from the build_updater workflow, so a local build has to
 # make its own. See tools/build_updater.ps1 and tools/build_updater.sh.
-updater:
+updater: ensure-venv
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\build_updater.ps1"
 else
-	bash tools/build_updater.sh
+	$(VENV_ACTIVATE) && bash tools/build_updater.sh
 endif
 
-# On Windows local_build.ps1 builds the updater and stamps its hash itself;
-# on Linux build.sh only reads UPDATER_SHA256, so build the updater first.
-build:
+# Every format the current OS ships: on Windows local_build.ps1 does the
+# updater, binary, portable zip and installer, stamping the updater hash
+# itself. Elsewhere build.sh only reads UPDATER_SHA256, so build the updater
+# first; Linux then packages the .deb and AppImage from build.sh's output.
+build: ensure-venv
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\local_build.ps1"
 else
-	bash tools/build_updater.sh
-	UPDATER_SHA256=$$(sha256sum output/linux/updater | cut -d' ' -f1) bash tools/build.sh
+	$(VENV_ACTIVATE) && bash tools/build_updater.sh
+	$(VENV_ACTIVATE) && UPDATER_SHA256=$$(sha256sum output/linux/updater | cut -d' ' -f1) bash tools/build.sh
+ifeq ($(shell uname -s),Linux)
+	$(VENV_ACTIVATE) && bash tools/package-deb.sh
+	$(VENV_ACTIVATE) && bash tools/package-appimage.sh
+endif
 endif
 
 # Just the PyInstaller binary + portable zip, no updater and no installer.
 # Both build scripts run `pyinstaller QSnippet.spec`, so the bundle contents
 # match a full release build.
-portable:
+portable: ensure-venv
 ifeq ($(OS),Windows_NT)
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "& .\tools\build.ps1"
 else
-	bash tools/build.sh
+	$(VENV_ACTIVATE) && bash tools/build.sh
 endif
 
-build-deb:
+build-deb: ensure-venv
 ifeq ($(OS),Windows_NT)
 	@echo build-deb is only available on Linux
 else
-	bash tools/package-deb.sh
+	$(VENV_ACTIVATE) && bash tools/package-deb.sh
 endif
 
-build-appimage:
+build-appimage: ensure-venv
 ifeq ($(OS),Windows_NT)
 	@echo build-appimage is only available on Linux
 else
-	bash tools/package-appimage.sh
+	$(VENV_ACTIVATE) && bash tools/package-appimage.sh
 endif
 
 # Remove build staging only. Keeps output/ and dist/ (built artifacts);
@@ -160,45 +180,57 @@ endif
 create-venv:
 ifeq ($(OS),Windows_NT)
 	@powershell -NoProfile -ExecutionPolicy Bypass -Command "& { \
-		if (-not (Test-Path '$(VENV_DIR)')) { \
-			Write-Host 'Creating virtual environment at $(VENV_DIR)...'; \
-			& $(PYTHON) -m venv '$(VENV_DIR)'; \
+		if (-not (Test-Path '$(VENV_DIR_OVERRIDE)')) { \
+			Write-Host 'Creating virtual environment at $(VENV_DIR_OVERRIDE)...'; \
+			& $(PYTHON) -m venv '$(VENV_DIR_OVERRIDE)'; \
 		} else { \
-			Write-Host 'Virtual environment already exists at $(VENV_DIR)'; \
+			Write-Host 'Virtual environment already exists at $(VENV_DIR_OVERRIDE)'; \
 		} \
 	}"
 	@"$(VENV_PYTHON)" -m pip install --upgrade pip
 	@"$(VENV_PYTHON)" -m pip install -r requirements.txt
 else
-	@if [ ! -d "$(VENV_DIR)" ]; then \
-		echo "Creating virtual environment at $(VENV_DIR)..."; \
-		$(PYTHON) -m venv "$(VENV_DIR)"; \
+	@# activate is written last, so its absence means a missing or half-built venv
+	@if [ ! -f "$(VENV_DIR_OVERRIDE)/bin/activate" ]; then \
+		echo "Creating virtual environment at $(VENV_DIR_OVERRIDE)..."; \
+		$(PYTHON) -m venv "$(VENV_DIR_OVERRIDE)"; \
 	else \
-		echo "Virtual environment already exists at $(VENV_DIR)"; \
+		echo "Virtual environment already exists at $(VENV_DIR_OVERRIDE)"; \
 	fi
 	@"$(VENV_PYTHON)" -m pip install --upgrade pip
 	@"$(VENV_PYTHON)" -m pip install -r requirements.txt
 endif
 
+# Create the venv on first use so a fresh Linux checkout can `make build`
+# straight away. The Windows build scripts manage their own Python.
+ensure-venv:
+ifneq ($(OS),Windows_NT)
+	@[ -f "$(VENV_DIR_OVERRIDE)/bin/activate" ] || $(MAKE) create-venv
+endif
+
 recreate-venv:
 ifeq ($(OS),Windows_NT)
 	@powershell -NoProfile -ExecutionPolicy Bypass -Command "& { \
-		if (Test-Path '$(VENV_DIR)') { \
-			Write-Host 'Removing existing virtual environment at $(VENV_DIR)...'; \
-			Remove-Item '$(VENV_DIR)' -Recurse -Force; \
+		if (Test-Path '$(VENV_DIR_OVERRIDE)') { \
+			Write-Host 'Removing virtual environment at $(VENV_DIR_OVERRIDE)...'; \
+			Remove-Item -Recurse -Force '$(VENV_DIR_OVERRIDE)'; \
 		} \
 	}"
-else
-	@rm -rf "$(VENV_DIR)"
-endif
 	@$(MAKE) create-venv
+else
+	@if [ -d "$(VENV_DIR_OVERRIDE)" ]; then \
+		echo "Removing virtual environment at $(VENV_DIR_OVERRIDE)..."; \
+		rm -rf "$(VENV_DIR_OVERRIDE)"; \
+	fi
+	@$(MAKE) create-venv
+endif
 
 activate-venv:
 ifeq ($(OS),Windows_NT)
 	@echo make cannot activate a venv in your current shell; run one of the following yourself:
-	@echo   PowerShell: .\$(VENV_DIR)\Scripts\Activate.ps1
-	@echo   cmd.exe:    $(VENV_DIR)\Scripts\activate.bat
+	@echo   PowerShell: .\$(VENV_DIR_OVERRIDE)\Scripts\Activate.ps1
+	@echo   cmd.exe:    $(VENV_DIR_OVERRIDE)\Scripts\activate.bat
 else
 	@echo "make cannot activate a venv in your current shell; run this yourself:"
-	@echo "  source $(VENV_DIR)/bin/activate"
+	@echo "  source $(VENV_DIR_OVERRIDE)/bin/activate"
 endif
